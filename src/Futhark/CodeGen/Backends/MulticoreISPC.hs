@@ -528,7 +528,7 @@ compileCode (SetMem dest src space) =
   setMem dest src space
 compileCode (Write dest (Count idx) elemtype DefaultSpace _ elemexp)
   | isConstExp (untyped idx) = do
-      dest' <- GC.rawMem dest
+      dest' <- GC.rawMem dest DefaultSpace
       idxexp <- compileExp $ constFoldPrimExp $ untyped idx
       deref <-
         GC.derefPointer
@@ -538,7 +538,7 @@ compileCode (Write dest (Count idx) elemtype DefaultSpace _ elemexp)
       elemexp' <- toStorage elemtype <$> compileExp elemexp
       GC.stm [C.cstm|$exp:deref = $exp:elemexp';|]
   | otherwise = do
-      dest' <- GC.rawMem dest
+      dest' <- GC.rawMem dest DefaultSpace
       idxexp <- compileExp $ untyped idx
       deref <-
         GC.derefPointer
@@ -552,7 +552,7 @@ compileCode (Write dest (Count idx) elemtype DefaultSpace _ elemexp)
     isSimple (ValueExp _) = True
     isSimple _ = False
 compileCode (Read x src (Count iexp) restype DefaultSpace _) = do
-  src' <- GC.rawMem src
+  src' <- GC.rawMem src DefaultSpace
   e <-
     fmap (fromStorage restype) $
       GC.derefPointer src'
@@ -560,8 +560,8 @@ compileCode (Read x src (Count iexp) restype DefaultSpace _) = do
         <*> getMemType src restype
   GC.stm [C.cstm|$id:x = $exp:e;|]
 compileCode (Copy t shape (dst, DefaultSpace) dst_lmad (src, DefaultSpace) src_lmad) = do
-  dst' <- GC.rawMem dst
-  src' <- GC.rawMem src
+  dst' <- GC.rawMem dst DefaultSpace
+  src' <- GC.rawMem src DefaultSpace
   let doWrite dst_i ve = do
         deref <-
           GC.derefPointer

@@ -468,7 +468,7 @@ doAtomic old arr ind val op ty castf = do
   ind' <- GC.compileExp $ untyped $ unCount ind
   val' <- GC.compileExp val
   cast <- castf ty arr
-  arr' <- GC.rawMem arr
+  arr' <- GC.rawMem arr DefaultSpace
   GC.stm [C.cstm|$id:old = $id:op(&(($ty:cast)$exp:arr')[$exp:ind'], ($ty:ty) $exp:val', __ATOMIC_RELAXED);|]
 
 atomicOps :: AtomicOp -> (C.Type -> VName -> GC.CompilerM op s C.Type) -> GC.CompilerM op s ()
@@ -476,7 +476,7 @@ atomicOps (AtomicCmpXchg t old arr ind res val) castf = do
   ind' <- GC.compileExp $ untyped $ unCount ind
   new_val' <- GC.compileExp val
   cast <- castf [C.cty|$ty:(GC.primTypeToCType t)|] arr
-  arr' <- GC.rawMem arr
+  arr' <- GC.rawMem arr DefaultSpace
   GC.stm
     [C.cstm|$id:res = $id:op(&(($ty:cast)$exp:arr')[$exp:ind'],
                  &$id:old,
