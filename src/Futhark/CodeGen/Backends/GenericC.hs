@@ -702,6 +702,11 @@ compileConstants (Constants ps init_consts) = do
     getConst (ScalarParam name bt) = do
       let ctp = primTypeToCType bt
       pure [C.citem|$ty:ctp $id:name = ctx->constants->$id:name;|]
+    -- A 'ScalarSpace' block is a C array, and C cannot assign those.  The
+    -- array in the constants struct is the one we want to use anyway, so
+    -- name it through a pointer.
+    getConst (MemParam name (ScalarSpace _ pt)) =
+      pure [C.citem|$ty:(primTypeToCType pt) *$id:name = ctx->constants->$id:name;|]
     getConst (MemParam name space) = do
       ty <- memToCType name space
       pure [C.citem|$ty:ty $id:name = ctx->constants->$id:name;|]
