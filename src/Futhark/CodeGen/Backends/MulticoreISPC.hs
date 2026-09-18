@@ -1031,7 +1031,7 @@ findDeps (SetScalar name e) =
   addDeps name $ freeIn e
 findDeps (Call tars _ args) =
   mapM_ (\x -> addDeps x $ freeIn args) tars
-findDeps (Read x arr (Count iexp) _ DefaultSpace _) = do
+findDeps (Read x arr (Count iexp) _ _ _) = do
   addDeps x $ freeIn (untyped iexp)
   addDeps x $ oneName arr
 findDeps (Op (GetLoopBounds x y)) = do
