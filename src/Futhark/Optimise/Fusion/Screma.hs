@@ -306,7 +306,7 @@ moveRedScanSuperScrema super_screma = do
       new_pars = lambdaParams lam
       new_res = scan_res <> scan_res' <> red_res <> red_res' <> map_res
       new_body = mkBody (stms <> binds <> stms') new_res
-      new_lam = eliminateByRes $ Lambda new_pars new_ts new_body
+      new_lam = Lambda new_pars new_ts new_body
       (scan_pars', map_pars') =
         splitAt (scanResults scan) (lambdaParams lam')
 
@@ -319,7 +319,7 @@ moveRedScanSuperScrema super_screma = do
         varsRes (map paramName extra_scan_pars')
           <> bodyResult (lambdaBody map_lam')
       new_body' = mkBody new_stms' new_res'
-      new_lam' = eliminateByRes $ Lambda new_pars' new_ts' new_body'
+      new_lam' = Lambda new_pars' new_ts' new_body'
 
   pure $
     SuperScrema w inp new_lam new_scan new_red new_lam' [] [] lam''
@@ -364,7 +364,7 @@ moveLastSuperScrema (SuperScrema w inp lam scan red lam' [] [] lam'') = do
       new_stms = stms' <> binds <> stms''
       new_res = bodyResult $ lambdaBody temp_lam''
       new_body = mkBody new_stms new_res
-      new_lam' = eliminateByRes $ Lambda new_pars new_ts new_body
+      new_lam' = Lambda new_pars new_ts new_body
 
   new_lam'' <- mkIdentityLambda $ lambdaReturnType lam''
   pure $
