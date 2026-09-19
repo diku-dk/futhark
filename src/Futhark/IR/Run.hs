@@ -24,8 +24,14 @@ import Data.Vector.Storable.Mutable qualified as MSVec
 import Foreign.Storable (Storable)
 import Futhark.Data qualified as V
 import Futhark.IR
-import Futhark.IR.GPU (GPU, HostOp (..))
+import Futhark.IR.GPU
+  ( GPU,
+    HostOp (..),
+    SizeClass (..),
+    SizeOp (..),
+  )
 import Futhark.IR.SOACS (HistOp (..), Reduce (..), SOAC (FlatMap, Hist, Screma, Stream), SOACS, Scan (..), ScremaForm (..), flatMapNonuniform)
+import Futhark.IR.SegOp qualified as Seg
 import Language.Futhark.Primitive qualified as P
 import Numeric.Half qualified as H
 
@@ -179,13 +185,27 @@ cloneArrayValues (F64ArrayValues values) = F64ArrayValues <$> MSVec.clone values
 cloneArrayValues (BoolArrayValues values) = BoolArrayValues <$> MSVec.clone values
 cloneArrayValues (UnitArrayValues values) = UnitArrayValues <$> MSVec.clone values
 
+evalStms :: FunEnv rep -> Env -> Stms rep -> InterpM rep Env
+evalStms funs env stms =
+  foldM (evalStm funs) env (stmsToList stms)
+
 evalBody :: FunEnv rep -> Env -> Body rep -> InterpM rep [Val]
-evalBody funs env (Body _ stms res) = do
-  env' <- foldStms env (stmsToList stms)
-  mapM (evalSubExp env' . resSubExp) res
+evalBody funs env (Body _ stms results) = do
+  env' <- evalStms funs env stms
+  mapM (evalSubExp env' . resSubExp) results
+
+evalKernelBody ::
+  FunEnv rep -> Env -> Seg.KernelBody rep -> InterpM rep [Val]
+evalKernelBody funs env (Body _ stms results) = do
+  env' <- evalStms funs env stms
+  mapM (evalKernelResult env') results
   where
-    foldStms e [] = pure e
-    foldStms e (s : ss) = evalStm funs e s >>= \e' -> foldStms e' ss
+    evalKernelResult env' (Seg.Returns _ _ result) =
+      evalSubExp env' result
+    evalKernelResult _ Seg.TileReturns {} =
+      interpError "TileReturns is not implemented"
+    evalKernelResult _ Seg.RegTileReturns {} =
+      interpError "RegTileReturns is not implemented"
 
 -- Evaluate the expression then bind the pattern names to its results
 evalStm :: FunEnv rep -> Env -> Stm rep -> InterpM rep Env
@@ -407,9 +427,6 @@ evalWithAcc funs env inputs lambda = do
 
     indicesInBounds shape indices =
       and $ zipWith (\size index -> index >= 0 && index < size) shape indices
-
-    int64Val =
-      PrimVal . IntValue . Int64Value . fromIntegral
 
 evalSubExp :: Env -> SubExp -> InterpM rep Val
 evalSubExp _ (Constant pv) = pure $ PrimVal pv
@@ -996,7 +1013,6 @@ evalFlatMap funs env width_exp input_names lambda = do
 
     int64_type = IntType Int64
     int64Prim = IntValue . Int64Value . fromIntegral
-    int64Val = PrimVal . int64Prim
 
 evalHist ::
   FunEnv rep ->
@@ -1150,6 +1166,409 @@ evalScrema funs env width_exp input_names (ScremaForm pre_lambda scans reduction
         next_reduction_states <- updateReductionStates funs env reductions reduction_states reduction_contributions
         post_results <- evalLambda funs env post_lambda (concat next_scan_states <> map_values)
         pure (next_scan_states, next_reduction_states, post_results : output_rows)
+
+int64Val :: Int -> Val
+int64Val = PrimVal . IntValue . Int64Value . fromIntegral
+
+evalSegSpace :: FunEnv rep -> M.Map VName Val -> Seg.SegSpace -> Seg.KernelBody rep -> InterpM rep ([Int], [([Int], [Val])])
+evalSegSpace funs env (Seg.SegSpace flat dimensions) body = do
+  sizes <- mapM (evalSubExp env . snd >=> expectPrimVal >=> expectInt) dimensions
+  if any (< 0) sizes
+    then interpError "negative SegSpace dimension"
+    else do
+      let coordinates = sequence [[0 .. size - 1] | size <- sizes]
+      rows <- mapM (runWorker sizes) coordinates
+      pure (sizes, rows)
+  where
+    runWorker sizes coordinate = do
+      let names = map fst dimensions
+          bindings =
+            M.fromList $
+              (flat, int64Val $ linearIndex sizes coordinate)
+                : zip names (map int64Val coordinate)
+          worker_env = M.union bindings env
+      values <- evalKernelBody funs worker_env body
+      pure (coordinate, values)
+
+evalShape :: Env -> Shape -> InterpM rep [Int]
+evalShape env =
+  mapM
+    ( \dimension ->
+        evalSubExp env dimension >>= expectPrimVal >>= expectInt
+    )
+    . shapeDims
+
+segmentRows :: Int -> Int -> [a] -> [[a]]
+segmentRows segment_count segment_width rows =
+  [ take segment_width $ drop (segment * segment_width) rows
+  | segment <- [0 .. segment_count - 1]
+  ]
+
+splitSegContributions ::
+  [Seg.SegBinOp rep] ->
+  [Val] ->
+  InterpM rep [[Val]]
+splitSegContributions operators values = do
+  let sizes = map (length . Seg.segBinOpNeutral) operators
+  (groups, extra) <- splitGroups sizes values
+  if null extra
+    then pure groups
+    else interpError "segmented operator received too many values"
+
+initialSegBinOp ::
+  Env ->
+  Seg.SegBinOp rep ->
+  InterpM rep [Val]
+initialSegBinOp env operator = do
+  neutral <- mapM (evalSubExp env) $ Seg.segBinOpNeutral operator
+  vector_shape <- evalShape env $ Seg.segBinOpShape operator
+
+  if null vector_shape
+    then pure neutral
+    else
+      collectOutputs
+        env
+        vector_shape
+        (lambdaReturnType $ Seg.segBinOpLambda operator)
+        (replicate (product vector_shape) neutral)
+
+applySegBinOp ::
+  FunEnv rep ->
+  Env ->
+  Seg.SegBinOp rep ->
+  [Val] ->
+  [Val] ->
+  InterpM rep [Val]
+applySegBinOp funs env operator state contribution = do
+  vector_shape <- evalShape env $ Seg.segBinOpShape operator
+  let operator_lambda = Seg.segBinOpLambda operator
+
+  if length state /= length contribution
+    then interpError "segmented operator argument count mismatch"
+    else
+      if null vector_shape
+        then evalLambda funs env operator_lambda $ state <> contribution
+        else do
+          let coordinates =
+                sequence [[0 .. size - 1] | size <- vector_shape]
+
+          result_rows <-
+            mapM
+              ( \coordinate -> do
+                  state_elements <-
+                    mapM (readAccumulatorElement coordinate) state
+                  contribution_elements <-
+                    mapM
+                      (readAccumulatorElement coordinate)
+                      contribution
+                  evalLambda
+                    funs
+                    env
+                    operator_lambda
+                    (state_elements <> contribution_elements)
+              )
+              coordinates
+
+          collectOutputs
+            env
+            vector_shape
+            (lambdaReturnType operator_lambda)
+            result_rows
+
+initialSegStates ::
+  Env ->
+  [Seg.SegBinOp rep] ->
+  InterpM rep [[Val]]
+initialSegStates env =
+  mapM $ initialSegBinOp env
+
+updateSegStates ::
+  FunEnv rep ->
+  Env ->
+  [Seg.SegBinOp rep] ->
+  [[Val]] ->
+  [[Val]] ->
+  InterpM rep [[Val]]
+updateSegStates funs env operators states contributions
+  | length operators /= length states
+      || length operators /= length contributions =
+      interpError "segmented operator count mismatch"
+  | otherwise =
+      zipWithM
+        ( \operator (state, contribution) ->
+            applySegBinOp funs env operator state contribution
+        )
+        operators
+        (zip states contributions)
+
+evalSegOp ::
+  FunEnv rep -> Env -> Seg.SegOp level rep -> InterpM rep [Val]
+evalSegOp funs env (Seg.SegMap _ space types body) = do
+  (shape, indexed_rows) <- evalSegSpace funs env space body
+  collectSegOutputs env shape types $ map snd indexed_rows
+evalSegOp
+  funs
+  env
+  (Seg.SegRed _ space types body operators) = do
+    (shape, indexed_rows) <- evalSegSpace funs env space body
+
+    case shape of
+      [] ->
+        interpError "SegRed requires a nonempty index space"
+      _ -> do
+        let segment_shape = init shape
+            segment_width = last shape
+            segment_count = product segment_shape
+            reduction_count = Seg.segBinOpResults operators
+            reduction_types = take reduction_count types
+            map_types = drop reduction_count types
+            worker_rows = map snd indexed_rows
+            reduction_rows =
+              map (take reduction_count) worker_rows
+            map_rows =
+              map (drop reduction_count) worker_rows
+            segments =
+              segmentRows
+                segment_count
+                segment_width
+                reduction_rows
+
+        reduced_rows <- mapM reduceSegment segments
+
+        reduction_outputs <-
+          collectSegOutputs
+            env
+            segment_shape
+            reduction_types
+            reduced_rows
+
+        map_outputs <-
+          collectSegOutputs env shape map_types map_rows
+
+        pure $ reduction_outputs <> map_outputs
+    where
+      reduceSegment rows = do
+        initial_states <- initialSegStates env operators
+        final_states <- foldM reduceRow initial_states rows
+        pure $ concat final_states
+
+      reduceRow states values = do
+        contributions <-
+          splitSegContributions operators values
+        updateSegStates funs env operators states contributions
+evalSegOp
+  funs
+  env
+  (Seg.SegScan _ space _ body operators post_operator) = do
+    (shape, indexed_rows) <- evalSegSpace funs env space body
+
+    case shape of
+      [] ->
+        interpError "SegScan requires a nonempty index space"
+      _ -> do
+        let segment_shape = init shape
+            segment_width = last shape
+            segment_count = product segment_shape
+            worker_rows = map snd indexed_rows
+            segments =
+              segmentRows
+                segment_count
+                segment_width
+                worker_rows
+
+        output_rows <- concat <$> mapM scanSegment segments
+
+        collectSegOutputs
+          env
+          shape
+          (lambdaReturnType post_lambda)
+          output_rows
+        where
+          contribution_count = Seg.segBinOpResults operators
+          post_lambda =
+            Seg.segPostOpLambda post_operator
+          scanSegment rows = do
+            initial_states <- initialSegStates env operators
+            (_, reversed_outputs) <-
+              foldM
+                scanRow
+                (initial_states, [])
+                rows
+            pure $ reverse reversed_outputs
+
+          scanRow (states, outputs) values = do
+            let (contribution_values, map_values) =
+                  splitAt contribution_count values
+
+            contributions <-
+              splitSegContributions operators contribution_values
+
+            next_states <-
+              updateSegStates
+                funs
+                env
+                operators
+                states
+                contributions
+
+            post_results <-
+              evalLambda
+                funs
+                env
+                post_lambda
+                (concat next_states <> map_values)
+
+            pure (next_states, post_results : outputs)
+evalSegOp
+  funs
+  env
+  (Seg.SegHist _ space _ body operators) = do
+    (shape, indexed_rows) <- evalSegSpace funs env space body
+
+    case shape of
+      [] ->
+        interpError "SegHist requires a nonempty index space"
+      _ -> do
+        initial_histograms <- mapM initialHistogramsFor operators
+
+        final_histograms <-
+          foldM
+            updateFromWorker
+            initial_histograms
+            indexed_rows
+
+        pure $ concat final_histograms
+    where
+      index_counts =
+        map (shapeRank . Seg.histShape) operators
+
+      value_counts =
+        map (length . Seg.histDest) operators
+
+      initialHistogramsFor operator =
+        mapM lookupHistogram $ Seg.histDest operator
+
+      lookupHistogram name =
+        case M.lookup name env of
+          Just histogram@ArrayValue {} ->
+            pure histogram
+          Just PrimVal {} ->
+            interpError "SegHist destination must be an array"
+          Just AccValue {} ->
+            interpError "SegHist destination must be an array"
+          Nothing ->
+            interpError $
+              "unbound SegHist destination: " <> prettyText name
+
+      updateFromWorker histograms (coordinate, worker_values) = do
+        let segment_indices = init coordinate
+
+        (index_groups, remaining) <-
+          splitGroups index_counts worker_values
+        (value_groups, extra) <-
+          splitGroups value_counts remaining
+
+        if not $ null extra
+          then
+            interpError "SegHist kernel body returned too many values"
+          else do
+            evaluated_indices <-
+              mapM
+                (mapM (expectPrimVal >=> expectInt))
+                index_groups
+
+            if length operators /= length evaluated_indices
+              || length operators /= length value_groups
+              || length operators /= length histograms
+              then
+                interpError "SegHist operation count mismatch"
+              else
+                mapM
+                  ( \(operator, bucket_indices, values_and_histograms) ->
+                      updateHistogram
+                        segment_indices
+                        operator
+                        bucket_indices
+                        values_and_histograms
+                  )
+                  ( zip3
+                      operators
+                      evaluated_indices
+                      (zip value_groups histograms)
+                  )
+
+      updateHistogram
+        segment_indices
+        operator
+        bucket_indices
+        (new_values, histograms)
+          | length histograms /= length (Seg.histDest operator) =
+              interpError "SegHist destination count mismatch"
+          | not $ indicesInBounds full_indices histograms =
+              pure histograms
+          | otherwise = do
+              vector_shape <- evalShape env $ Seg.histOpShape operator
+              old_values <- mapM (readHistogramBin full_indices) histograms
+
+              replacement_values <-
+                if null vector_shape
+                  then
+                    evalLambda
+                      funs
+                      env
+                      (Seg.histOp operator)
+                      (old_values <> new_values)
+                  else do
+                    let coordinates =
+                          sequence [[0 .. size - 1] | size <- vector_shape]
+
+                    result_rows <-
+                      mapM
+                        ( \coordinate -> do
+                            old_elements <-
+                              mapM (readAccumulatorElement coordinate) old_values
+                            new_elements <-
+                              mapM (readAccumulatorElement coordinate) new_values
+                            evalLambda
+                              funs
+                              env
+                              (Seg.histOp operator)
+                              (old_elements <> new_elements)
+                        )
+                        coordinates
+
+                    collectOutputs
+                      env
+                      vector_shape
+                      (lambdaReturnType $ Seg.histOp operator)
+                      result_rows
+
+              if length replacement_values /= length histograms
+                then
+                  interpError "SegHist operator result count mismatch"
+                else
+                  zipWithM
+                    (writeHistogramBin full_indices)
+                    histograms
+                    replacement_values
+          where
+            full_indices =
+              segment_indices <> bucket_indices
+
+      indicesInBounds indices =
+        all $ histogramIndicesInBounds indices
+
+      histogramIndicesInBounds
+        indices
+        (ArrayValue histogram_shape _ _) =
+          length indices <= length histogram_shape
+            && and
+              (zipWith validIndex indices histogram_shape)
+      histogramIndicesInBounds _ _ =
+        False
+
+      validIndex index dimension =
+        index >= 0 && index < dimension
 
 prependAccumulatorInputs :: [Val] -> [Val] -> InterpM rep [Val]
 prependAccumulatorInputs inputs =
@@ -1500,15 +1919,15 @@ collectFlatMapOutput env sizes total_size result_type rows
     evalFreeDimension (Ext _) =
       interpError "unexpected existential FlatMap result dimension"
 
-collectScremaOutputs ::
+collectOutputs ::
   Env ->
-  Int ->
+  [Int] ->
   [Type] ->
   [[Val]] ->
   InterpM rep [Val]
-collectScremaOutputs env width return_types iteration_results
+collectOutputs env outer_shape return_types iteration_results
   | any ((/= length return_types) . length) iteration_results =
-      interpError "inconsistent Screma output count"
+      interpError "inconsistent output count"
   | otherwise =
       zipWithM collectOne return_types columns
   where
@@ -1520,10 +1939,9 @@ collectScremaOutputs env width return_types iteration_results
 
     collectOne (Prim expected_type) rows = do
       values <- mapM expectPrimitive rows
-
       if all ((== expected_type) . P.primValueType) values
-        then newArrayValue [width] expected_type values
-        else interpError "Screma primitive output type mismatch"
+        then newArrayValue outer_shape expected_type values
+        else interpError "primitive output type mismatch"
     collectOne (Array expected_type annotated_shape _) [] = do
       row_shape <-
         mapM
@@ -1531,49 +1949,40 @@ collectScremaOutputs env width return_types iteration_results
               evalSubExp env dimension >>= expectPrimVal >>= expectInt
           )
           (shapeDims annotated_shape)
-
-      newArrayValue (width : row_shape) expected_type []
+      newArrayValue (outer_shape <> row_shape) expected_type []
     collectOne (Array expected_type _ _) rows = do
       evaluated_rows <- mapM expectArray rows
-
       case evaluated_rows of
         [] ->
-          interpError "internal empty Screma output"
+          interpError "internal empty output"
         (first_shape, first_type, first_values) : remaining
           | first_type /= expected_type ->
-              interpError "Screma array output type mismatch"
+              interpError "array output type mismatch"
           | not $ all (sameRow first_shape first_type) remaining ->
-              interpError "inconsistent Screma array output rows"
+              interpError "inconsistent array output rows"
           | otherwise ->
               newArrayValue
-                (width : first_shape)
+                (outer_shape <> first_shape)
                 expected_type
                 (first_values <> concatMap third remaining)
     collectOne Acc {} rows =
       AccValue . concat <$> mapM expectAccumulator rows
     collectOne Mem {} _ =
-      interpError "Screma memory outputs are unsupported" -- This should never happen?
-    expectPrimitive (PrimVal val) =
-      pure val
-    expectPrimitive ArrayValue {} =
-      interpError "expected primitive Screma output"
-    expectPrimitive AccValue {} =
-      interpError "expected primitive Screma output"
+      interpError "memory outputs are unsupported"
+
+    expectPrimitive (PrimVal val) = pure val
+    expectPrimitive _ = interpError "expected primitive output"
 
     expectArray (ArrayValue shape element_type values)
       | arrayValuesLength values == product shape = do
           primitive_values <- arrayValues values
           pure (shape, element_type, primitive_values)
       | otherwise =
-          interpError "invalid Screma output row storage"
-    expectArray PrimVal {} =
-      interpError "expected array-valued Screma output"
-    expectArray AccValue {} =
-      interpError "expected array-valued Screma output"
-    expectAccumulator (AccValue updates) =
-      pure updates
-    expectAccumulator _ =
-      interpError "expected accumulator-valued Screma output"
+          interpError "invalid array output storage"
+    expectArray _ = interpError "expected array output"
+
+    expectAccumulator (AccValue updates) = pure updates
+    expectAccumulator _ = interpError "expected accumulator output"
 
     sameRow expected_shape expected_type (shape, element_type, values) =
       shape == expected_shape
@@ -1581,6 +1990,17 @@ collectScremaOutputs env width return_types iteration_results
         && length values == product shape
 
     third (_, _, values) = values
+
+collectScremaOutputs :: Env -> Int -> [Type] -> [[Val]] -> InterpM rep [Val]
+collectScremaOutputs env width = collectOutputs env [width]
+
+collectSegOutputs ::
+  Env ->
+  [Int] ->
+  [Type] ->
+  [[Val]] ->
+  InterpM rep [Val]
+collectSegOutputs = collectOutputs
 
 -- | Run a program in the IR specified by rep.
 runProgram :: OpEvaluator rep -> Prog rep -> Name -> [V.Value] -> IO (Either T.Text [V.Value])
@@ -1764,8 +2184,43 @@ runSOACS =
   runProgram evalSOAC
 
 evalGPUOp :: OpEvaluator GPU
-evalGPUOp = undefined
+evalGPUOp funs env (SegOp op) = evalSegOp funs env op
+evalGPUOp _ env (SizeOp op) = evalSizeOp env op
+evalGPUOp funs env (OtherOp op) = evalSOAC funs env op
+evalGPUOp funs env (GPUBody _ body) = evalBody funs env body
+
+sizeValue :: SizeClass -> Int
+sizeValue (SizeThreshold _ (Just n)) = fromIntegral n
+sizeValue SizeThreadBlock = 256
+sizeValue SizeGrid = 65535
+sizeValue SizeTile = 32
+sizeValue SizeRegTile = 4
+sizeValue SizeSharedMemory = 48 * 1024
+sizeValue SizeRegisters = 65536
+sizeValue SizeCache = 4 * 1024 * 1024
+sizeValue _ = 32768
+
+evalSizeOp :: Env -> SizeOp -> InterpM rep [Val]
+evalSizeOp _ (GetSize _ cls) =
+  pure [int64Val $ sizeValue cls]
+evalSizeOp _ (GetSizeMax cls) =
+  pure [int64Val $ sizeValue cls]
+evalSizeOp env (CmpSizeLe _ cls x) = do
+  limit <- evalSubExp env x >>= expectPrimVal >>= expectInt
+  pure [PrimVal $ BoolValue $ sizeValue cls <= limit]
+evalSizeOp env (CalcNumBlocks width_exp _ block_size_exp) = do
+  width <- evalSubExp env width_exp >>= expectPrimVal >>= expectInt
+  block_size <- evalSubExp env block_size_exp >>= expectPrimVal >>= expectInt
+  if block_size <= 0
+    then interpError "thread-block size must be positive"
+    else
+      pure
+        [ int64Val $
+            max 1 $
+              min (sizeValue SizeGrid) $
+                (width + block_size - 1) `div` block_size
+        ]
 
 -- | Run a program in the GPU IR.
 runGPU :: Prog GPU -> Name -> [V.Value] -> IO (Either T.Text [V.Value])
-runGPU = undefined
+runGPU = runProgram evalGPUOp
