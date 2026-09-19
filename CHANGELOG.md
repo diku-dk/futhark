@@ -42,6 +42,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Tiling would produce invalid code in some cases.
 
+* Mishandling of abstract types could lead to compiler crash. (#2538)
+
 ## [0.27.1]
 
 ### Added
