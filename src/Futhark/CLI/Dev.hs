@@ -647,6 +647,26 @@ commandLineOptions =
       "Print AST metrics of the resulting internal representation on standard output.",
     Option
       []
+      ["run-soacs"]
+      ( OptArg
+          ( \fname -> Right $ \opts ->
+              opts {futharkAction = SOACSAction (runSOACSAction (maybe "main" nameFromString fname))}
+          )
+          "NAME"
+      )
+      "Run SOACS program with input from stdin",
+    Option
+      []
+      ["run-gpu"]
+      ( OptArg
+          ( \fname -> Right $ \opts ->
+              opts {futharkAction = GPUAction (runGPUAction (maybe "main" nameFromString fname))}
+          )
+          "NAME"
+      )
+      "Run GPU program with input from stdin",
+    Option
+      []
       ["defunctorise"]
       (NoArg $ Right $ \opts -> opts {futharkPipeline = Defunctorise})
       "Partially evaluate all module constructs and print the residual program.",
