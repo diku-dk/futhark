@@ -406,6 +406,39 @@ handleError msg stacktrace = do
 
     mapArgNames (ErrorMsg parts) = mapArgNames' parts
 
+-- | Is this a space whose memory blocks we can address directly from ISPC
+-- code, and for which 'readHostMem'/'writeHostMem' know the layout?
+isHostSpace :: Space -> Bool
+isHostSpace DefaultSpace = True
+isHostSpace ScalarSpace {} = True
+isHostSpace Space {} = False
+
+-- | Read an element of a memory block. A 'ScalarSpace' block is an array of
+-- the element type, while a 'DefaultSpace' block is a byte pointer whose
+-- variability depends on whether the block is lexical; see 'getMemType'.
+readHostMem :: PrimType -> VName -> Space -> C.Exp -> ISPCCompilerM C.Exp
+readHostMem t mem space i = do
+  mem' <- GC.rawMem mem space
+  case space of
+    ScalarSpace {} -> pure [C.cexp|$exp:mem'[$exp:i]|]
+    _ -> fromStorage t . GC.derefPointer mem' i <$> getMemType mem t
+
+-- | Write an element of a memory block; the counterpart of 'readHostMem'. The
+-- index is forced to be varying, as ISPC will otherwise complain about writing
+-- a varying value through a uniform index.
+writeHostMem :: PrimType -> VName -> Space -> C.Exp -> C.Exp -> ISPCCompilerM ()
+writeHostMem t mem space i v = do
+  mem' <- GC.rawMem mem space
+  case space of
+    ScalarSpace {} -> GC.stm [C.cstm|$exp:mem'[$exp:i] = $exp:v;|]
+    _ -> do
+      deref <-
+        GC.derefPointer
+          mem'
+          [C.cexp|($tyquals:([varying]) typename int64_t)$exp:i|]
+          <$> getMemType mem t
+      GC.stm [C.cstm|$exp:deref = $exp:(toStorage t v);|]
+
 -- | Given the name and type of a parameter, return the C type used to
 -- represent it. We use uniform pointers to varying values for lexical
 -- memory blocks, as this generally results in less gathers/scatters.
@@ -593,19 +626,16 @@ compileCode (Read x src (Count iexp) restype DefaultSpace _) = do
         <$> compileExp (untyped iexp)
         <*> getMemType src restype
   GC.stm [C.cstm|$id:x = $exp:e;|]
-compileCode (Copy t shape (dst, DefaultSpace) dst_lmad (src, DefaultSpace) src_lmad) = do
-  dst' <- GC.rawMem dst DefaultSpace
-  src' <- GC.rawMem src DefaultSpace
-  let doWrite dst_i ve = do
-        deref <-
-          GC.derefPointer
-            dst'
-            [C.cexp|($tyquals:([varying]) typename int64_t)$exp:dst_i|]
-            <$> getMemType dst t
-        GC.stm [C.cstm|$exp:deref = $exp:(toStorage t ve);|]
-      doRead src_i =
-        fromStorage t . GC.derefPointer src' src_i <$> getMemType src t
-  GC.compileCopyWith shape doWrite dst_lmad doRead src_lmad
+compileCode (Copy t shape (dst, dstspace) dst_lmad (src, srcspace) src_lmad)
+  | t /= Unit,
+    isHostSpace dstspace,
+    isHostSpace srcspace =
+      GC.compileCopyWith
+        shape
+        (writeHostMem t dst dstspace)
+        dst_lmad
+        (readHostMem t src srcspace)
+        src_lmad
 compileCode (Free name space) = do
   cached <- isJust <$> GC.cacheMem name
   unless cached $ unRefMem name space
