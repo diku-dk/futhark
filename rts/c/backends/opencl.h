@@ -504,6 +504,21 @@ static cl_build_status build_gpu_program(cl_program program, cl_device_id device
   return build_status;
 }
 
+// Whether the device supports OpenCL C 2.0, which is how we obtain a
+// device-wide memory fence; see mk_compile_opts().  Note that an OpenCL
+// 3.0 device may report only 1.2 here, as the 2.0 features are optional
+// in 3.0, in which case we conservatively stay on 1.2.
+static bool device_supports_opencl_c_2(cl_device_id device) {
+  char *version = opencl_device_info(device, CL_DEVICE_OPENCL_C_VERSION);
+  int major = 0, minor = 0;
+  // The string has the form "OpenCL C <major>.<minor> <vendor-specific>".
+  bool supported =
+    sscanf(version, "OpenCL C %d.%d", &major, &minor) == 2 && major >= 2;
+
+  free(version);
+  return supported;
+}
+
 static char* mk_compile_opts(struct futhark_context *ctx,
                              const char *extra_build_opts[],
                              struct opencl_device_option device_option) {
@@ -533,10 +548,20 @@ static char* mk_compile_opts(struct futhark_context *ctx,
                    "-DLOCKSTEP_WIDTH=%d ",
                    (int)ctx->lockstep_width);
 
+  // mem_fence_global() is a device-wide fence only when the program is
+  // compiled as OpenCL C 2.0, which provides atomic_work_item_fence()
+  // with device scope.  Under OpenCL C 1.2 it degrades to mem_fence(),
+  // which orders memory only within a thread block, and then the
+  // device-wide synchronisation we generate - notably the lock-based
+  // reduce_by_index - can silently lose updates.  NVIDIA does not
+  // support OpenCL C 2.0 at all, and is instead handled with inline
+  // assembly in the prelude.
   bool is_rusticl_asahi =
     strcmp(device_option.platform_name, "rusticl") == 0 &&
     strncmp(device_option.device_name, "Apple M", 7) == 0;
-  if (is_rusticl_asahi && !cl_std_was_set) {
+  if (!cl_std_was_set &&
+      (is_rusticl_asahi ||
+       device_supports_opencl_c_2(device_option.device))) {
     w += snprintf(compile_opts+w, compile_opts_size-w,
                   "-cl-std=CL2.0 ");
   }
