@@ -263,13 +263,15 @@ getTySet :: TypeM TySet
 getTySet = gets stateTySet
 
 -- | Run type checking command while accumulating (and returning) all new
--- abstract types, then reset to known abstract types afterwards.
+-- abstract types.  Abstract types are uniquely named and their liftedness
+-- never changes, so the set of known abstract types only ever grows; an
+-- abstract type created inside a module expression is still nameable
+-- afterwards (as @m.t@), and so must remain known.
 collectTySet :: TypeM a -> TypeM (a, TySet)
 collectTySet m = do
   old <- gets stateTySet
   x <- m
   new <- gets stateTySet
-  modify $ \s -> s {stateTySet = old}
   pure (x, new `M.difference` old)
 
 -- | Look up the liftedness of an abstract type.

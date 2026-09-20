@@ -131,6 +131,10 @@ data Coalesced
 data CoalsEntry = CoalsEntry
   { -- | destination memory block
     dstmem :: VName,
+    -- | the space of the destination, and hence of every array we put there.
+    --   Usually also the space of the source, but not always; see Note
+    --   [Short-circuiting across memory spaces].
+    dstspace :: Space,
     -- | index function of the destination (used for rebasing)
     dstind :: LMAD,
     -- | aliased destination memory blocks can appear
@@ -248,16 +252,16 @@ instance Pretty CoalsEntry where
 -- the same destination memory and use the same index function, the first
 -- 'CoalsEntry' is returned.
 unionCoalsEntry :: CoalsEntry -> CoalsEntry -> CoalsEntry
-unionCoalsEntry etry1 (CoalsEntry dstmem2 dstind2 alsmem2 vartab2 optdeps2 memrefs2 certs2) =
-  if dstmem etry1 /= dstmem2 || dstind etry1 /= dstind2
+unionCoalsEntry etry1 etry2 =
+  if dstmem etry1 /= dstmem etry2 || dstind etry1 /= dstind etry2
     then etry1
     else
       etry1
-        { alsmem = alsmem etry1 <> alsmem2,
-          optdeps = optdeps etry1 <> optdeps2,
-          vartab = vartab etry1 <> vartab2,
-          memrefs = memrefs etry1 <> memrefs2,
-          certs = certs etry1 <> certs2
+        { alsmem = alsmem etry1 <> alsmem etry2,
+          optdeps = optdeps etry1 <> optdeps etry2,
+          vartab = vartab etry1 <> vartab etry2,
+          memrefs = memrefs etry1 <> memrefs etry2,
+          certs = certs etry1 <> certs etry2
         }
 
 -- | Get the names of array 'PatElem's in a 'Pat' and the corresponding

@@ -202,7 +202,10 @@ fuseSOACwithKer ::
   SOAC ->
   FusedSOAC ->
   TryFusion FusedSOAC
-fuseSOACwithKer mode unfus_set outVars soac_p ker = do
+fuseSOACwithKer mode unfus_set outVars soac_p0 ker = do
+  -- soac_p0 is not removed from the program until much later, so the copy of it
+  -- that ends up inside the fused SOAC must be given fresh names.
+  soac_p <- flip SOAC.setLambda soac_p0 <$> renameLambda (SOAC.lambda soac_p0)
   -- We are fusing soac_p into soac_c, i.e, the output of soac_p is going
   -- into soac_c.
   let soac_c = fsSOAC ker
@@ -214,15 +217,8 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
       lam_c = SOAC.lambda soac_c
       w = SOAC.width soac_p
       returned_outvars = filter (`nameIn` unfus_set) outVars
-      success res_outnms res_soac = do
-        -- Avoid name duplication, because the producer lambda is not
-        -- removed from the program until much later.
-        uniq_lam <- renameLambda $ SOAC.lambda res_soac
-        pure $
-          ker
-            { fsSOAC = uniq_lam `SOAC.setLambda` res_soac,
-              fsOutNames = res_outnms
-            }
+      success res_outnms res_soac =
+        pure $ ker {fsSOAC = res_soac, fsOutNames = res_outnms}
 
   -- Can only fuse SOACs with same width.
   guard $ SOAC.width soac_p == SOAC.width soac_c
@@ -775,9 +771,24 @@ pullReshape soac ots = do
     all
       ((== MapNest.depth mapnest) . arrayRank)
       (MapNest.typeOf mapnest)
-  mapnest' <- MapNest.reshape cs (newShape newshape) mapnest
+  -- Reshaping the nest changes its parallel dimensions, e.g. an unflattening
+  -- splits one dimension into several. When the innermost lambda contains a
+  -- SOAC (such as a reduction), this can inhibit later optimisations: a matrix
+  -- multiplication whose result is unflattened becomes a nest where one operand
+  -- varies with two of the dimensions, which tiling cannot handle (see
+  -- tests/tiling/tiling_mm_unflatten.fut). In that case we only allow
+  -- coercions. As a simple heuristic, we only look at the top-level statements
+  -- of the innermost lambda. The proper solution is for tiling to handle such
+  -- nests.
+  guard $
+    reshapeKind newshape == ReshapeCoerce
+      || not (any (isSOAC . stmExp) (bodyStms (lambdaBody (MapNest.mapNestLambda mapnest))))
+  mapnest' <- MapNest.reshape cs newshape mapnest
   soac' <- MapNest.toSOAC mapnest'
   pure (soac', ots')
+  where
+    isSOAC Op {} = True
+    isSOAC _ = False
 
 -- Tie it all together in exposeInputs (for making inputs to a
 -- consumer available) and pullOutputTransforms (for moving

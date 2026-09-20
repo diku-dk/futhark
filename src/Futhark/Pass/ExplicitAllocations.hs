@@ -10,6 +10,7 @@ module Futhark.Pass.ExplicitAllocations
     explicitAllocationsInStmsGeneric,
     ExpHint (..),
     defaultExpHints,
+    scalarSpaceExpHints,
     askDefaultSpace,
     Allocable,
     AllocM,
@@ -753,18 +754,30 @@ data MemReq
   | NeedsNormalisation Space
   deriving (Eq, Show)
 
-combMemReqs :: MemReq -> MemReq -> MemReq
-combMemReqs x@NeedsNormalisation {} _ = x
-combMemReqs _ y@NeedsNormalisation {} = y
-combMemReqs x@(MemReq x_space) y@MemReq {} =
-  if x == y then x else NeedsNormalisation x_space
+-- | Unify the memory requirements of two branches of a 'Match'.  The first
+-- argument is the default space, used when the branches disagree and we
+-- cannot normalise to either of them.
+combMemReqs :: Space -> MemReq -> MemReq -> MemReq
+combMemReqs _ x@NeedsNormalisation {} _ = x
+combMemReqs _ _ y@NeedsNormalisation {} = y
+combMemReqs def_space (MemReq x_space) (MemReq y_space)
+  | x_space == y_space = MemReq x_space
+  -- A 'ScalarSpace' states the size of the array as part of the space, so
+  -- normalising to the space of one branch would give the other branch an
+  -- array of the wrong size.  Normalise to the default space instead.
+  | isScalarSpace x_space || isScalarSpace y_space = NeedsNormalisation def_space
+  | otherwise = NeedsNormalisation x_space
+
+isScalarSpace :: Space -> Bool
+isScalarSpace ScalarSpace {} = True
+isScalarSpace _ = False
 
 type MemReqType = MemInfo (Ext SubExp) NoMode MemReq
 
-combMemReqTypes :: MemReqType -> MemReqType -> MemReqType
-combMemReqTypes (MemArray pt shape o x) (MemArray _ _ _ y) =
-  MemArray pt shape o $ combMemReqs x y
-combMemReqTypes x _ = x
+combMemReqTypes :: Space -> MemReqType -> MemReqType -> MemReqType
+combMemReqTypes def_space (MemArray pt shape o x) (MemArray _ _ _ y) =
+  MemArray pt shape o $ combMemReqs def_space x y
+combMemReqTypes _ x _ = x
 
 contextRets :: MemReqType -> [MemInfo d o r]
 contextRets (MemArray _ shape _ (MemReq space)) =
@@ -950,7 +963,8 @@ allocInExp (Apply fname args rettype loc) = do
 allocInExp (Match ses cases defbody (MatchDec rets ifsort)) = do
   (defbody', def_reqs) <- allocInMatchBody rets defbody
   (cases', cases_reqs) <- mapAndUnzipM onCase cases
-  let reqs = zipWith (foldl combMemReqTypes) def_reqs (transpose cases_reqs)
+  def_space <- askDefaultSpace
+  let reqs = zipWith (foldl (combMemReqTypes def_space)) def_reqs (transpose cases_reqs)
   defbody'' <- addCtxToMatchBody reqs defbody'
   cases'' <- mapM (traverse $ addCtxToMatchBody reqs) cases'
   let (cases''', defbody''', rets') =
@@ -1149,6 +1163,38 @@ data ExpHint
 
 defaultExpHints :: (ASTRep rep, HasScope rep m) => Exp rep -> m [ExpHint]
 defaultExpHints e = map (const NoHint) <$> expExtType e
+
+-- | Arrays of at most this many bytes are put in 'ScalarSpace'. The point is to
+-- reach values that the C compiler can keep in registers or at least on the
+-- stack, so this is deliberately small.
+maxScalarSpaceBytes :: Int64
+maxScalarSpaceBytes = 1024
+
+-- | Put small arrays of statically known size in 'ScalarSpace', which the CPU
+-- backends turn into ordinary C arrays of scalars rather than heap allocations.
+-- This matters most for arrays carried by a loop, where the alternative is an
+-- allocation (and a reference count update) per iteration. Only for
+-- representations where the default space is the one the host can address
+-- directly; a GPU array must stay in device memory.
+scalarSpaceExpHints ::
+  (Allocable fromrep torep inner) =>
+  Exp torep ->
+  AllocM fromrep torep [ExpHint]
+scalarSpaceExpHints e = map hint <$> expExtType e
+  where
+    hint t
+      | Just (Array pt shape _) <- hasStaticShape t,
+        Just ns <- mapM knownDim $ shapeDims shape,
+        let bytes = product ns * primByteSize pt,
+        -- An empty array, or one of 'Unit' elements, cannot be stored.
+        bytes > 0,
+        bytes <= maxScalarSpaceBytes =
+          Hint (LMAD.iota 0 $ map pe64 $ shapeDims shape) $
+            ScalarSpace (shapeDims shape) pt
+      | otherwise = NoHint
+
+    knownDim (Constant (IntValue v)) = Just $ valueIntegral v
+    knownDim _ = Nothing
 
 -- I have no Idea if this is correct
 allocInLParams ::

@@ -133,7 +133,23 @@ replaceInStm (Let (Pat elems) (StmAux c a loc d) e) = do
     replaceInPatElem :: PatElem LetDecMem -> UpdateM inner (PatElem LetDecMem)
     replaceInPatElem p@(PatElem vname (MemArray _ _ o _)) =
       fromMaybe p <$> lookupAndReplace vname PatElem o
+    -- Memory bound here whose arrays now live in the destination is declared in
+    -- the space of the destination; see Note [Short-circuiting across memory
+    -- spaces]. This concerns only the existential memory of those expressions
+    -- whose results we replace, as an allocation that has been coalesced away
+    -- merely becomes dead, and keeps its space until then.
+    replaceInPatElem p@(PatElem vname (MemMem _))
+      | results_replaced = do
+          coaltab <- asks envCoalesceTab
+          pure $ case M.lookup vname coaltab of
+            Just entry -> PatElem vname $ MemMem $ dstspace entry
+            Nothing -> p
     replaceInPatElem p = pure p
+
+    results_replaced = case e of
+      Match {} -> True
+      Loop {} -> True
+      _ -> False
 
 replaceInExp ::
   (Mem rep inner, LetDec rep ~ LetDecMem) =>
@@ -201,6 +217,11 @@ generalizeIxfun
           & MemArray pt shp o
           & pure
       else pure m
+generalizeIxfun _ (PatElem vname (MemMem _)) m@(MemMem _) = do
+  coaltab <- asks envCoalesceTab
+  pure $ case M.lookup vname coaltab of
+    Just entry -> MemMem $ dstspace entry
+    Nothing -> m
 generalizeIxfun _ _ m = pure m
 
 replaceInIfBody :: (Mem rep inner, LetDec rep ~ LetDecMem) => Body rep -> UpdateM (inner rep) (Body rep)

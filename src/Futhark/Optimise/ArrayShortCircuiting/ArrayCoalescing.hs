@@ -72,7 +72,10 @@ data ShortCircuitReader rep = ShortCircuitReader
       Pat (VarAliases, LetDecMem) ->
       Certs ->
       Op (Aliases rep) ->
-      Maybe [SSPointInfo]
+      Maybe [SSPointInfo],
+    -- | Can an array in the second space be moved into a memory block in the
+    -- first? See Note [Short-circuiting across memory spaces].
+    spaceOK :: Space -> Space -> Bool
   }
 
 newtype ShortCircuitM rep a = ShortCircuitM (ReaderT (ShortCircuitReader rep) (State VNameSource) a)
@@ -115,7 +118,7 @@ mkCoalsTab :: (MonadFreshNames m) => Prog (Aliases SeqMem) -> m (M.Map Name Coal
 mkCoalsTab prog =
   mkCoalsTabProg
     (lastUseSeqMem prog)
-    (ShortCircuitReader shortCircuitSeqMem genSSPointInfoSeqMem)
+    (ShortCircuitReader shortCircuitSeqMem genSSPointInfoSeqMem hostSpaceOK)
     (ComputeScalarTableOnOp $ const $ const $ pure mempty)
     prog
 
@@ -125,7 +128,7 @@ mkCoalsTabGPU :: (MonadFreshNames m) => Prog (Aliases GPUMem) -> m (M.Map Name C
 mkCoalsTabGPU prog =
   mkCoalsTabProg
     (lastUseGPUMem prog)
-    (ShortCircuitReader shortCircuitGPUMem genSSPointInfoGPUMem)
+    (ShortCircuitReader shortCircuitGPUMem genSSPointInfoGPUMem (==))
     (ComputeScalarTableOnOp (computeScalarTableMemOp computeScalarTableGPUMem))
     prog
 
@@ -135,7 +138,7 @@ mkCoalsTabMC :: (MonadFreshNames m) => Prog (Aliases MCMem) -> m (M.Map Name Coa
 mkCoalsTabMC prog =
   mkCoalsTabProg
     (lastUseMCMem prog)
-    (ShortCircuitReader shortCircuitMCMem genSSPointInfoMCMem)
+    (ShortCircuitReader shortCircuitMCMem genSSPointInfoMCMem hostSpaceOK)
     (ComputeScalarTableOnOp (computeScalarTableMemOp computeScalarTableMCMem))
     prog
 
@@ -556,7 +559,7 @@ makeSegMapCoals lvlOK lvl td_env kernel_body pat_certs (active, inhb) (PatElem p
               ( active
                   <> M.singleton
                     return_mem
-                    (CoalsEntry pat_mem pat_ixf (oneName pat_mem) vtab mempty mempty pat_certs),
+                    (CoalsEntry pat_mem pat_space pat_ixf (oneName pat_mem) vtab mempty mempty pat_certs),
                 inhb
               )
             _ -> (active, inhb)
@@ -580,6 +583,7 @@ makeSegMapCoals lvlOK lvl td_env kernel_body pat_certs (active, inhb) (PatElem p
                       return_mem
                       ( CoalsEntry
                           (dstmem trans)
+                          (dstspace trans)
                           (dstind trans)
                           (oneName pat_mem <> alsmem trans)
                           vtab
@@ -1020,6 +1024,9 @@ mkCoalsTabStm lutab (Let pat _ (Loop arginis lform body)) td_env bu_env = do
         Var a0 <- ini,
         Var r <- bdyres,
         Just coal_etry <- M.lookup m_b actv0,
+        -- A loop-carried array stays in its own space - see Note
+        -- [Short-circuiting across memory spaces].
+        memSpace td_env_allocs m_b == Just (dstspace coal_etry),
         Just _ <- M.lookup b (vartab coal_etry),
         Just (MemBlock _ _ m_a _) <- getScopeMemInfo a (scope td_env_allocs),
         Just (MemBlock _ _ m_a0 _) <- getScopeMemInfo a0 (scope td_env_allocs),
@@ -1218,7 +1225,7 @@ mkCoalsTabStm lutab stm@(Let pat _ e) td_env bu_env = do
     foldfun safe_4 ((a_acc, inhb), s_acc) (b, MemBlock tp shp mb _b_indfun) =
       case M.lookup mb a_acc of
         Nothing -> ((a_acc, inhb), s_acc)
-        Just info@(CoalsEntry x_mem _ _ vtab _ _ certs) ->
+        Just info@(CoalsEntry x_mem _ _ _ vtab _ _ certs) ->
           let failed = markFailedCoal (a_acc, inhb) mb
            in case M.lookup b vtab of
                 Nothing ->
@@ -1295,7 +1302,7 @@ filterSafetyCond2and5 act_coal inhb_coal scals_env td_env pes =
           -- If it is an array in memory block m_b
           case M.lookup m_b acc of
             Nothing -> (acc, inhb)
-            Just info@(CoalsEntry x_mem _ _ vtab _ _ certs) ->
+            Just info@(CoalsEntry x_mem _ _ _ vtab _ _ certs) ->
               -- And m_b we're trying to coalesce m_b
               let failed = markFailedCoal (acc, inhb) m_b
                in -- It is not safe to short circuit if some other pattern
@@ -1361,57 +1368,60 @@ mkCoalsHelper3PatternMatch stm lutab td_env bu_env = do
       let proper_coals_tab = case knd of
             InPlaceCoal -> activeCoals_tab
             _ -> successCoals_tab
-          (m_yx, ind_yx, mem_yx_al, x_deps, certs') =
+          (m_yx, space_yx, ind_yx, mem_yx_al, x_deps, certs') =
             case M.lookup m_x proper_coals_tab of
               Nothing ->
-                (m_x, alias_fn ind_x, oneName m_x, M.empty, mempty)
-              Just (CoalsEntry m_y ind_y y_al vtab x_deps0 _ certs'') ->
+                (m_x, memSpace td_env m_x, alias_fn ind_x, oneName m_x, M.empty, mempty)
+              Just (CoalsEntry m_y m_y_space ind_y y_al vtab x_deps0 _ certs'') ->
                 let ind = case M.lookup x vtab of
                       Just (Coalesced _ (MemBlock _ _ _ ixf) _) ->
                         ixf
                       Nothing ->
                         ind_y
-                 in (m_y, alias_fn ind, oneName m_x <> y_al, x_deps0, certs <> certs'')
+                 in (m_y, Just m_y_space, alias_fn ind, oneName m_x <> y_al, x_deps0, certs <> certs'')
           m_b_aliased_m_yx = areAnyAliased td_env m_b [m_yx] -- m_b \= m_yx
-       in if not m_b_aliased_m_yx && isInScope td_env m_yx -- nameIn m_yx (alloc td_env)
-      -- Finally update the @activeCoals@ table with a fresh
-      --   binding for @m_b@; if such one exists then overwrite.
-      -- Also, add all variables from the alias chain of @b@ to
-      --   @vartab@, for example, in the case of a sequence:
-      --   @ b0 = if cond then ... else ... @
-      --   @ b1 = alias0 b0 @
-      --   @ b  = alias1 b1 @
-      --   @ x[j] = b @
-      -- Then @b1@ and @b0@ should also be added to @vartab@ if
-      --   @alias1@ and @alias0@ are invertible, otherwise fail early!
-            then
-              let mem_info = Coalesced knd (MemBlock tp_b shp_b m_yx ind_yx) M.empty
-                  opts' =
-                    if m_yx == m_x
-                      then M.empty
-                      else M.insert x m_x x_deps
-                  vtab = M.singleton b mem_info
-                  mvtab = addInvAliasesVarTab td_env vtab b
+          -- Finally update the @activeCoals@ table with a fresh
+          --   binding for @m_b@; if such one exists then overwrite.
+          -- Also, add all variables from the alias chain of @b@ to
+          --   @vartab@, for example, in the case of a sequence:
+          --   @ b0 = if cond then ... else ... @
+          --   @ b1 = alias0 b0 @
+          --   @ b  = alias1 b1 @
+          --   @ x[j] = b @
+          -- Then @b1@ and @b0@ should also be added to @vartab@ if
+          --   @alias1@ and @alias0@ are invertible, otherwise fail early!
+       in case space_yx of
+            Just space_yx'
+              | not m_b_aliased_m_yx,
+                isInScope td_env m_yx -> -- nameIn m_yx (alloc td_env)
+                  let mem_info = Coalesced knd (MemBlock tp_b shp_b m_yx ind_yx) M.empty
+                      opts' =
+                        if m_yx == m_x
+                          then M.empty
+                          else M.insert x m_x x_deps
+                      vtab = M.singleton b mem_info
+                      mvtab = addInvAliasesVarTab td_env vtab b
 
-                  is_inhibited = case M.lookup m_b $ inhibited td_env of
-                    Just nms -> m_yx `nameIn` nms
-                    Nothing -> False
-               in case (is_inhibited, mvtab) of
-                    (True, _) -> acc -- fail due to inhibited
-                    (_, Nothing) -> acc -- fail early due to non-invertible aliasing
-                    (_, Just vtab') ->
-                      -- successfully adding a new coalesced entry
-                      let coal_etry =
-                            CoalsEntry
-                              m_yx
-                              ind_yx
-                              mem_yx_al
-                              vtab'
-                              opts'
-                              mempty
-                              (certs <> certs')
-                       in M.insert m_b coal_etry acc
-            else acc
+                      is_inhibited = case M.lookup m_b $ inhibited td_env of
+                        Just nms -> m_yx `nameIn` nms
+                        Nothing -> False
+                   in case (is_inhibited, mvtab) of
+                        (True, _) -> acc -- fail due to inhibited
+                        (_, Nothing) -> acc -- fail early due to non-invertible aliasing
+                        (_, Just vtab') ->
+                          -- successfully adding a new coalesced entry
+                          let coal_etry =
+                                CoalsEntry
+                                  m_yx
+                                  space_yx'
+                                  ind_yx
+                                  mem_yx_al
+                                  vtab'
+                                  opts'
+                                  mempty
+                                  (certs <> certs')
+                           in M.insert m_b coal_etry acc
+            _ -> acc
 
 -- | Information about a particular short-circuit point
 type SSPointInfo =
@@ -1537,17 +1547,15 @@ genCoalStmtInfo lutab td_env scopetab (Let pat aux (BasicOp (Replicate (Shape []
   | Pat [PatElem x (_, MemArray _ _ _ (ArrayIn m_x ind_x))] <- pat,
     Just last_uses <- M.lookup x lutab,
     Just (MemBlock tpb shpb m_b ind_b) <- getScopeMemInfo b scopetab,
-    sameSpace td_env m_x m_b,
     b `nameIn` last_uses =
-      pure $ Just [(CopyCoal, id, x, m_x, ind_x, b, m_b, ind_b, tpb, shpb, stmAuxCerts aux)]
+      ifMemsCompatible td_env m_x m_b [(CopyCoal, id, x, m_x, ind_x, b, m_b, ind_b, tpb, shpb, stmAuxCerts aux)]
 -- CASE c) @let x[i] = b^{lu}@
 genCoalStmtInfo lutab td_env scopetab (Let pat aux (BasicOp (Update _ x slice_x (Var b))))
   | Pat [PatElem x' (_, MemArray _ _ _ (ArrayIn m_x ind_x))] <- pat,
     Just last_uses <- M.lookup x' lutab,
     Just (MemBlock tpb shpb m_b ind_b) <- getScopeMemInfo b scopetab,
-    sameSpace td_env m_x m_b,
     b `nameIn` last_uses =
-      pure $ Just [(InPlaceCoal, (`updateIndFunSlice` slice_x), x, m_x, ind_x, b, m_b, ind_b, tpb, shpb, stmAuxCerts aux)]
+      ifMemsCompatible td_env m_x m_b [(InPlaceCoal, (`updateIndFunSlice` slice_x), x, m_x, ind_x, b, m_b, ind_b, tpb, shpb, stmAuxCerts aux)]
   where
     updateIndFunSlice :: LMAD -> Slice SubExp -> LMAD
     updateIndFunSlice ind_fun slc_x =
@@ -1557,9 +1565,8 @@ genCoalStmtInfo lutab td_env scopetab (Let pat aux (BasicOp (FlatUpdate x slice_
   | Pat [PatElem x' (_, MemArray _ _ _ (ArrayIn m_x ind_x))] <- pat,
     Just last_uses <- M.lookup x' lutab,
     Just (MemBlock tpb shpb m_b ind_b) <- getScopeMemInfo b scopetab,
-    sameSpace td_env m_x m_b,
     b `nameIn` last_uses =
-      pure $ Just [(InPlaceCoal, (`updateIndFunSlice` slice_x), x, m_x, ind_x, b, m_b, ind_b, tpb, shpb, stmAuxCerts aux)]
+      ifMemsCompatible td_env m_x m_b [(InPlaceCoal, (`updateIndFunSlice` slice_x), x, m_x, ind_x, b, m_b, ind_b, tpb, shpb, stmAuxCerts aux)]
   where
     updateIndFunSlice :: LMAD -> FlatSlice SubExp -> LMAD
     updateIndFunSlice ind_fun (FlatSlice offset dims) =
@@ -1568,18 +1575,19 @@ genCoalStmtInfo lutab td_env scopetab (Let pat aux (BasicOp (FlatUpdate x slice_
 -- CASE b) @let x = concat(a, b^{lu})@
 genCoalStmtInfo lutab td_env scopetab (Let pat aux (BasicOp (Concat concat_dim (b0 :| bs) _)))
   | Pat [PatElem x (_, MemArray _ _ _ (ArrayIn m_x ind_x))] <- pat,
-    Just last_uses <- M.lookup x lutab =
-      pure $
-        let (res, _, _) = foldl (markConcatParts last_uses x m_x ind_x) ([], zero, True) (b0 : bs)
-         in if null res then Nothing else Just res
+    Just last_uses <- M.lookup x lutab = do
+      space_ok <- asks spaceOK
+      let compatible = memsCompatible space_ok td_env m_x
+          (res, _, _) = foldl (markConcatParts compatible last_uses x m_x ind_x) ([], zero, True) (b0 : bs)
+      pure $ if null res then Nothing else Just res
   where
     zero = pe64 $ intConst Int64 0
-    markConcatParts _ _ _ _ acc@(_, _, False) _ = acc
-    markConcatParts last_uses x m_x ind_x (acc, offs, True) b
+    markConcatParts _ _ _ _ _ acc@(_, _, False) _ = acc
+    markConcatParts compatible last_uses x m_x ind_x (acc, offs, True) b
       | Just (MemBlock tpb shpb@(Shape dims@(_ : _)) m_b ind_b) <- getScopeMemInfo b scopetab,
         Just d <- maybeNth concat_dim dims,
         offs' <- offs + pe64 d =
-          if b `nameIn` last_uses && sameSpace td_env m_x m_b
+          if b `nameIn` last_uses && compatible m_b
             then
               let slc =
                     Slice $
@@ -1600,14 +1608,64 @@ genCoalStmtInfo lutab td_env scopetab (Let pat aux (Op op)) = do
 -- CASE other than a), b), c), or d) not supported
 genCoalStmtInfo _ _ _ _ = pure Nothing
 
-sameSpace :: (Coalesceable rep inner) => TopdownEnv rep -> VName -> VName -> Bool
-sameSpace td_env m_x m_b
-  | Just (MemMem pat_space) <- nameInfoToMemInfo <$> M.lookup m_x scope',
-    Just (MemMem return_space) <- nameInfoToMemInfo <$> M.lookup m_b scope' =
-      pat_space == return_space
-  | otherwise = False
+-- | These short-circuit points, but only if an array in @m_b@ may be moved into
+-- @m_x@.
+ifMemsCompatible ::
+  (Coalesceable rep inner) =>
+  TopdownEnv rep ->
+  VName ->
+  VName ->
+  [SSPointInfo] ->
+  ShortCircuitM rep (Maybe [SSPointInfo])
+ifMemsCompatible td_env m_x m_b points = do
+  space_ok <- asks spaceOK
+  pure $
+    if memsCompatible space_ok td_env m_x m_b
+      then Just points
+      else Nothing
+
+-- | Can an array in the memory block @m_b@ be moved into the memory block
+-- @m_x@? See Note [Short-circuiting across memory spaces].
+memsCompatible ::
+  (Coalesceable rep inner) =>
+  (Space -> Space -> Bool) ->
+  TopdownEnv rep ->
+  VName ->
+  VName ->
+  Bool
+memsCompatible space_ok td_env m_x m_b =
+  case (memSpace td_env m_x, memSpace td_env m_b) of
+    (Just x_space, Just b_space)
+      | x_space == b_space -> True
+      | not $ isFParamMem td_env m_b -> space_ok x_space b_space
+    _ -> False
+
+-- | Is this memory block a parameter of the enclosing function? The arrays in
+-- such a block are never moved elsewhere.
+isFParamMem :: TopdownEnv rep -> VName -> Bool
+isFParamMem td_env m =
+  case M.lookup m (scope td_env) of
+    Just FParamName {} -> True
+    _ -> False
+
+-- | The space of a memory block, if it is in scope.
+memSpace :: (Coalesceable rep inner) => TopdownEnv rep -> VName -> Maybe Space
+memSpace td_env m
+  | Just (MemMem space) <-
+      nameInfoToMemInfo <$> M.lookup m (removeScopeAliases (scope td_env)) =
+      Just space
+  | otherwise = Nothing
+
+-- | The 'spaceOK' of the host representations: besides the obvious, an array in
+-- 'ScalarSpace' may be moved into any other space. See Note [Short-circuiting
+-- across memory spaces].
+hostSpaceOK :: Space -> Space -> Bool
+hostSpaceOK dst_space src_space =
+  dst_space == src_space
+    || (isScalarSpace src_space && not (isScalarSpace dst_space))
   where
-    scope' = removeScopeAliases $ scope td_env
+    isScalarSpace ScalarSpace {} = True
+    isScalarSpace _ = False
 
 data MemBodyResult = MemBodyResult
   { patMem :: VName,
@@ -1776,3 +1834,38 @@ computeScalarTableMCMem scope_table (MC.ParOp par_op segop) =
 
 filterMapM1 :: (Eq k, Monad m) => (v -> m Bool) -> M.Map k v -> m (M.Map k v)
 filterMapM1 f m = fmap M.fromAscList $ filterM (f . snd) $ M.toAscList m
+
+-- Note [Short-circuiting across memory spaces]
+--
+-- Short-circuiting an array means storing it in part of some other memory
+-- block, the destination, instead of a block of its own. This does not by
+-- itself require the two blocks to be in the same space, because the source
+-- block disappears entirely: no memory is aliased across spaces, the array
+-- simply moves. The question is only whether the destination space can hold
+-- the array at all, which is what the 'spaceOK' of each representation
+-- answers.
+--
+-- For 'GPUMem' the answer for now is that the spaces must be identical, but it
+-- is not clear to me whether we could change this in the future. On the host,
+-- 'ScalarSpace' is merely a storage representation for memory the host can
+-- address, an array of scalars rather than a block of bytes, so such an array
+-- can be moved into the default space. This is 'hostSpaceOK'. It holds in one
+-- direction only, because the array must fit in the destination, and a
+-- 'ScalarSpace' block is exactly one array large.
+--
+-- Since the space is a property of the memory block, the space of a coalesced
+-- array is that of the destination. We record it as 'dstspace', because any
+-- declaration of the source block that survives must be updated to match; this
+-- is the existential memory bound by a 'Match' or a 'Loop', which
+-- "Futhark.Optimise.ArrayShortCircuiting" rewrites along with the results
+-- themselves.
+--
+-- Two kinds of arrays are never moved, even when 'spaceOK' permits it. The
+-- first is an array in the memory of a function parameter, where the source
+-- block does not in fact disappear: 'replaceInParams' renames the parameter to
+-- the destination and removes the destination's allocation, so it is the space
+-- of the parameter that survives, and the move would happen in the opposite
+-- direction from the one we checked. The second is a loop-carried array, which
+-- we refuse in 'mapmbFun' for for performance reasons, as being in
+-- 'ScalarSpace' is what keeps such an array out of (heap) memory across all the
+-- iterations.

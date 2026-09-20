@@ -15,7 +15,7 @@ import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Multicore.Base
 import Futhark.IR.MCMem
 import Futhark.Transform.Rename (renameBody)
-import Futhark.Util.IntegralExp (divUp)
+import Futhark.Util.IntegralExp (ceilDiv)
 import Prelude hiding (quot, rem)
 
 -- This does not correspond with the actual cache size, but the actual cache
@@ -344,14 +344,18 @@ load64 ::
   VName ->
   Imp.Count Imp.Elements (Imp.TExp Int32) ->
   MulticoreGen ()
-load64 v arr i = sOp $ Imp.Atomic $ Imp.AtomicLoad (IntType Int64) v arr i
+load64 v arr i = do
+  space <- entryMemSpace <$> lookupMemory arr
+  sOp $ Imp.Atomic space $ Imp.AtomicLoad (IntType Int64) v arr i
 
 store64 ::
   VName ->
   Imp.Count Imp.Elements (Imp.TExp Int32) ->
   Imp.TExp Int64 ->
   MulticoreGen ()
-store64 arr i x = sOp $ Imp.Atomic $ Imp.AtomicStore (IntType Int64) arr i (untyped x)
+store64 arr i x = do
+  space <- entryMemSpace <$> lookupMemory arr
+  sOp $ Imp.Atomic space $ Imp.AtomicStore (IntType Int64) arr i (untyped x)
 
 add64 ::
   TV Int64 ->
@@ -359,7 +363,9 @@ add64 ::
   Imp.Count Imp.Elements (Imp.TExp Int32) ->
   Imp.TExp Int64 ->
   MulticoreGen ()
-add64 v arr i x = sOp $ Imp.Atomic $ Imp.AtomicAdd Int64 (tvVar v) arr i (untyped x)
+add64 v arr i x = do
+  space <- entryMemSpace <$> lookupMemory arr
+  sOp $ Imp.Atomic space $ Imp.AtomicAdd Int64 (tvVar v) arr i (untyped x)
 
 applyPostOp ::
   Pat LetDecMem ->
@@ -422,9 +428,9 @@ nonsegmentedScan
   post_op
   nsubtasks = do
     let multiplier = 1 -- For playing with.
-        blockSize = cacheSize `divUp` (totalBytes scan_ops * multiplier)
+        blockSize = cacheSize `ceilDiv` (totalBytes scan_ops * multiplier)
 
-    block_no <- dPrimV "nblocks" (pe64 n `divUp` blockSize)
+    block_no <- dPrimV "nblocks" (pe64 n `ceilDiv` blockSize)
 
     -- allocate flags/aggr/prefix arrays of length nblocks
     flagsArr <- sAllocArray "scan_flags" int64 (Shape [Var (tvVar block_no)]) DefaultSpace

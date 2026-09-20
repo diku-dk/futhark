@@ -18,6 +18,7 @@ module Futhark.IR.SOACS.Simplify
     simplifyMapIota,
     SOACS,
     eliminate,
+    eliminateWithDeps,
     eliminateByRes,
     prunePreLambdaResults,
     dedupInput,
@@ -1177,16 +1178,32 @@ moveTransformToOutput _ _ _ _ =
 -- | Eliminate statements if it is not an dependency used to form the
 -- names given.
 eliminate :: (Buildable rep) => Names -> Stms rep -> Stms rep
-eliminate = auxiliary (stmsFromList [])
+eliminate deps = snd . eliminateWithDeps deps
+
+-- | As 'eliminate', but also return everything the retained statements and the
+-- results depend upon. A lambda parameter is live exactly when it is in this
+-- set, which saves traversing the pruned body again just to find its free
+-- variables. The pair is lazy in its second component, so a caller that only
+-- wants to know what is live need not pay for rebuilding the statements.
+eliminateWithDeps :: (Buildable rep) => Names -> Stms rep -> (Names, Stms rep)
+eliminateWithDeps deps stms
+  -- If nothing needs preserving then nothing is live, as a statement is kept
+  -- only when it binds a name already needed, and the set of needed names grows
+  -- only from statements we keep.
+  | namesNull deps = (mempty, mempty)
+  | otherwise = (final_deps, stmsFromList kept)
   where
-    auxiliary stms' deps stms
-      | Just (stms'', stm@(Let v aux e)) <- stmsLast stms =
-          if namesIntersect deps $ namesFromList $ patNames v
-            then
-              auxiliary (oneStm stm <> stms') (freeIn (aux, e) <> deps) stms''
-            else
-              auxiliary stms' deps stms''
-      | otherwise = stms'
+    -- Walking the statements as a list and rebuilding the sequence once is much
+    -- cheaper than peeling them off the right of the sequence, which allocates
+    -- a new sequence per statement in both directions.
+    (final_deps, kept) = auxiliary deps (reverse (stmsToList stms)) []
+
+    auxiliary deps' [] kept' = (deps', kept')
+    auxiliary deps' (stm@(Let v aux e) : stms') kept'
+      | any (`nameIn` deps') (patNames v) =
+          auxiliary (freeIn (aux, e) <> deps') stms' (stm : kept')
+      | otherwise =
+          auxiliary deps' stms' kept'
 
 -- | Eliminate statements inside a lambda if they are not used to
 -- compute the result.
@@ -1288,8 +1305,8 @@ prunePreLambdaScanResults (ScremaForm pre_lam scan red post_lam) =
     temp_post_lam = eliminateByRes post_lam
     deps = freeIn $ lambdaBody temp_post_lam
 
--- | Prunes all unused results from the pre-lambda in a ScremaForm
--- (fixed-point).
+-- | Prunes all unused results from the pre-lambda in a ScremaForm with scans or
+-- reduces (fixed-point).
 --
 -- Repeatedly prunes unused scan and map results until no further
 -- changes occur.  This is necessary because eliminating some results
@@ -1303,10 +1320,27 @@ prunePreLambdaScanResults (ScremaForm pre_lam scan red post_lam) =
 -- Returns: A ScremaForm with all transitively unused pre-lambda
 -- results eliminated.
 prunePreLambdaResults :: (Buildable rep) => ScremaForm rep -> ScremaForm rep
-prunePreLambdaResults form =
-  if form == form' then form' else prunePreLambdaResults form'
+prunePreLambdaResults form
+  -- Performance weak: without scans or reductions, every pre-lambda result is a
+  -- map result that the post-lambda consumes directly, so there is nothing here
+  -- that the ordinary simplifier will not remove later.
+  | null (scremaScans form), null (scremaReduces form) = form
+  | otherwise =
+      if extent form == extent form' then form' else prunePreLambdaResults form'
   where
     form' = prunePreLambdaScanResults $ prunePreLambdaMapResults form
+    -- Both prunings only ever remove results, parameters and statements, so a
+    -- round that changes nothing leaves all of these counts alone.  Comparing
+    -- them detects a change without comparing the lambda bodies, which may be
+    -- very large when this is called on a repeatedly fused SOAC.
+    extent (ScremaForm pre scan red post) =
+      ( length $ bodyResult $ lambdaBody pre,
+        length $ bodyStms $ lambdaBody pre,
+        length $ lambdaParams post,
+        length $ bodyStms $ lambdaBody post,
+        scanResults scan,
+        redResults red
+      )
 
 -- | Removes duplicate inputs from a ScremaForm's lambda parameters.
 --

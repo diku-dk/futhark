@@ -234,13 +234,19 @@ $ futhark dev -a --backend=c tmp.fut_seq
 
 ## When you are about to have a bad day
 
-When using the `cuda` backend, you can use the `--dump-ptx` runtime
-option to dump PTX, a kind of high-level assembly for NVIDIA GPUs,
-corresponding to the GPU kernels. This can be used to investigate why
-the generated code isn\'t running as fast as you expect (not fun), or
-even whether NVIDIAs compiler is miscompiling something (extremely not
-fun). With the OpenCL backend, `--dump-opencl-binary` does the same
-thing.
+When using the `cuda` backend, you can use the `--dump-ptx` runtime option to
+dump PTX, a kind of high-level assembly for NVIDIA GPUs, corresponding to the
+GPU kernels. This can be used to investigate why the generated code isn\'t
+running as fast as you expect (not fun), or even whether NVIDIAs compiler is
+miscompiling something (extremely not fun). You can also use `--load-ptx` to
+load modified PTX if desired. With the OpenCL backend, the corresponding
+commands are `--dump-opencl-binary`/`--load-opencl-binary`.
+
+You can also dump and load the embedded GPU kernel source code, using
+`--dump-cuda`/`--load-cuda`, `--dump-opencl`/`--load-opencl`, and
+`--dump-hip`/`--load-hip`. It is generally an effective debugging technique to
+dump the GPU code for a reasonably minimal program and try to make repair by
+hand (or add print statements etc), before modifying the code generator.
 
 On AMD platforms, `--dump-opencl-binary` tends to produce an actual
 binary of some kind, and it is pretty tricky to obtain a debugger for it

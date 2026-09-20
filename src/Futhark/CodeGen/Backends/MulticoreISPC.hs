@@ -58,6 +58,14 @@ export = C.EscTypeQual "export" noLoc
 varying :: C.TypeQual
 varying = C.EscTypeQual "varying" noLoc
 
+-- | Qualify a pointer type so that the pointer itself is uniform, not just
+-- what it points at: @uniform T *@ is a varying pointer in ISPC, @uniform T *
+-- uniform@ is not.
+uniformly :: C.Type -> C.Type
+uniformly (C.Type ds (C.Ptr quals d dl) l) =
+  C.Type ds (C.Ptr (uniform : quals) d dl) l
+uniformly t = t
+
 -- | Compile the program to C and ISPC code using multicore operations.
 compileProg ::
   (MonadFreshNames m) => T.Text -> Prog MCMem -> m (ImpGen.Warnings, (GC.CParts, T.Text))
@@ -160,6 +168,15 @@ makeStringLiteral str = do
 
 -- | Set memory in ISPC
 setMem :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> ISPCCompilerM ()
+-- A 'ScalarSpace' block is an array, not a reference-counted pointer, so
+-- assigning one to another is an element-wise copy.
+setMem dest src (ScalarSpace ds _) = do
+  i <- C.toIdent <$> newVName "i"
+  let bound = cproduct $ map (`C.toExp` noLoc) ds
+  GC.stm
+    [C.cstm|for ($tyqual:uniform typename int32_t $id:i = 0; $id:i < $exp:bound; $id:i++) {
+              $exp:dest[$id:i] = $exp:src[$id:i];
+            }|]
 setMem dest src space = do
   let src_s = T.unpack $ expText $ C.toExp src noLoc
   strlit <- makeStringLiteral src_s
@@ -171,6 +188,8 @@ setMem dest src space = do
 
 -- | Unref memory in ISPC
 unRefMem :: (C.ToExp a) => a -> Space -> ISPCCompilerM ()
+-- A 'ScalarSpace' block is not reference counted; there is nothing to free.
+unRefMem _ ScalarSpace {} = pure ()
 unRefMem mem space = do
   cached <- isJust <$> GC.cacheMem mem
   let mem_s = T.unpack $ expText $ C.toExp mem noLoc
@@ -387,6 +406,39 @@ handleError msg stacktrace = do
 
     mapArgNames (ErrorMsg parts) = mapArgNames' parts
 
+-- | Is this a space whose memory blocks we can address directly from ISPC
+-- code, and for which 'readHostMem'/'writeHostMem' know the layout?
+isHostSpace :: Space -> Bool
+isHostSpace DefaultSpace = True
+isHostSpace ScalarSpace {} = True
+isHostSpace Space {} = False
+
+-- | Read an element of a memory block. A 'ScalarSpace' block is an array of
+-- the element type, while a 'DefaultSpace' block is a byte pointer whose
+-- variability depends on whether the block is lexical; see 'getMemType'.
+readHostMem :: PrimType -> VName -> Space -> C.Exp -> ISPCCompilerM C.Exp
+readHostMem t mem space i = do
+  mem' <- GC.rawMem mem space
+  case space of
+    ScalarSpace {} -> pure [C.cexp|$exp:mem'[$exp:i]|]
+    _ -> fromStorage t . GC.derefPointer mem' i <$> getMemType mem t
+
+-- | Write an element of a memory block; the counterpart of 'readHostMem'. The
+-- index is forced to be varying, as ISPC will otherwise complain about writing
+-- a varying value through a uniform index.
+writeHostMem :: PrimType -> VName -> Space -> C.Exp -> C.Exp -> ISPCCompilerM ()
+writeHostMem t mem space i v = do
+  mem' <- GC.rawMem mem space
+  case space of
+    ScalarSpace {} -> GC.stm [C.cstm|$exp:mem'[$exp:i] = $exp:v;|]
+    _ -> do
+      deref <-
+        GC.derefPointer
+          mem'
+          [C.cexp|($tyquals:([varying]) typename int64_t)$exp:i|]
+          <$> getMemType mem t
+      GC.stm [C.cstm|$exp:deref = $exp:(toStorage t v);|]
+
 -- | Given the name and type of a parameter, return the C type used to
 -- represent it. We use uniform pointers to varying values for lexical
 -- memory blocks, as this generally results in less gathers/scatters.
@@ -510,6 +562,21 @@ compileCode (c1 :>>: c2) = go (GC.linearCode (c1 :>>: c2))
           go code
     go (x : xs) = compileCode x >> go xs
     go [] = pure ()
+compileCode (DeclareMem name (ScalarSpace ds t)) = do
+  -- A 'ScalarSpace' block is an array, and an ISPC varying array has no
+  -- address, so it cannot not be passed to a task. Give each program instance a
+  -- row of an array-of-structs and name that row with a varying pointer, which
+  -- is addressable and which every other use of the block can treat exactly
+  -- like the array it replaces.
+  storage <- newVName "scalar_storage"
+  let ct = GC.primTypeToCType t
+      n = cproduct $ map (`C.toExp` noLoc) ds
+  GC.decl [C.cdecl|$tyqual:uniform $ty:ct $id:storage[programCount][$exp:n];|]
+  GC.decl [C.cdecl|$tyqual:uniform $ty:ct * $tyqual:varying $id:name = &$id:storage[programIndex][0];|]
+compileCode (Allocate _ _ ScalarSpace {}) =
+  -- Handled by the declaration of the memory block, which is translated to
+  -- an actual array.
+  pure ()
 compileCode (Allocate name (Count (TPrimExp e)) space) = do
   size <- compileExp e
   cached <- GC.cacheMem name
@@ -528,7 +595,7 @@ compileCode (SetMem dest src space) =
   setMem dest src space
 compileCode (Write dest (Count idx) elemtype DefaultSpace _ elemexp)
   | isConstExp (untyped idx) = do
-      dest' <- GC.rawMem dest
+      dest' <- GC.rawMem dest DefaultSpace
       idxexp <- compileExp $ constFoldPrimExp $ untyped idx
       deref <-
         GC.derefPointer
@@ -538,7 +605,7 @@ compileCode (Write dest (Count idx) elemtype DefaultSpace _ elemexp)
       elemexp' <- toStorage elemtype <$> compileExp elemexp
       GC.stm [C.cstm|$exp:deref = $exp:elemexp';|]
   | otherwise = do
-      dest' <- GC.rawMem dest
+      dest' <- GC.rawMem dest DefaultSpace
       idxexp <- compileExp $ untyped idx
       deref <-
         GC.derefPointer
@@ -552,26 +619,23 @@ compileCode (Write dest (Count idx) elemtype DefaultSpace _ elemexp)
     isSimple (ValueExp _) = True
     isSimple _ = False
 compileCode (Read x src (Count iexp) restype DefaultSpace _) = do
-  src' <- GC.rawMem src
+  src' <- GC.rawMem src DefaultSpace
   e <-
     fmap (fromStorage restype) $
       GC.derefPointer src'
         <$> compileExp (untyped iexp)
         <*> getMemType src restype
   GC.stm [C.cstm|$id:x = $exp:e;|]
-compileCode (Copy t shape (dst, DefaultSpace) dst_lmad (src, DefaultSpace) src_lmad) = do
-  dst' <- GC.rawMem dst
-  src' <- GC.rawMem src
-  let doWrite dst_i ve = do
-        deref <-
-          GC.derefPointer
-            dst'
-            [C.cexp|($tyquals:([varying]) typename int64_t)$exp:dst_i|]
-            <$> getMemType dst t
-        GC.stm [C.cstm|$exp:deref = $exp:(toStorage t ve);|]
-      doRead src_i =
-        fromStorage t . GC.derefPointer src' src_i <$> getMemType src t
-  GC.compileCopyWith shape doWrite dst_lmad doRead src_lmad
+compileCode (Copy t shape (dst, dstspace) dst_lmad (src, srcspace) src_lmad)
+  | t /= Unit,
+    isHostSpace dstspace,
+    isHostSpace srcspace =
+      GC.compileCopyWith
+        shape
+        (writeHostMem t dst dstspace)
+        dst_lmad
+        (readHostMem t src srcspace)
+        src_lmad
 compileCode (Free name space) = do
   cached <- isJust <$> GC.cacheMem name
   unless cached $ unRefMem name space
@@ -707,6 +771,12 @@ compileGetStructVals struct a b = concat <$> zipWithM field a b
     field name (ty, _, MC.Prim pt) = do
       let inner = [C.cexp|$id:struct'->$id:(MC.closureFreeStructField name)|]
       pure [C.citems|$tyqual:uniform $ty:ty $id:name = $exp:(fromStorage pt inner);|]
+    field name (ty, _, MC.ScalarMem) =
+      -- The block belongs to this task alone, so the pointer is uniform.
+      -- Note the second 'uniform': without it the pointer itself is varying.
+      pure
+        [C.citems|$ty:(uniformly ty) $id:name =
+                    $id:struct'->$id:(MC.closureFreeStructField name);|]
     field name (_, _, _) = do
       strlit <- makeStringLiteral $ prettyString name
       pure
@@ -933,8 +1003,8 @@ compileOp (ExtractLane dest tar lane) = do
   tar' <- compileExp tar
   lane' <- compileExp lane
   GC.stm [C.cstm|$id:dest = extract($exp:tar', $exp:lane');|]
-compileOp (Atomic aop) =
-  MC.atomicOps aop $ \ty arr -> do
+compileOp (Atomic space aop) =
+  MC.atomicOps space aop $ \ty arr -> do
     cached <- isJust <$> GC.cacheMem arr
     if cached
       then pure [C.cty|$tyqual:varying $ty:ty* $tyqual:uniform|]
@@ -1031,7 +1101,7 @@ findDeps (SetScalar name e) =
   addDeps name $ freeIn e
 findDeps (Call tars _ args) =
   mapM_ (\x -> addDeps x $ freeIn args) tars
-findDeps (Read x arr (Count iexp) _ DefaultSpace _) = do
+findDeps (Read x arr (Count iexp) _ _ _) = do
   addDeps x $ freeIn (untyped iexp)
   addDeps x $ oneName arr
 findDeps (Op (GetLoopBounds x y)) = do
@@ -1039,7 +1109,7 @@ findDeps (Op (GetLoopBounds x y)) = do
   addDeps y mempty
 findDeps (Op (ExtractLane x _ _)) = do
   addDeps x mempty
-findDeps (Op (Atomic (AtomicCmpXchg _ old arr ind res val))) = do
+findDeps (Op (Atomic _ (AtomicCmpXchg _ old arr ind res val))) = do
   addDeps res $ freeIn arr <> freeIn ind <> freeIn val
   addDeps old $ freeIn arr <> freeIn ind <> freeIn val
 findDeps _ = pure ()

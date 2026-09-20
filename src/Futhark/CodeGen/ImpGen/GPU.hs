@@ -27,7 +27,7 @@ import Futhark.CodeGen.ImpGen.GPU.SegScan
 import Futhark.Error
 import Futhark.IR.GPUMem
 import Futhark.MonadFreshNames
-import Futhark.Util.IntegralExp (divUp, nextMul)
+import Futhark.Util.IntegralExp (ceilDiv, nextMul)
 import Prelude hiding (quot, rem)
 
 callKernelOperations :: Operations GPUMem HostEnv Imp.HostOp
@@ -144,7 +144,7 @@ opCompiler (Pat [pe]) (Inner (SizeOp (CalcNumBlocks w64 max_num_tblocks_key tblo
   -- The calculations are done with 64-bit integers to avoid overflow
   -- issues.
   let num_tblocks_maybe_zero =
-        sMin64 (pe64 w64 `divUp` pe64 tblock_size) $
+        sMin64 (pe64 w64 `ceilDiv` pe64 tblock_size) $
           sExt64 (tvExp max_num_tblocks)
   -- We also don't want zero blocks.
   let num_tblocks = sMax64 1 num_tblocks_maybe_zero

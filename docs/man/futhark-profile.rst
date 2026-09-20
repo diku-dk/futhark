@@ -44,6 +44,11 @@ the source files are unavailable. If the source files passed to ``futhark
 bench`` are accessible via the original paths, the reports also link to HTML
 files with annotated source code.
 
+Open ``prog.prof/index.html`` to browse the program indexes. Each program
+index links to the dataset indexes that were generated successfully.
+Failed datasets and datasets with neither a log nor profiling information do
+not have an HTML index.
+
 You can pass multiple JSON files to ``futhark profile``. Each will
 produce a distinct top level directory.
 
