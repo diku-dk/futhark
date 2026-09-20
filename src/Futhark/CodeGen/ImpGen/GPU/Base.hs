@@ -828,10 +828,24 @@ atomicUpdateLocking _ op = AtomicLocking $ \locking space arrs bucket -> do
             zipWithM_ (writeArray bucket) arrs $
               map (Var . paramName) acc_params
 
+  -- Entering and leaving the critical section is done with an atomic
+  -- compare-and-exchange, but that orders only the lock word itself.
+  -- The writes are ordered by the fence that 'writeAtomic' emits, but
+  -- the reads need one here: without it the memory model permits them
+  -- to be served from a stale cache, so the value we combine with is
+  -- the one from before the previous lock holder ran, and that
+  -- holder's update is lost.
+  let acquire_fence =
+        sOp . Imp.MemFence $
+          case space of
+            Space "shared" -> Imp.FenceLocal
+            _ -> Imp.FenceGlobal
+
   -- While-loop: Try to insert your value
   sWhile (tvExp continue) $ do
     try_acquire_lock
     sWhen lock_acquired $ do
+      acquire_fence
       dLParams acc_params
       bind_acc_params
       op_body
