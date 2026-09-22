@@ -9,11 +9,11 @@
 -- Hence you should not expect programs to run fast at all.
 module Futhark.IR.Run (runSOACS, runGPU) where
 
-import Control.Monad (foldM, zipWithM, (>=>))
+import Control.Monad (foldM, zipWithM, zipWithM_, (>=>))
 import Control.Monad.Error.Class
 import Control.Monad.Except (ExceptT, runExceptT)
 import Control.Monad.IO.Class
-import Control.Monad.Reader (MonadReader, ReaderT, asks, runReaderT)
+import Control.Monad.Reader (MonadReader, ReaderT, asks, local, runReaderT)
 import Data.Int qualified as I
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
@@ -39,7 +39,7 @@ import Numeric.Half qualified as H
 data Val
   = PrimVal PrimValue
   | ArrayValue [Int] PrimType ArrayValues
-  | AccValue [AccUpdate]
+  | AccValue VName
 
 data ArrayValues
   = I8ArrayValues (MSVec.IOVector I.Int8)
@@ -52,7 +52,11 @@ data ArrayValues
   | BoolArrayValues (MSVec.IOVector Bool)
   | UnitArrayValues (MSVec.IOVector ())
 
-data AccUpdate = AccUpdate Safety [Int] [Val]
+data AccumulatorInfo rep = AccumulatorInfo
+  { accumulatorShape :: [Int],
+    accumulatorArrays :: [Val],
+    accumulatorOperator :: Maybe (Lambda rep, [SubExp])
+  }
 
 data DimSelection
   = Fixed Int
@@ -71,7 +75,9 @@ type OpEvaluator rep =
   FunEnv rep -> Env -> Op rep -> InterpM rep [Val]
 
 data InterpEnv rep = InterpEnv
-  {interpOpEvaluator :: OpEvaluator rep}
+  { interpOpEvaluator :: OpEvaluator rep,
+    interpAccumulators :: M.Map VName (AccumulatorInfo rep)
+  }
 
 newtype InterpM rep a = InterpM
   { unInterpM :: ReaderT (InterpEnv rep) (ExceptT T.Text IO) a
@@ -248,6 +254,8 @@ addProvenance (Provenance locations location) message
 
 -- Produce one Val per pattern element the expression is expected to bind.
 evalExp :: FunEnv rep -> Env -> Exp rep -> InterpM rep [Val]
+evalExp funs env (BasicOp (UpdateAcc safety accumulator indices values)) =
+  evalUpdateAcc funs env safety accumulator indices values
 evalExp _ env (BasicOp op) = evalBasicOp env op
 evalExp funs env (Match ses cases default_body _) = do
   values <- mapM (evalSubExp env >=> expectPrimVal) ses
@@ -375,10 +383,19 @@ evalWithAcc funs env inputs lambda = do
     || length accumulator_params /= accumulator_count
     then interpError "WithAcc lambda parameter count mismatch"
     else do
-      let certificates =
+      let accumulator_ids = map paramName certificate_params
+          certificates =
             replicate accumulator_count $ PrimVal UnitValue
           accumulators =
-            replicate accumulator_count $ AccValue []
+            map AccValue accumulator_ids
+          accumulator_infos =
+            M.fromList $
+              zipWith
+                ( \accumulator_id (index_shape, arrays, operator) ->
+                    (accumulator_id, AccumulatorInfo index_shape arrays operator)
+                )
+                accumulator_ids
+                evaluated_inputs
           bindings =
             M.fromList $
               zip
@@ -386,7 +403,17 @@ evalWithAcc funs env inputs lambda = do
                 (certificates <> accumulators)
           lambda_env = M.union bindings env
 
-      results <- evalBody funs lambda_env $ lambdaBody lambda
+      results <-
+        local
+          ( \interp_env ->
+              interp_env
+                { interpAccumulators =
+                    M.union accumulator_infos $
+                      interpAccumulators interp_env
+                }
+          )
+          $ evalBody funs lambda_env
+          $ lambdaBody lambda
 
       let (accumulator_results, ordinary_results) =
             splitAt accumulator_count results
@@ -394,14 +421,11 @@ evalWithAcc funs env inputs lambda = do
       if length accumulator_results /= accumulator_count
         then interpError "WithAcc lambda returned too few accumulators"
         else do
-          updated_arrays <-
-            concat
-              <$> zipWithM
-                applyAccumulator
-                evaluated_inputs
-                accumulator_results
-
-          pure $ updated_arrays <> ordinary_results
+          mapM_ validateAccumulatorResult $
+            zip accumulator_ids accumulator_results
+          pure $
+            concatMap (\(_, arrays, _) -> arrays) evaluated_inputs
+              <> ordinary_results
   where
     evaluateInput (Shape dimension_exps, array_names, operator) = do
       index_shape <-
@@ -414,7 +438,8 @@ evalWithAcc funs env inputs lambda = do
         else do
           arrays <- mapM lookupArray array_names
           mapM_ (validateArray index_shape) arrays
-          pure (index_shape, arrays, operator)
+          arrays' <- mapM cloneArray arrays
+          pure (index_shape, arrays', operator)
 
     lookupArray name =
       case M.lookup name env of
@@ -435,54 +460,17 @@ evalWithAcc funs env inputs lambda = do
     validateArray _ _ =
       interpError "WithAcc input must be an array"
 
-    applyAccumulator
-      (index_shape, initial_arrays, operator)
-      (AccValue updates) =
-        foldM
-          (applyUpdateLog index_shape operator)
-          initial_arrays
-          updates
-    applyAccumulator _ _ =
+    cloneArray (ArrayValue shape element_type values) = do
+      values' <- liftIO $ cloneArrayValues values
+      pure $ ArrayValue shape element_type values'
+    cloneArray _ =
+      interpError "WithAcc input must be an array"
+
+    validateAccumulatorResult (expected_id, AccValue actual_id)
+      | expected_id == actual_id = pure ()
+      | otherwise = interpError "WithAcc accumulator result mismatch"
+    validateAccumulatorResult _ =
       interpError "WithAcc lambda did not return an accumulator"
-
-    applyUpdateLog
-      index_shape
-      operator
-      arrays
-      (AccUpdate safety indices new_values)
-        | length indices /= length index_shape =
-            interpError "accumulator update index rank mismatch"
-        | length new_values /= length arrays =
-            interpError "accumulator update value count mismatch"
-        | not (indicesInBounds index_shape indices) =
-            case safety of
-              Safe -> pure arrays
-              Unsafe -> interpError "unsafe accumulator update out of bounds"
-        | otherwise = do
-            old_values <-
-              mapM (readAccumulatorElement indices) arrays
-
-            replacement_values <-
-              case operator of
-                Nothing ->
-                  pure new_values
-                Just (operator_lambda, _) ->
-                  evalLambda
-                    funs
-                    env
-                    operator_lambda
-                    (map int64Val indices <> old_values <> new_values)
-
-            if length replacement_values /= length arrays
-              then interpError "accumulator operator result count mismatch"
-              else
-                zipWithM
-                  (writeAccumulatorElement indices)
-                  arrays
-                  replacement_values
-
-    indicesInBounds shape indices =
-      and $ zipWith (\size index -> index >= 0 && index < size) shape indices
 
 evalSubExp :: Env -> SubExp -> InterpM rep Val
 evalSubExp _ (Constant pv) = pure $ PrimVal pv
@@ -874,7 +862,18 @@ evalBasicOp env (Scratch element_type dimension_exps) = do
        in pure <$> newArrayValue dimensions element_type (replicate element_count blank_value)
 evalBasicOp env (UserParam _ default_sub_exp) =
   pure <$> evalSubExp env default_sub_exp
-evalBasicOp env (UpdateAcc safety accumulator_name index_exps value_exps) = do
+evalBasicOp _ UpdateAcc {} =
+  interpError "internal error: UpdateAcc requires function context"
+
+evalUpdateAcc ::
+  FunEnv rep ->
+  Env ->
+  Safety ->
+  VName ->
+  [SubExp] ->
+  [SubExp] ->
+  InterpM rep [Val]
+evalUpdateAcc funs env safety accumulator_name index_exps value_exps = do
   accumulator <-
     maybe
       (interpError $ "unbound accumulator: " <> prettyText accumulator_name)
@@ -888,10 +887,50 @@ evalBasicOp env (UpdateAcc safety accumulator_name index_exps value_exps) = do
   values <- mapM (evalSubExp env) value_exps
 
   case accumulator of
-    AccValue updates ->
-      pure [AccValue $ updates <> [AccUpdate safety indices values]]
+    AccValue accumulator_id -> do
+      info <-
+        maybe
+          (interpError "accumulator backing storage not found")
+          pure
+          =<< asks (M.lookup accumulator_id . interpAccumulators)
+      updateAccumulator info indices values
+      pure [accumulator]
     _ ->
       interpError "UpdateAcc argument is not an accumulator"
+  where
+    updateAccumulator info indices new_values
+      | length indices /= length (accumulatorShape info) =
+          interpError "accumulator update index rank mismatch"
+      | length new_values /= length (accumulatorArrays info) =
+          interpError "accumulator update value count mismatch"
+      | not $ indicesInBounds (accumulatorShape info) indices =
+          case safety of
+            Safe -> pure ()
+            Unsafe -> interpError "unsafe accumulator update out of bounds"
+      | otherwise = do
+          old_values <-
+            mapM (readAccumulatorElement indices) $
+              accumulatorArrays info
+          replacement_values <-
+            case accumulatorOperator info of
+              Nothing -> pure new_values
+              Just (operator_lambda, _) ->
+                evalLambda
+                  funs
+                  env
+                  operator_lambda
+                  (map int64Val indices <> old_values <> new_values)
+
+          if length replacement_values /= length (accumulatorArrays info)
+            then interpError "accumulator operator result count mismatch"
+            else
+              zipWithM_
+                (writeAccumulatorElementInPlace indices)
+                (accumulatorArrays info)
+                replacement_values
+
+    indicesInBounds shape indices =
+      and $ zipWith (\size index -> index >= 0 && index < size) shape indices
 
 evalErrorMsg :: Env -> ErrorMsg SubExp -> InterpM rep T.Text
 evalErrorMsg env (ErrorMsg parts) = do
@@ -1255,8 +1294,7 @@ evalScrema funs env width_exp input_names (ScremaForm pre_lambda scans reduction
               (lambdaReturnType post_lambda)
               (reverse reversed_output_rows)
 
-          outputs <- prependAccumulatorInputs inputs collected_outputs
-          pure $ concat final_reduction_states <> outputs
+          pure $ concat final_reduction_states <> collected_outputs
   where
     scan_sizes =
       map (length . scanNeutral) scans
@@ -1704,21 +1742,6 @@ evalSegOp
       validIndex index dimension =
         index >= 0 && index < dimension
 
-prependAccumulatorInputs :: [Val] -> [Val] -> InterpM rep [Val]
-prependAccumulatorInputs inputs =
-  go [updates | AccValue updates <- inputs]
-  where
-    go [] outputs = pure outputs
-    go remaining [] =
-      if null remaining
-        then pure []
-        else interpError "Screma dropped an accumulator result"
-    go (initial : remaining) (AccValue updates : outputs) =
-      (AccValue (initial <> updates) :)
-        <$> go remaining outputs
-    go remaining (output : outputs) =
-      (output :) <$> go remaining outputs
-
 splitGroups :: [Int] -> [a] -> InterpM rep ([[a]], [a])
 splitGroups [] values =
   pure ([], values)
@@ -1842,8 +1865,8 @@ rowAt index (ArrayValue (_ : row_shape) element_type values)
       row_values <-
         mapM (readArrayValue values) [offset .. offset + row_size - 1]
       newArrayValue row_shape element_type row_values
-rowAt _ AccValue {} =
-  pure $ AccValue []
+rowAt _ accumulator@AccValue {} =
+  pure accumulator
 rowAt _ _ =
   interpError "cannot extract a row from this value"
 
@@ -1869,8 +1892,8 @@ readAccumulatorElement indices (ArrayValue shape element_type values)
 readAccumulatorElement _ _ =
   interpError "accumulator backing value must be an array"
 
-writeAccumulatorElement :: [Int] -> Val -> Val -> InterpM rep Val
-writeAccumulatorElement
+writeAccumulatorElementInPlace :: [Int] -> Val -> Val -> InterpM rep ()
+writeAccumulatorElementInPlace
   indices
   (ArrayValue shape element_type values)
   replacement
@@ -1886,14 +1909,10 @@ writeAccumulatorElement
         replacement_values <-
           updateValues element_type element_shape replacement
 
-        values' <- liftIO $ cloneArrayValues values
-
         mapM_
-          (uncurry $ writeArrayValue values')
+          (uncurry $ writeArrayValue values)
           (zip [offset ..] replacement_values)
-
-        pure $ ArrayValue shape element_type values'
-writeAccumulatorElement _ _ _ =
+writeAccumulatorElementInPlace _ _ _ =
   interpError "accumulator backing value must be an array"
 
 readHistogramBin :: [Int] -> Val -> InterpM rep Val
@@ -2108,8 +2127,9 @@ collectOutputs env outer_shape return_types iteration_results
                 (outer_shape <> first_shape)
                 expected_type
                 (first_values <> concatMap third remaining)
-    collectOne Acc {} rows =
-      AccValue . concat <$> mapM expectAccumulator rows
+    collectOne (Acc certificate _ _ _) rows = do
+      mapM_ (expectAccumulator certificate) rows
+      pure $ AccValue certificate
     collectOne Mem {} _ =
       interpError "memory outputs are unsupported"
 
@@ -2124,8 +2144,10 @@ collectOutputs env outer_shape return_types iteration_results
           interpError "invalid array output storage"
     expectArray _ = interpError "expected array output"
 
-    expectAccumulator (AccValue updates) = pure updates
-    expectAccumulator _ = interpError "expected accumulator output"
+    expectAccumulator expected (AccValue actual)
+      | expected == actual = pure ()
+      | otherwise = interpError "accumulator output mismatch"
+    expectAccumulator _ _ = interpError "expected accumulator output"
 
     sameRow expected_shape expected_type (shape, element_type, values) =
       shape == expected_shape
@@ -2260,7 +2282,7 @@ runProgram ::
   Name ->
   [V.Value] ->
   IO (Either T.Text [V.Value])
-runProgram eval_op prog entry inputs = runExceptT $ flip runReaderT (InterpEnv {interpOpEvaluator = eval_op}) . unInterpM $ do
+runProgram eval_op prog entry inputs = runExceptT $ flip runReaderT initial_interp_env . unInterpM $ do
   let funs = M.fromList [(funDefName fun, fun) | fun <- progFuns prog]
   consts_env <- foldConsts funs mempty (stmsToList (progConsts prog)) -- top-level consts
   fun <- findEntry prog entry
@@ -2292,6 +2314,12 @@ runProgram eval_op prog entry inputs = runExceptT $ flip runReaderT (InterpEnv {
             result_signedness
             (drop result_context_count results)
   where
+    initial_interp_env =
+      InterpEnv
+        { interpOpEvaluator = eval_op,
+          interpAccumulators = mempty
+        }
+
     foldConsts _ e [] = pure e
     foldConsts funs e (s : ss) = evalStm funs e s >>= \e' -> foldConsts funs e' ss
 
