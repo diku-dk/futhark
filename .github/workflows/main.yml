@@ -433,7 +433,7 @@ jobs:
           source virtualenv/bin/activate
           pip install jsonschema
           module unload cuda
-          module load cuda/11.8
+          module load cuda/12.2
           futhark test tests \
             --backend=opencl \
             --cache-extension=cache \
@@ -457,7 +457,7 @@ jobs:
           source virtualenv/bin/activate
           pip install numpy pyopencl jsonschema mako
           module unload cuda
-          module load cuda/11.8
+          module load cuda/12.2
           futhark test tests \
              --backend=pyopencl \
              --tuning=tuning_gpu
@@ -479,7 +479,7 @@ jobs:
           source virtualenv/bin/activate
           pip install jsonschema
           module unload cuda
-          module load cuda/11.8
+          module load cuda/12.2
           nvidia-smi --query-gpu=gpu_name --format=csv,noheader
           futhark test tests \
             --backend=cuda \
