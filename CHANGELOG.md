@@ -12,17 +12,37 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Attributes may now also reference variables in scope, by prefixing a name with
   `$`. There is no builtin use for this feature.
 
+* The "uniqueness" terminology for in-place updates has now been completely
+  replaced with the notions of "consumption" and "freshness".
+
+* `futhark bench`: JSON files now contain metadata about the configuration and
+  execution environment (#2381). Work by Yifan Chen.
+
 ### Removed
 
 ### Changed
 
 ### Fixed
 
+* File names are now always encoded as UTF-8. Non-UTF-8 locales are not
+  supported.
+
 * Propagation of flattening attributes in some cases.
 
 * GPU code generation now supports reductions with more than 25 operators.
 
 * `reduce` and `reduce_comm` now produce alias-free results.
+
+* AD is now supposed for scans with array operators (#2208). Work by Yifan Chen.
+
+* AD operators now return alias-free results.
+
+* Shared memory histograms no longer occasionally exceed the shared memory
+  limit when chunking the buckets.
+
+* Tiling would produce invalid code in some cases.
+
+* Mishandling of abstract types could lead to compiler crash. (#2538)
 
 ## [0.27.1]
 

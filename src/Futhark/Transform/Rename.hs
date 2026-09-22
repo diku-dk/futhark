@@ -304,12 +304,12 @@ instance (Renameable rep) => Rename (Exp rep) where
 instance Rename PrimType where
   rename = pure
 
-instance (Rename shape) => Rename (TypeBase shape u) where
-  rename (Array et size u) = Array <$> rename et <*> rename size <*> pure u
+instance (Rename shape) => Rename (TypeBase shape o) where
+  rename (Array et size o) = Array <$> rename et <*> rename size <*> pure o
   rename (Prim t) = pure $ Prim t
   rename (Mem space) = pure $ Mem space
-  rename (Acc acc ispace ts u) =
-    Acc <$> rename acc <*> rename ispace <*> rename ts <*> pure u
+  rename (Acc acc ispace ts) =
+    Acc <$> rename acc <*> rename ispace <*> rename ts
 
 instance (Renameable rep, Rename t) => Rename (GLambda rep t) where
   rename (Lambda params ret body) =

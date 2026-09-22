@@ -35,12 +35,12 @@ class (Num e) => IntegralExp e where
 
   -- | Like 'Futhark.Util.IntegralExp.div', but rounds towards
   -- positive infinity.
-  divUp :: e -> e -> e
-  divUp x y =
+  ceilDiv :: e -> e -> e
+  ceilDiv x y =
     (x + y - 1) `Futhark.Util.IntegralExp.div` y
 
   nextMul :: e -> e -> e
-  nextMul x y = x `divUp` y * y
+  nextMul x y = x `ceilDiv` y * y
 
 -- | This wrapper allows you to use a type that is an instance of the
 -- true class whenever the simile class is required.

@@ -3,16 +3,18 @@ module Futhark.CLI.Profile (main) where
 
 import Control.Arrow ((&&&), (>>>))
 import Control.Exception (catch)
-import Control.Monad (forM_, (>=>))
+import Control.Monad (forM_)
 import Control.Monad.Except (ExceptT, liftEither, runExcept, runExceptT)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Except (Except)
 import Data.Bifunctor (first, second)
 import Data.ByteString.Lazy.Char8 qualified as BS
+import Data.Char (isAlphaNum, isAscii, ord)
 import Data.Foldable (toList)
 import Data.Function ((&))
 import Data.List qualified as L
 import Data.Map qualified as M
+import Data.Maybe (catMaybes, isJust)
 import Data.Monoid (Sum (..))
 import Data.Sequence qualified as Seq
 import Data.Set qualified as S
@@ -32,7 +34,7 @@ import Futhark.Bench
   )
 import Futhark.Profile.Details (CostCentreDetails (CostCentreDetails), CostCentreName (CostCentreName), CostCentres, SourceRangeDetails (SourceRangeDetails), SourceRanges, containingCostCentres)
 import Futhark.Profile.EventSummary qualified as ES
-import Futhark.Profile.Html (generateCCOverviewHtml, generateHeatmapHtml, generateHtmlIndex, securedHashPath)
+import Futhark.Profile.Html (generateCCOverviewHtml, generateHeatmapHtml, generateHtmlIndex, generateSourceIndex, securedHashPath)
 import Futhark.Profile.SourceRange (SourceRange)
 import Futhark.Profile.SourceRange qualified as SR
 import Futhark.Util (showText)
@@ -53,6 +55,7 @@ import System.FilePath
 import System.IO (hPutStrLn, stderr)
 import Text.Blaze.Html.Renderer.Text qualified as H
 import Text.Blaze.Html5 qualified as H
+import Text.Blaze.Html5.Attributes qualified as A
 import Text.Printf (printf)
 
 commonPrefix :: (Eq e) => [e] -> [e] -> [e]
@@ -151,27 +154,36 @@ data TargetFiles = TargetFiles
     htmlDir :: FilePath
   }
 
-writeAnalysis :: TargetFiles -> ProfilingReport -> IO ()
-writeAnalysis tf r = runExceptT >=> handleException $ do
-  let evSummaryMap = ES.eventSummaries $ profilingEvents r
+-- | Write text and HTML reports, even if source analysis is unavailable.
+writeAnalysis :: TargetFiles -> Maybe T.Text -> Maybe ProfilingReport -> IO ()
+writeAnalysis tf logText profilingReport = do
+  createDirectoryIfMissing True $ htmlDir tf
+  T.writeFile (htmlDir tf </> "style.css") cssFile
 
-  -- heatmap html and cost centres
-  writeHtml tf evSummaryMap
+  let timelineText = timeline . profilingEvents <$> profilingReport
+  sourceIndex <- case profilingReport of
+    Nothing -> pure $ H.p "No profiling information recorded."
+    Just r -> do
+      let evSummaryMap = ES.eventSummaries $ profilingEvents r
+      T.writeFile (summaryFile tf) $
+        memoryReport (profilingMemory r)
+          <> "\n\n"
+          <> tabulateEvents evSummaryMap
+      forM_ timelineText $ T.writeFile (timelineFile tf)
 
-  -- profile.summary
-  liftIO $
-    T.writeFile (summaryFile tf) $
-      memoryReport (profilingMemory r)
-        <> "\n\n"
-        <> tabulateEvents evSummaryMap
+      sourceResult <- runExceptT $ writeHtml tf evSummaryMap
+      case sourceResult of
+        Left err -> do
+          T.hPutStrLn stderr err
+          pure $ do
+            H.p "Source information unavailable."
+            H.pre $ H.text err
+        Right html -> pure html
 
-  -- profile.timeline
-  liftIO $
-    T.writeFile (timelineFile tf) $
-      timeline (profilingEvents r)
-  where
-    handleException :: Either T.Text () -> IO ()
-    handleException = either (T.hPutStrLn stderr) pure
+  let relHtmlDirPath = last $ splitPath $ htmlDir tf
+  LT.writeFile (htmlIndexFile tf) $
+    H.renderHtml $
+      generateHtmlIndex relHtmlDirPath logText timelineText sourceIndex
 
 toIOExcept :: Except T.Text a -> ExceptT T.Text IO a
 toIOExcept = liftEither . runExcept
@@ -181,27 +193,14 @@ writeHtml ::
   TargetFiles ->
   -- | mapping keys are (name, provenance)
   M.Map (T.Text, T.Text) ES.EvSummary ->
-  ExceptT T.Text IO ()
+  ExceptT T.Text IO H.Html
 writeHtml tf evSummaryMap = do
   let htmlDirPath = htmlDir tf
-  let htmlIndexPath = htmlIndexFile tf
   (sourceRanges, costCentres) <- toIOExcept $ buildDetailStructures evSummaryMap
   htmlFiles <- generateHtmlHeatmaps sourceRanges
   let costCentreOverview = generateCCOverviewHtml costCentres
 
   liftIO $ do
-    -- create the bench.html/ directory
-    createDirectoryIfMissing True htmlDirPath
-    -- style is needed by both cc-overview and source ranges
-    let cssPath = htmlDirPath </> "style.css"
-    T.writeFile cssPath cssFile
-
-    -- index file
-    let relHtmlDirPath = last $ splitPath htmlDirPath
-    LT.writeFile
-      htmlIndexPath
-      (H.renderHtml $ generateHtmlIndex relHtmlDirPath sourceRanges costCentres)
-
     -- cost centre file
     LT.writeFile
       (htmlDirPath </> "cost-centres.html")
@@ -212,6 +211,9 @@ writeHtml tf evSummaryMap = do
       let absPath =
             htmlDirPath </> makeRelative "/" (srcFilePath <> ".html")
       writeLazyTextFile absPath (H.renderHtml html)
+
+  let relHtmlDirPath = last $ splitPath htmlDirPath
+  pure $ generateSourceIndex relHtmlDirPath sourceRanges
 
 writeLazyTextFile :: FilePath -> LT.Text -> IO ()
 writeLazyTextFile filepath content = do
@@ -402,18 +404,22 @@ analyseProfilingReport json_path r = do
         TargetFiles
           { summaryFile = top_dir </> "summary",
             timelineFile = top_dir </> "timeline",
-            htmlIndexFile = top_dir </> "index",
+            htmlIndexFile = top_dir </> "index.html",
             htmlDir = top_dir </> "html/"
           }
-  writeAnalysis tf r
+  writeAnalysis tf Nothing $ Just r
 
 analyseBenchResults :: FilePath -> [BenchResult] -> IO ()
 analyseBenchResults json_path bench_results = do
   top_dir <- prepareDir json_path
   T.hPutStrLn stderr $ "Stripping '" <> T.pack prefix <> "' from program paths."
-  mapM_ (onBenchResult top_dir) bench_results
+  programs <- mapM (onBenchResult top_dir) bench_results
+  writeNavigationIndex (top_dir </> "index.html") "Program Index" programs
   where
-    prefix = longestCommonPrefix $ map benchResultProg bench_results
+    programPaths = map (takeWhile (/= ':') . benchResultProg) bench_results
+    prefix = case S.toList $ S.fromList programPaths of
+      [path] -> path
+      paths -> takeDirectory $ longestCommonPrefix paths
 
     -- Eliminate characters that are filesystem-meaningful.
     escape '/' = '_'
@@ -424,13 +430,26 @@ analyseBenchResults json_path bench_results = do
 
     onBenchResult top_dir (BenchResult prog_path data_results) = do
       let (prog_path', entry) = span (/= ':') prog_path
-          prog_name = drop (length prefix) prog_path'
-          prog_dir = top_dir </> dropExtension prog_name </> drop 1 entry
+          prog_name = makeRelative prefix prog_path'
+          relative_dir = dropExtension prog_name </> drop 1 entry
+          -- Preserve the established <entry>/<dataset>-index.html layout for
+          -- one source file. A file without an entry point still needs its
+          -- own directory so it does not collide with the top-level index.
+          prog_dir =
+            top_dir
+              </> if null relative_dir || relative_dir == "."
+                then "program"
+                else relative_dir
       createDirectoryIfMissing True prog_dir
-      mapM_ (onDataResult prog_dir (T.pack prog_name)) data_results
+      datasets <-
+        catMaybes <$> mapM (onDataResult prog_dir (T.pack prog_name)) data_results
+      let index = prog_dir </> "index.html"
+      writeNavigationIndex index (T.pack prog_path) datasets
+      pure (T.pack prog_path, makeRelative top_dir index)
 
-    onDataResult _ prog_name (DataResult name (Left _)) =
+    onDataResult _ prog_name (DataResult name (Left _)) = do
       problem prog_name name "execution failed"
+      pure Nothing
     onDataResult prog_dir prog_name (DataResult name (Right res)) = do
       let name' = prog_dir </> T.unpack (T.map escape name)
       case stdErr res of
@@ -438,15 +457,39 @@ analyseBenchResults json_path bench_results = do
         Just text -> T.writeFile (name' <.> ".log") text
       case report res of
         Nothing -> problem prog_name name "no profiling information"
-        Just r ->
-          let tf =
-                TargetFiles
-                  { summaryFile = name' <> ".summary",
-                    timelineFile = name' <> ".timeline",
-                    htmlIndexFile = name' <> "-index.html",
-                    htmlDir = name' <> ".html/"
-                  }
-           in writeAnalysis tf r
+        Just _ -> pure ()
+      let tf =
+            TargetFiles
+              { summaryFile = name' <> ".summary",
+                timelineFile = name' <> ".timeline",
+                htmlIndexFile = name' <> "-index.html",
+                htmlDir = name' <> ".html/"
+              }
+      if isJust (stdErr res) || isJust (report res)
+        then do
+          writeAnalysis tf (stdErr res) (report res)
+          pure $ Just (name, makeRelative prog_dir $ htmlIndexFile tf)
+        else pure Nothing
+
+-- | Write an index of generated reports, with paths relative to the index.
+writeNavigationIndex :: FilePath -> T.Text -> [(T.Text, FilePath)] -> IO ()
+writeNavigationIndex path title links =
+  writeLazyTextFile path $ H.renderHtml $ H.docTypeHtml $ do
+    H.head $ do
+      H.meta H.! A.charset "utf-8"
+      H.title $ H.text title
+      H.style $ H.text cssFile
+    H.body $ do
+      H.h2 $ H.text title
+      H.ul $ forM_ links $ \(label, target) ->
+        H.li $ H.a H.! A.href (H.toValue $ escapePath target) $ H.text label
+  where
+    -- Percent-encode UTF-8 bytes, retaining separators and URI-unreserved bytes.
+    escapePath =
+      concatMap escapeByte . BS.unpack . BS.fromStrict . T.encodeUtf8 . T.pack
+    escapeByte c
+      | isAscii c && (isAlphaNum c || c `elem` ['-', '.', '/', '_', '~']) = [c]
+      | otherwise = printf "%%%02X" (ord c)
 
 readFileSafely :: FilePath -> IO (Either String BS.ByteString)
 readFileSafely filepath =

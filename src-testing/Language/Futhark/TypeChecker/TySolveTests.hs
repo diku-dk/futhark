@@ -47,13 +47,13 @@ testSolveFail constraints typarams tyvars expected =
 -- the numbers are distinct. These are all that actually matter for
 -- determining identity.
 
-(~) :: TypeBase () NoUniqueness -> TypeBase () NoUniqueness -> CtTy ()
+(~) :: TypeBase () NoMode -> TypeBase () NoMode -> CtTy ()
 t1 ~ t2 = CtEq (Reason mempty) t1 t2
 
 tvFree :: VName -> Level -> (VName, (Level, TyVarInfo ()))
 tvFree v lvl = (v, (lvl, TyVarFree mempty Unlifted))
 
-tvRecord :: VName -> Level -> M.Map Name (TypeBase () NoUniqueness) -> (VName, (Level, TyVarInfo ()))
+tvRecord :: VName -> Level -> M.Map Name (TypeBase () NoMode) -> (VName, (Level, TyVarInfo ()))
 tvRecord v lvl fields = (v, (lvl, TyVarRecord mempty fields))
 
 typaram :: VName -> Level -> Liftedness -> (VName, (Level, Liftedness, Loc))

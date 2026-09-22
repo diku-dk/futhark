@@ -179,13 +179,13 @@ generateWrite dest idx elemtype (Space space) vol elemexp = do
 
 compileRead ::
   VName ->
-  Count u (TPrimExp t VName) ->
+  Count m (TPrimExp t VName) ->
   PrimType ->
   Space ->
   Volatility ->
   CompilerM op s C.Exp
 compileRead src (Count iexp) restype space vol = do
-  src' <- rawMem src
+  src' <- rawMem src space
   iexp' <- compileExp (untyped iexp)
   generateRead src' iexp' restype space vol
 
@@ -338,8 +338,8 @@ compileCode (Copy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace
   case cp of
     Just cp' | t /= Unit -> do
       shape' <- traverse (traverse (compileExp . untyped)) shape
-      dst' <- rawMem dst
-      src' <- rawMem src
+      dst' <- rawMem dst dstspace
+      src' <- rawMem src srcspace
       dstoffset' <- traverse (compileExp . untyped) dstoffset
       dststrides' <- traverse (traverse (compileExp . untyped)) dststrides
       srcoffset' <- traverse (compileExp . untyped) srcoffset
@@ -349,7 +349,7 @@ compileCode (Copy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace
       compileCopy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)
 compileCode (Write _ _ Unit _ _ _) = pure ()
 compileCode (Write dst (Count idx) elemtype space vol elemexp) = do
-  dst' <- rawMem dst
+  dst' <- rawMem dst space
   idx' <- compileExp (untyped idx)
   elemexp' <- compileExp elemexp
   generateWrite dst' idx' elemtype space vol elemexp'
@@ -469,8 +469,8 @@ compileCopy ::
   ) ->
   CompilerM op s ()
 compileCopy t shape (dst, dstspace) dst_lmad (src, srcspace) src_lmad = do
-  src' <- rawMem src
-  dst' <- rawMem dst
+  src' <- rawMem src srcspace
+  dst' <- rawMem dst dstspace
   let doWrite dst_i = generateWrite dst' dst_i t dstspace Nonvolatile
       doRead src_i = generateRead src' src_i t srcspace Nonvolatile
   compileCopyWith shape doWrite dst_lmad doRead src_lmad

@@ -192,7 +192,7 @@ toValueType TEArrow {} = Left "Cannot generate functions."
 toValueType TESum {} = Left "Cannot handle sumtypes yet."
 toValueType TEDim {} = Left "Cannot handle existential sizes."
 toValueType (TEParens t _) = toValueType t
-toValueType (TEUnique t _) = toValueType t
+toValueType (TEStar t _) = toValueType t
 toValueType (TEArray d t _) = do
   d' <- constantDim d
   V.ValueType ds t' <- toValueType t

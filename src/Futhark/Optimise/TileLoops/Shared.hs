@@ -61,7 +61,7 @@ forLoop' i_bound merge body = do
   let loop_form = ForLoop i Int64 i_bound
 
   merge_ts <- mapM lookupType merge
-  loop_inits <- mapM (\merge_t -> newParam "merge" $ toDecl merge_t Unique) merge_ts
+  loop_inits <- mapM (\merge_t -> newParam "merge" $ toDecl merge_t Consume) merge_ts
 
   loop_body <-
     insertStmsM $

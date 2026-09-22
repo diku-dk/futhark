@@ -156,9 +156,9 @@ newNamesForMTy orig_mty = do
         substituteInTypeParam (TypeParamType l p loc) =
           TypeParamType l (substitute p) loc
 
-        substituteInScalarType :: ScalarTypeBase Size u -> ScalarTypeBase Size u
-        substituteInScalarType (TypeVar u v targs) =
-          TypeVar u (substituteInQualName v) $ map substituteInTypeArg targs
+        substituteInScalarType :: ScalarTypeBase Size o -> ScalarTypeBase Size o
+        substituteInScalarType (TypeVar o v targs) =
+          TypeVar o (substituteInQualName v) $ map substituteInTypeArg targs
         substituteInScalarType (Prim t) =
           Prim t
         substituteInScalarType (Record ts) =
@@ -168,14 +168,14 @@ newNamesForMTy orig_mty = do
         substituteInScalarType (Arrow als v d1 t1 (RetType dims t2)) =
           Arrow als v d1 (substituteInType t1) $ RetType dims $ substituteInType t2
 
-        substituteInRetType :: RetTypeBase Size u -> RetTypeBase Size u
+        substituteInRetType :: RetTypeBase Size o -> RetTypeBase Size o
         substituteInRetType (RetType ext t) =
           RetType (map substitute ext) $ substituteInType t
 
-        substituteInType :: TypeBase Size u -> TypeBase Size u
+        substituteInType :: TypeBase Size o -> TypeBase Size o
         substituteInType (Scalar t) = Scalar $ substituteInScalarType t
-        substituteInType (Array u shape t) =
-          Array u (substituteInShape shape) $ substituteInScalarType t
+        substituteInType (Array o shape t) =
+          Array o (substituteInShape shape) $ substituteInScalarType t
 
         substituteInShape (Shape ds) = Shape $ map substituteInExp ds
 

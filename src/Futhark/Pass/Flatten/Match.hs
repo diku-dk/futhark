@@ -64,7 +64,7 @@ mergeResult lvl segments w iss branchesRep dist_res
           xs <- mapM asRegular branchesRep
           pure $ Regular $ last xs
         else do
-          let resultType = Array (elemType resType) (Shape [w] <> arrayShape resType) NoUniqueness
+          let resultType = Array (elemType resType) (Shape [w] <> arrayShape resType) NoMode
           xs <- mapM asRegular branchesRep
           -- Create the blank space for the result
           resultSpace <- letExp "blank_res" =<< eBlank resultType
@@ -78,13 +78,13 @@ mergeResult lvl segments w iss branchesRep dist_res
   -- Irregular case
   | DistType _ _ (Array pt _ _) <- distResType dist_res = do
       branchesIrregRep <- mapM asIrregular branchesRep
-      let segsType = Array (IntType Int64) (Shape [w]) NoUniqueness
+      let segsType = Array (IntType Int64) (Shape [w]) NoMode
       -- Create a blank space for the 'segs'
       segsSpace <- letExp "blank_segs" =<< eBlank segsType
       -- Write back the segs of each branch to the blank space
       segs <- foldM (scatterRegular lvl) segsSpace $ zip iss (irregularS <$> branchesIrregRep)
       (_, offsets, num_data) <- exScanAndSum lvl segs
-      let resultType = Array pt (Shape [num_data]) NoUniqueness
+      let resultType = Array pt (Shape [num_data]) NoMode
       -- Create the blank space for the result
       resultSpace <- letExp "blank_res" =<< eBlank resultType
       -- Write back the values of each branch to the blank space
@@ -241,7 +241,7 @@ flattenVariantMatch ops segments env inps res _aux scrutinees cases defaultCase 
       let (v, inp) = v_inp
        in if isAcc (distInputType inp)
             then case distInputType inp of
-              Acc cert' _ _ _ | cert == cert' -> Just v
+              Acc cert' _ _ | cert == cert' -> Just v
               _ -> Nothing
             else Nothing
 
@@ -255,7 +255,7 @@ flattenVariantMatch ops segments env inps res _aux scrutinees cases defaultCase 
             then
               acc_reps
             else
-              let (Acc cert _ _ _) = t
+              let (Acc cert _ _) = t
                   accVars = findAccCerts cert
                in foldl (\m v -> M.insert v rep m) acc_reps accVars
     replaceAccReps acc_reps reps = foldl replaceAccRep acc_reps $ zip res reps

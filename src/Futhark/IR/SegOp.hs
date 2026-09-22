@@ -681,14 +681,13 @@ mapOnSegOpType ::
   Type ->
   m Type
 mapOnSegOpType _tv t@Prim {} = pure t
-mapOnSegOpType tv (Acc acc ispace ts u) =
+mapOnSegOpType tv (Acc acc ispace ts) =
   Acc
     <$> mapOnSegOpVName tv acc
     <*> traverse (mapOnSegOpSubExp tv) ispace
     <*> traverse (bitraverse (traverse (mapOnSegOpSubExp tv)) pure) ts
-    <*> pure u
-mapOnSegOpType tv (Array et shape u) =
-  Array et <$> traverse (mapOnSegOpSubExp tv) shape <*> pure u
+mapOnSegOpType tv (Array et shape o) =
+  Array et <$> traverse (mapOnSegOpSubExp tv) shape <*> pure o
 mapOnSegOpType _tv (Mem s) = pure $ Mem s
 
 rephraseBinOp ::
@@ -906,15 +905,28 @@ instance (ASTRep rep) => ST.IndexOp (SegOp lvl rep) where
     Returns ResultMaySimplify _ se <- maybeNth k $ bodyResult kbody
     guard $ length gtids <= length is
     let idx_table = M.fromList $ zip gtids $ map (ST.Indexed mempty . untyped) is
-        idx_table' = foldl' expandIndexedTable idx_table $ bodyStms kbody
     case se of
-      Var v -> M.lookup v idx_table'
+      Var v ->
+        M.lookup v $
+          foldl' expandIndexedTable idx_table $
+            dependedOn v (bodyStms kbody)
       _ -> Nothing
     where
       (gtids, _) = unzip $ unSegSpace space
       -- Indexes in excess of what is used to index through the
       -- segment dimensions.
       excess_is = drop (length gtids) is
+
+      -- The table entry for a variable depends only on the statements
+      -- that variable is (transitively) computed from, and computing an
+      -- entry is expensive, so skip the rest. See Note [Pruning the
+      -- index table].
+      dependedOn v = snd . foldr onStm (oneName v, [])
+        where
+          onStm stm (needed, acc)
+            | any ((`nameIn` needed) . patElemName) (patElems (stmPat stm)) =
+                (freeIn stm <> needed, stm : acc)
+            | otherwise = (needed, acc)
 
       expandIndexedTable table stm
         | [v] <- patNames $ stmPat stm,
@@ -1498,3 +1510,22 @@ segOpReturns k@(SegScan {}) =
   extReturns <$> opType k
 segOpReturns (SegHist _ _ _ _ ops) =
   concat <$> mapM (mapM varReturns . histDest) ops
+
+-- Note [Pruning the index table]
+--
+-- The 'ST.IndexOp' instance for 'SegMap' answers the question "what is the
+-- value of element @is@ of the array produced by this kernel?". It does so by
+-- symbolically evaluating the kernel body into a table mapping each variable to
+-- a 'ST.Indexed', then looking up the variable returned by the kernel.
+--
+-- Only one entry of that table is ever read, and an entry depends solely on the
+-- entries of the variables that are free in the statement that binds it. Hence
+-- the answer is unchanged if we first drop every statement that the result does
+-- not transitively depend on, which is what 'dependedOn' does.
+--
+-- This matters because building an entry is expensive (it constructs a
+-- 'PrimExp' for the entire statement), while deciding whether a statement is
+-- depended upon is a set membership test and a set union. Kernel bodies are
+-- often large while the slice that computes any single result is small, and the
+-- simplifier asks this question once per indexing of the array, in every one of
+-- its many passes; without pruning, that is quadratic in the size of the kernel.

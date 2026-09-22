@@ -10,7 +10,7 @@ module Language.Futhark.Pretty
     IsName (..),
     prettyNameText,
     prettyNameString,
-    Annot (..),
+    Annot,
   )
 where
 
@@ -107,7 +107,15 @@ instance Pretty (Shape Int64) where
 instance Pretty (Shape Bool) where
   pretty (Shape ds) = mconcat (map (brackets . pretty) ds)
 
-prettyRetType :: (Pretty (Shape dim), Pretty u) => Int -> RetTypeBase dim u -> Doc a
+instance Pretty Diet where
+  pretty Consume = "*"
+  pretty Observe = ""
+
+instance Pretty Freshness where
+  pretty Fresh = "*"
+  pretty Nonfresh = ""
+
+prettyRetType :: (Pretty (Shape dim), Pretty o) => Int -> RetTypeBase dim o -> Doc a
 prettyRetType p (RetType [] t) =
   prettyType p t
 prettyRetType _ (RetType dims t) =
@@ -116,18 +124,14 @@ prettyRetType _ (RetType dims t) =
     <> "."
     <> pretty t
 
-instance (Pretty (Shape dim), Pretty u) => Pretty (RetTypeBase dim u) where
+instance (Pretty (Shape dim), Pretty o) => Pretty (RetTypeBase dim o) where
   pretty = prettyRetType 0
 
-instance Pretty Diet where
-  pretty Consume = "*"
-  pretty Observe = ""
-
-prettyScalarType :: (Pretty (Shape dim), Pretty u) => Int -> ScalarTypeBase dim u -> Doc a
+prettyScalarType :: (Pretty (Shape dim), Pretty o) => Int -> ScalarTypeBase dim o -> Doc a
 prettyScalarType _ (Prim et) = pretty et
-prettyScalarType p (TypeVar u v targs) =
+prettyScalarType p (TypeVar o v targs) =
   parensIf (not (null targs) && p > 3) $
-    pretty u <> hsep (pretty v : map (prettyTypeArg 3) targs)
+    pretty o <> hsep (pretty v : map (prettyTypeArg 3) targs)
 prettyScalarType _ (Record fs)
   | Just ts <- areTupleFields fs =
       group $ parens $ align $ mconcat $ punctuate ("," <> line) $ map pretty ts
@@ -153,16 +157,16 @@ prettyScalarType p (Sum cs) =
     ppConstr (name, fs) = sep $ ("#" <> pretty name) : map (prettyType 2) fs
     cs' = map ppConstr $ M.toList cs
 
-instance (Pretty (Shape dim), Pretty u) => Pretty (ScalarTypeBase dim u) where
+instance (Pretty (Shape dim), Pretty o) => Pretty (ScalarTypeBase dim o) where
   pretty = prettyScalarType 0
 
-prettyType :: (Pretty (Shape dim), Pretty u) => Int -> TypeBase dim u -> Doc a
-prettyType _ (Array u shape at) =
-  pretty u <> pretty shape <> align (prettyScalarType 2 at)
+prettyType :: (Pretty (Shape dim), Pretty o) => Int -> TypeBase dim o -> Doc a
+prettyType _ (Array o shape at) =
+  pretty o <> pretty shape <> align (prettyScalarType 2 at)
 prettyType p (Scalar t) =
   prettyScalarType p t
 
-instance (Pretty (Shape dim), Pretty u) => Pretty (TypeBase dim u) where
+instance (Pretty (Shape dim), Pretty o) => Pretty (TypeBase dim o) where
   pretty = prettyType 0
 
 prettyTypeArg :: (Pretty (Shape dim)) => Int -> TypeArg dim -> Doc a
@@ -173,7 +177,7 @@ instance Pretty (TypeArg Size) where
   pretty = prettyTypeArg 0
 
 instance (IsName vn, Pretty d) => Pretty (TypeExp d vn) where
-  pretty (TEUnique t _) = "*" <> pretty t
+  pretty (TEStar t _) = "*" <> pretty t
   pretty (TEArray d at _) = pretty d <> pretty at
   pretty (TETuple ts _) = parens $ commasep $ map pretty ts
   pretty (TERecord fs _) = braces $ commasep $ map ppField fs
@@ -234,8 +238,8 @@ letBody body@(AppExp LetFun {} _) = pretty body
 letBody body = "in" <+> align (pretty body)
 
 prettyAppExp :: (IsName vn, Annot f) => Int -> AppExpBase f vn -> Doc a
-prettyAppExp p (BinOp (bop, _) _ (x, _) (y, _) _) =
-  prettyBinOp p bop x y
+prettyAppExp p (BinOp (bop, _) bop_t (x, _) (y, _) _) =
+  prettyBinOp p bop bop_t x y
 prettyAppExp _ (Match e cs _) = "match" <+> pretty e </> (stack . map pretty) (NE.toList cs)
 prettyAppExp _ (Loop sizeparams pat initexp form loopbody _) =
   "loop"
@@ -620,13 +624,14 @@ prettyBinOp ::
   (IsName vn, Annot f) =>
   Int ->
   QualName vn ->
+  f StructType ->
   ExpBase f vn ->
   ExpBase f vn ->
   Doc a
-prettyBinOp p bop x y =
+prettyBinOp p bop bop_t x y =
   parensIf (p > symPrecedence) $
     prettyExp symPrecedence x
-      <+> bop'
+      <+> (bop' <> prettyInst bop_t)
       <+> prettyExp symRPrecedence y
   where
     bop' = case leading of

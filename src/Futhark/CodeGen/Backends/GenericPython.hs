@@ -964,11 +964,11 @@ entryTypes :: Imp.EntryPoint -> ([T.Text], T.Text)
 entryTypes (Imp.EntryPoint _ res args _doc) =
   (map descArg args, desc res)
   where
-    descArg ((_, u), d) = desc (u, d)
-    desc (u, Imp.OpaqueValue d _) = prettyText u <> nameToText d
-    desc (u, Imp.TransparentValue (Imp.ScalarValue pt s _)) = prettyText u <> readTypeEnum pt s
-    desc (u, Imp.TransparentValue (Imp.ArrayValue _ _ pt s dims)) =
-      prettyText u <> mconcat (replicate (length dims) "[]") <> readTypeEnum pt s
+    descArg ((_, o), d) = desc (o, d)
+    desc (o, Imp.OpaqueValue d _) = prettyText o <> nameToText d
+    desc (o, Imp.TransparentValue (Imp.ScalarValue pt s _)) = prettyText o <> readTypeEnum pt s
+    desc (o, Imp.TransparentValue (Imp.ArrayValue _ _ pt s dims)) =
+      prettyText o <> mconcat (replicate (length dims) "[]") <> readTypeEnum pt s
 
 callEntryFun ::
   [PyStmt] ->
@@ -1220,14 +1220,12 @@ generateRead ::
   CompilerM op s PyExp
 generateRead _ _ Unit _ =
   pure (compilePrimValue UnitValue)
-generateRead _ _ _ ScalarSpace {} =
-  error "GenericPython.generateRead: ScalarSpace"
-generateRead src iexp pt DefaultSpace = do
-  let pt' = compilePrimType pt
-  pure $ fromStorage pt $ simpleCall "indexArray" [src, iexp, Var pt']
 generateRead src iexp pt (Space space) = do
   reader <- asks envReadScalar
   reader src iexp pt space
+generateRead src iexp pt _ = do
+  let pt' = compilePrimType pt
+  pure $ fromStorage pt $ simpleCall "indexArray" [src, iexp, Var pt']
 
 generateWrite ::
   PyExp ->
@@ -1237,12 +1235,10 @@ generateWrite ::
   PyExp ->
   CompilerM op s ()
 generateWrite _ _ Unit _ _ = pure ()
-generateWrite _ _ _ ScalarSpace {} _ = do
-  error "GenericPython.generateWrite: ScalarSpace"
 generateWrite dst iexp pt (Imp.Space space) elemexp = do
   writer <- asks envWriteScalar
   writer dst iexp pt space elemexp
-generateWrite dst iexp _ DefaultSpace elemexp =
+generateWrite dst iexp _ _ elemexp =
   stm $ Exp $ simpleCall "writeScalarArray" [dst, iexp, elemexp]
 
 -- | Compile an 'Copy' using sequential nested loops, but

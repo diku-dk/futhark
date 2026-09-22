@@ -229,10 +229,10 @@ resultMap avail_inputs stms pat res = foldMap (foldMap f . distStmResult) stms
     findCert v = fromMaybe (DistInputFree v (Prim Unit)) $ lookup v avail_inputs
 
 splitIrregDims :: Names -> Type -> (Rank, Type)
-splitIrregDims bound_outside (Array pt shape u) =
+splitIrregDims bound_outside (Array pt shape o) =
   let (reg, irreg) =
         first reverse $ span regDim $ reverse $ shapeDims shape
-   in (Rank $ length irreg, Array pt (Shape reg) u)
+   in (Rank $ length irreg, Array pt (Shape reg) o)
   where
     regDim (Var v) = v `nameIn` bound_outside
     regDim Constant {} = True

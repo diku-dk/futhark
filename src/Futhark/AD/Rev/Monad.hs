@@ -429,8 +429,8 @@ lookupAdj v = do
     Nothing -> do
       v_t <- lookupType v
       case v_t of
-        Acc _ shape [Prim t] _ -> pure $ AdjZero shape t
-        Acc _ shape [t] _ -> pure $ AdjZero (shape <> arrayShape t) (elemType t)
+        Acc _ shape [Prim t] -> pure $ AdjZero shape t
+        Acc _ shape [t] -> pure $ AdjZero (shape <> arrayShape t) (elemType t)
         Acc {} -> error $ "lookupAdj: Non-singleton accumulator adjoint: " <> prettyString v_t
         _ -> pure $ AdjZero (adj_shape <> arrayShape v_t) (elemType v_t)
     Just v_adj -> pure v_adj
@@ -683,11 +683,10 @@ vecToInner v = do
 --
 --  let ys_copy = copy ys
 --
--- Then we generate code for the return sweep as normal, but replace
--- _every instance_ of 'ys' in the generated code with 'ys_copy'.
--- This works because Futhark does not have *semantic* in-place
--- updates - any uniqueness violation can be replaced with copies (on
--- arrays, anyway).
+-- Then we generate code for the return sweep as normal, but replace _every
+-- instance_ of 'ys' in the generated code with 'ys_copy'. This works because
+-- Futhark does not have *semantic* in-place updates - any consumption violation
+-- can be replaced with copies (on arrays, anyway).
 --
 -- If we are lucky, the uses of 'ys_copy' will be removed by
 -- simplification, and there will be no overhead.  But even if not,

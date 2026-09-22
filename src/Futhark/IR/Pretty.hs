@@ -44,6 +44,10 @@ instance Pretty Commutativity where
   pretty Commutative = "commutative"
   pretty Noncommutative = "noncommutative"
 
+instance Pretty Diet where
+  pretty Consume = "*"
+  pretty Observe = mempty
+
 instance (Pretty d) => Pretty (ShapeBase d) where
   pretty = mconcat . map (brackets . pretty) . shapeDims
 
@@ -59,46 +63,43 @@ instance Pretty Space where
   pretty (Space s) = "@" <> pretty s
   pretty (ScalarSpace d t) = "@" <> mconcat (map (brackets . pretty) d) <> pretty t
 
-instance (Pretty u) => Pretty (TypeBase Shape u) where
+instance (Pretty o) => Pretty (TypeBase Shape o) where
   pretty (Prim t) = pretty t
-  pretty (Acc acc ispace ts u) =
-    pretty u
-      <> "acc"
+  pretty (Acc acc ispace ts) =
+    "acc"
       <> apply
         [ pretty acc,
           pretty ispace,
           ppTuple' $ map pretty ts
         ]
-  pretty (Array et (Shape ds) u) =
-    pretty u <> mconcat (map (brackets . pretty) ds) <> pretty et
+  pretty (Array et (Shape ds) o) =
+    pretty o <> mconcat (map (brackets . pretty) ds) <> pretty et
   pretty (Mem s) = "mem" <> pretty s
 
-instance (Pretty u) => Pretty (TypeBase ExtShape u) where
+instance (Pretty o) => Pretty (TypeBase ExtShape o) where
   pretty (Prim t) = pretty t
-  pretty (Acc acc ispace ts u) =
-    pretty u
-      <> "acc"
+  pretty (Acc acc ispace ts) =
+    "acc"
       <> apply
         [ pretty acc,
           pretty ispace,
           ppTuple' $ map pretty ts
         ]
-  pretty (Array et (Shape ds) u) =
-    pretty u <> mconcat (map (brackets . pretty) ds) <> pretty et
+  pretty (Array et (Shape ds) o) =
+    pretty o <> mconcat (map (brackets . pretty) ds) <> pretty et
   pretty (Mem s) = "mem" <> pretty s
 
-instance (Pretty u) => Pretty (TypeBase Rank u) where
+instance (Pretty o) => Pretty (TypeBase Rank o) where
   pretty (Prim t) = pretty t
-  pretty (Acc acc ispace ts u) =
-    pretty u
-      <> "acc"
+  pretty (Acc acc ispace ts) =
+    "acc"
       <> apply
         [ pretty acc,
           pretty ispace,
           ppTuple' $ map pretty ts
         ]
-  pretty (Array et (Rank n) u) =
-    pretty u <> mconcat (replicate n $ brackets mempty) <> pretty et
+  pretty (Array et (Rank n) o) =
+    pretty o <> mconcat (replicate n $ brackets mempty) <> pretty et
   pretty (Mem s) = "mem" <> pretty s
 
 instance Pretty Ident where
@@ -398,10 +399,10 @@ instance Pretty EntryPointType where
   pretty (TypeOpaque desc) = "opaque" <+> dquotes (pretty desc)
 
 instance Pretty EntryParam where
-  pretty (EntryParam name u t) = pretty name <> colon <+> pretty u <> pretty t
+  pretty (EntryParam name o t) = pretty name <> colon <+> pretty o <> pretty t
 
 instance Pretty EntryResult where
-  pretty (EntryResult u t) = pretty u <> pretty t
+  pretty (EntryResult o t) = pretty o <> pretty t
 
 instance (PrettyRep rep) => Pretty (FunDef rep) where
   pretty (FunDef entry attrs name rettype fparams body) =

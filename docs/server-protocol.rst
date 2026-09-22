@@ -50,8 +50,9 @@ output of defined types. The notion of transparent and opaque types are the same
 as in the C API: primitives and array of primitives are directly supported, and
 everything else is treated as opaque. See also :ref:`valuemapping`. When
 printed, types follow basic Futhark type syntax *without* sizes (e.g.
-``[][]i32``). Uniqueness is not part of the types, but is indicated with an
-asterisk in the ``inputs`` and ``output`` commands (see below).
+``[][]i32``). Freshness and consumption is not part of the types, but is
+indicated with an asterisk in the ``inputs`` and ``output`` commands (see
+below).
 
 Consumption and aliasing
 ------------------------
@@ -116,7 +117,7 @@ the given input is consumed, the type is prefixed by `*`.
 ..................
 
 Print the type of the output produced by the given entry point, on a single
-line. If the output is guaranteed to be unique (does not alias any inputs), the
+line. If the output is guaranteed to be fresh (does not alias any inputs), the
 type is prefixed by `*`.
 
 ``clear``

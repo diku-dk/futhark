@@ -46,7 +46,8 @@ data Multicore
   | -- | If the context is currently in an error state (e.g. because some other
     -- task has died), put @True@ in the given variable, otherwise @False@.
     GetError VName
-  | Atomic AtomicOp
+  | -- | An atomic operation on a memory block in the given space.
+    Atomic Space AtomicOp
 
 -- | Multicore code.
 type MCCode = Code Multicore
@@ -135,7 +136,7 @@ instance Pretty Multicore where
           [ "params" <+> nestedBlock (pretty params),
             "body" <+> nestedBlock (pretty body)
           ]
-  pretty (Atomic _) =
+  pretty (Atomic _ _) =
     "AtomicOp"
   pretty (ISPCKernel body _) =
     "ispc" <+> nestedBlock (pretty body)
@@ -173,7 +174,7 @@ instance FreeIn Multicore where
     freeIn' par_code <> freeIn' seq_code <> freeIn' info
   freeIn' (ParLoop _ body _) =
     freeIn' body
-  freeIn' (Atomic aop) =
+  freeIn' (Atomic _ aop) =
     freeIn' aop
   freeIn' (ISPCKernel body _) =
     freeIn' body

@@ -110,6 +110,9 @@ common common
 
 library
   import: common
+  -- These cause inlining of class-heavy code, which speeds up compilation a lot
+  -- but makes compiling the compiler much slower.
+  ghc-options: -fexpose-all-unfoldings -fspecialise-aggressively
   hs-source-dirs: src
   exposed-modules:
       Futhark
@@ -494,8 +497,8 @@ library
     , filepath >=1.4.1.1
     , free >=5.1.10
     , futhark-data >= 1.1.4.0
-    , futhark-server >= 1.4.1.1
-    , futhark-manifest == 1.9.0.0
+    , futhark-server >= 1.5.0.0
+    , futhark-manifest == 1.10.0.0
     , githash >=0.1.6.1
     , half >= 0.3
     , haskeline
@@ -533,7 +536,7 @@ library
 executable futhark
   import: common
   main-is: src/main.hs
-  ghc-options: -threaded -rtsopts "-with-rtsopts=-maxN16 -qg1 -A16M"
+  ghc-options: -threaded -rtsopts "-with-rtsopts=-maxN16 -qg1 -A32M"
   build-depends: base, futhark
 
 library futhark-testing

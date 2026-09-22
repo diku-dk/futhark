@@ -10,6 +10,7 @@ module Futhark.IR.Prop.Names
     namesIntMap,
     namesIntSet,
     nameIn,
+    namesNull,
     notNameIn,
     oneName,
     namesFromList,
@@ -49,7 +50,6 @@ import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
 import Data.Map.Strict qualified as M
 import Data.Set qualified as S
-import Futhark.IR.Prop.Pat
 import Futhark.IR.Syntax
 import Futhark.IR.Traversals
 import Futhark.Util.Pretty
@@ -80,6 +80,10 @@ instance Monoid Names where
 instance Pretty Names where
   pretty = pretty . namesToList
 
+-- | Is the set of names empty?
+namesNull :: Names -> Bool
+namesNull (Names vs) = IM.null vs
+
 -- | Does the set of names contain this name?
 nameIn :: VName -> Names -> Bool
 nameIn v (Names vs) = baseTag v `IM.member` vs
@@ -90,7 +94,9 @@ notNameIn v (Names vs) = baseTag v `IM.notMember` vs
 
 -- | Construct a name set from a list.  Slow.
 namesFromList :: [VName] -> Names
-namesFromList vs = Names $ IM.fromList $ zip (map baseTag vs) vs
+namesFromList = Names . foldl' insert IM.empty
+  where
+    insert m v = IM.insert (baseTag v) v m
 
 -- | Turn a name set into a list of names.  Slow.
 namesToList :: Names -> [VName]
@@ -363,11 +369,11 @@ instance (FreeIn d) => FreeIn (Ext d) where
 instance FreeIn PrimType where
   freeIn' _ = mempty
 
-instance (FreeIn shape) => FreeIn (TypeBase shape u) where
+instance (FreeIn shape) => FreeIn (TypeBase shape o) where
   freeIn' (Array t shape _) = freeIn' t <> freeIn' shape
   freeIn' (Mem s) = freeIn' s
   freeIn' Prim {} = mempty
-  freeIn' (Acc acc ispace ts _) = freeIn' (acc, ispace, ts)
+  freeIn' (Acc acc ispace ts) = freeIn' (acc, ispace, ts)
 
 instance (FreeIn dec) => FreeIn (Param dec) where
   freeIn' (Param attrs _ dec) = freeIn' attrs <> freeIn' dec
@@ -441,7 +447,9 @@ boundInBody = boundByStms . bodyStms
 
 -- | The names bound by a binding.
 boundByStm :: Stm rep -> Names
-boundByStm = namesFromList . patNames . stmPat
+boundByStm = Names . foldl' insert IM.empty . patElems . stmPat
+  where
+    insert m pe = IM.insert (baseTag (patElemName pe)) (patElemName pe) m
 
 -- | The names bound by the bindings.
 boundByStms :: Stms rep -> Names
