@@ -33,6 +33,7 @@ import Futhark.IR.GPU
   )
 import Futhark.IR.SOACS (HistOp (..), Reduce (..), SOAC (FlatMap, Hist, Screma, Stream), SOACS, Scan (..), ScremaForm (..), flatMapNonuniform)
 import Futhark.IR.SegOp qualified as Seg
+import Futhark.Util (showText)
 import Language.Futhark.Primitive qualified as P
 import Numeric.Half qualified as H
 
@@ -489,9 +490,7 @@ expectInt _ = interpError "expected an integer value"
 
 safeBinOp :: BinOp -> Bool
 safeBinOp (UDiv _ Safe) = True
-safeBinOp (UDivUp _ Safe) = True
 safeBinOp (SDiv _ Safe) = True
-safeBinOp (SDivUp _ Safe) = True
 safeBinOp (UMod _ Safe) = True
 safeBinOp (SMod _ Safe) = True
 safeBinOp (SQuot _ Safe) = True
@@ -946,13 +945,13 @@ evalErrorMsg env (ErrorMsg parts) = do
 
 renderErrorValue :: PrimValue -> T.Text
 renderErrorValue (IntValue val) =
-  T.pack $ show (P.valueIntegral val :: Integer)
+  showText (P.valueIntegral val :: Integer)
 renderErrorValue (FloatValue (Float16Value val)) =
-  T.pack $ show val
+  showText val
 renderErrorValue (FloatValue (Float32Value val)) =
-  T.pack $ show val
+  showText val
 renderErrorValue (FloatValue (Float64Value val)) =
-  T.pack $ show val
+  showText val
 renderErrorValue (BoolValue True) = "true"
 renderErrorValue (BoolValue False) = "false"
 renderErrorValue UnitValue = "()"
@@ -2127,7 +2126,7 @@ collectOutputs env outer_shape return_types iteration_results
                 (outer_shape <> first_shape)
                 expected_type
                 (first_values <> concatMap third remaining)
-    collectOne (Acc certificate _ _ _) rows = do
+    collectOne (Acc certificate _ _) rows = do
       mapM_ (expectAccumulator certificate) rows
       pure $ AccValue certificate
     collectOne Mem {} _ =
