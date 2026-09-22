@@ -52,7 +52,7 @@ def mmm [M][N][Q] (A: [M][Q]real) (B: [Q][N]real) : [M][N]real =
         , [] -- virtualization not used
         , 1 -- MANIFEST_RESULT
         , [0, 1, 2, 3, 4, 5] -- no permute necessary
-        , [0,1]    -- padding does not makes sense for MANIFEST
+        , [0,1] -- padding does not makes sense for MANIFEST
         , [1,1] -- fuse the top two levels with classical map fusion (1)
         )
         C
