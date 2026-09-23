@@ -854,7 +854,7 @@ static inline uniform bool futrts_isfinite32(uniform float x) {
 
 
 static inline uniform int8_t fptosi_f32_i8(uniform float x) {
-  if (futrts_isnan32(x) || futrts_isinf32(x)) {
+  if (futrts_isnan32(x) || x < -0x1p7f || x >= 0x1p7f) {
     return 0;
   } else {
     return (uniform int8_t) x;
@@ -862,7 +862,7 @@ static inline uniform int8_t fptosi_f32_i8(uniform float x) {
 }
 
 static inline uniform int16_t fptosi_f32_i16(uniform float x) {
-  if (futrts_isnan32(x) || futrts_isinf32(x)) {
+  if (futrts_isnan32(x) || x < -0x1p15f || x >= 0x1p15f) {
     return 0;
   } else {
     return (uniform int16_t) x;
@@ -870,7 +870,7 @@ static inline uniform int16_t fptosi_f32_i16(uniform float x) {
 }
 
 static inline uniform int32_t fptosi_f32_i32(uniform float x) {
-  if (futrts_isnan32(x) || futrts_isinf32(x)) {
+  if (futrts_isnan32(x) || x < -0x1p31f || x >= 0x1p31f) {
     return 0;
   } else {
     return (uniform int32_t) x;
@@ -878,45 +878,44 @@ static inline uniform int32_t fptosi_f32_i32(uniform float x) {
 }
 
 static inline uniform int64_t fptosi_f32_i64(uniform float x) {
-  if (futrts_isnan32(x) || futrts_isinf32(x)) {
+  if (futrts_isnan32(x) || x < -0x1p63f || x >= 0x1p63f) {
     return 0;
   } else {
     return (uniform int64_t) x;
-  };
+  }
 }
 
 static inline uniform uint8_t fptoui_f32_i8(uniform float x) {
-  if (futrts_isnan32(x) || futrts_isinf32(x)) {
+  if (futrts_isnan32(x) || x < 0x0p0f || x >= 0x1p8f) {
     return 0;
   } else {
-    return (uniform uint8_t) (uniform int8_t) x;
+    return (uniform uint8_t) x;
   }
 }
 
 static inline uniform uint16_t fptoui_f32_i16(uniform float x) {
-  if (futrts_isnan32(x) || futrts_isinf32(x)) {
+  if (futrts_isnan32(x) || x < 0x0p0f || x >= 0x1p16f) {
     return 0;
   } else {
-    return (uniform uint16_t) (uniform int16_t) x;
+    return (uniform uint16_t) x;
   }
 }
 
 static inline uniform uint32_t fptoui_f32_i32(uniform float x) {
-  if (futrts_isnan32(x) || futrts_isinf32(x)) {
+  if (futrts_isnan32(x) || x < 0x0p0f || x >= 0x1p32f) {
     return 0;
   } else {
-    return (uniform uint32_t) (uniform int32_t) x;
+    return (uniform uint32_t) x;
   }
 }
 
 static inline uniform uint64_t fptoui_f32_i64(uniform float x) {
-  if (futrts_isnan32(x) || futrts_isinf32(x)) {
+  if (futrts_isnan32(x) || x < 0x0p0f || x >= 0x1p64f) {
     return 0;
   } else {
-    return (uniform uint64_t) (uniform int64_t) x;
+    return (uniform uint64_t) x;
   }
 }
-
 
 static inline uniform float futrts_log32(uniform float x) {
   return futrts_isfinite32(x) || (futrts_isinf32(x) && x < 0)? log(x) : x;
@@ -1319,7 +1318,7 @@ static inline uniform bool futrts_isnan64(uniform double x) {
 }
 
 static inline uniform int8_t fptosi_f64_i8(uniform double x) {
-  if (futrts_isnan64(x) || futrts_isinf64(x)) {
+  if (futrts_isnan64(x) || x < -0x1p7 || x >= 0x1p7) {
     return 0;
   } else {
     return (uniform int8_t) x;
@@ -1327,7 +1326,7 @@ static inline uniform int8_t fptosi_f64_i8(uniform double x) {
 }
 
 static inline uniform int16_t fptosi_f64_i16(uniform double x) {
-  if (futrts_isnan64(x) || futrts_isinf64(x)) {
+  if (futrts_isnan64(x) || x < -0x1p15 || x >= 0x1p15) {
     return 0;
   } else {
     return (uniform int16_t) x;
@@ -1335,7 +1334,7 @@ static inline uniform int16_t fptosi_f64_i16(uniform double x) {
 }
 
 static inline uniform int32_t fptosi_f64_i32(uniform double x) {
-  if (futrts_isnan64(x) || futrts_isinf64(x)) {
+  if (futrts_isnan64(x) || x < -0x1p31 || x >= 0x1p31) {
     return 0;
   } else {
     return (uniform int32_t) x;
@@ -1343,7 +1342,7 @@ static inline uniform int32_t fptosi_f64_i32(uniform double x) {
 }
 
 static inline uniform int64_t fptosi_f64_i64(uniform double x) {
-  if (futrts_isnan64(x) || futrts_isinf64(x)) {
+  if (futrts_isnan64(x) || x < -0x1p63 || x >= 0x1p63) {
     return 0;
   } else {
     return (uniform int64_t) x;
@@ -1351,34 +1350,34 @@ static inline uniform int64_t fptosi_f64_i64(uniform double x) {
 }
 
 static inline uniform uint8_t fptoui_f64_i8(uniform double x) {
-  if (futrts_isnan64(x) || futrts_isinf64(x)) {
+  if (futrts_isnan64(x) || x < 0x0p0 || x >= 0x1p8) {
     return 0;
   } else {
-    return (uniform uint8_t) (uniform int8_t) x;
+    return (uniform uint8_t) x;
   }
 }
 
 static inline uniform uint16_t fptoui_f64_i16(uniform double x) {
-  if (futrts_isnan64(x) || futrts_isinf64(x)) {
+  if (futrts_isnan64(x) || x < 0x0p0 || x >= 0x1p16) {
     return 0;
   } else {
-    return (uniform uint16_t) (uniform int16_t) x;
+    return (uniform uint16_t) x;
   }
 }
 
 static inline uniform uint32_t fptoui_f64_i32(uniform double x) {
-  if (futrts_isnan64(x) || futrts_isinf64(x)) {
+  if (futrts_isnan64(x) || x < 0x0p0 || x >= 0x1p32) {
     return 0;
   } else {
-    return (uniform uint32_t) (uniform int32_t) x;
+    return (uniform uint32_t) x;
   }
 }
 
 static inline uniform uint64_t fptoui_f64_i64(uniform double x) {
-  if (futrts_isnan64(x) || futrts_isinf64(x)) {
+  if (futrts_isnan64(x) || x < 0x0p0 || x >= 0x1p64) {
     return 0;
   } else {
-    return (uniform uint64_t) (uniform int64_t) x;
+    return (uniform uint64_t) x;
   }
 }
 
@@ -1502,35 +1501,67 @@ static inline uniform f16 uitofp_i64_f16(uniform uint64_t x) {
 }
 
 static inline uniform int8_t fptosi_f16_i8(uniform f16 x) {
-  return (uniform int8_t) (uniform float) x;
+  if (futrts_isnan16(x) || x < -0x1p7 || x >= 0x1p7) {
+    return 0;
+  } else {
+    return (uniform int8_t) x;
+  }
 }
 
 static inline uniform int16_t fptosi_f16_i16(uniform f16 x) {
-  return (uniform int16_t) x;
+  if (futrts_isnan16(x) || x < -0x1p15 || x >= 0x1p15) {
+    return 0;
+  } else {
+    return (uniform int16_t) x;
+  }
 }
 
 static inline uniform int32_t fptosi_f16_i32(uniform f16 x) {
-  return (uniform int32_t) x;
+  if (futrts_isnan16(x) || x < -0x1p31 || x >= 0x1p31) {
+    return 0;
+  } else {
+    return (uniform int32_t) x;
+  }
 }
 
 static inline uniform int64_t fptosi_f16_i64(uniform f16 x) {
-  return (uniform int64_t) x;
+  if (futrts_isnan16(x) || x < -0x1p63 || x >= 0x1p63) {
+    return 0;
+  } else {
+    return (uniform int64_t) x;
+  }
 }
 
 static inline uniform uint8_t fptoui_f16_i8(uniform f16 x) {
-  return (uniform uint8_t) (uniform float) x;
+  if (futrts_isnan16(x) || x < 0x0p0 || x >= 0x1p8) {
+    return 0;
+  } else {
+    return (uniform uint8_t) x;
+  }
 }
 
 static inline uniform uint16_t fptoui_f16_i16(uniform f16 x) {
-  return (uniform uint16_t) x;
+  if (futrts_isnan16(x) || x < 0x0p0 || x >= 0x1p16) {
+    return 0;
+  } else {
+    return (uniform uint16_t) x;
+  }
 }
 
 static inline uniform uint32_t fptoui_f16_i32(uniform f16 x) {
-  return (uniform uint32_t) x;
+  if (futrts_isnan16(x) || x < 0x0p0 || x >= 0x1p32) {
+    return 0;
+  } else {
+    return (uniform uint32_t) x;
+  }
 }
 
 static inline uniform uint64_t fptoui_f16_i64(uniform f16 x) {
-  return (uniform uint64_t) x;
+  if (futrts_isnan16(x) || x < 0x0p0 || x >= 0x1p64) {
+    return 0;
+  } else {
+    return (uniform uint64_t) x;
+  }
 }
 
 static inline uniform f16 fabs16(uniform f16 x) {

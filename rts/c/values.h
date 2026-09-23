@@ -395,36 +395,36 @@ static int read_str_unit(char *buf, void* dest) {
   }
 }
 
-static int write_str_i8(FILE *out, const int8_t *src) {
-  return fprintf(out, "%hhdi8", *src);
+static int write_str_i8(FILE *out, const void *src) {
+  return fprintf(out, "%hhdi8", *(const int8_t*)src);
 }
 
-static int write_str_u8(FILE *out, const uint8_t *src) {
-  return fprintf(out, "%hhuu8", *src);
+static int write_str_u8(FILE *out, const void *src) {
+  return fprintf(out, "%hhuu8", *(const uint8_t*)src);
 }
 
-static int write_str_i16(FILE *out, const int16_t *src) {
-  return fprintf(out, "%hdi16", *src);
+static int write_str_i16(FILE *out, const void *src) {
+  return fprintf(out, "%hdi16", *(const int16_t*)src);
 }
 
-static int write_str_u16(FILE *out, const uint16_t *src) {
-  return fprintf(out, "%huu16", *src);
+static int write_str_u16(FILE *out, const void *src) {
+  return fprintf(out, "%huu16", *(const uint16_t*)src);
 }
 
 static int write_str_i32(FILE *out, const int32_t *src) {
-  return fprintf(out, "%di32", *src);
+  return fprintf(out, "%di32", *(const int32_t*)src);
 }
 
-static int write_str_u32(FILE *out, const uint32_t *src) {
-  return fprintf(out, "%uu32", *src);
+static int write_str_u32(FILE *out, const void *src) {
+  return fprintf(out, "%uu32", *(const uint32_t*)src);
 }
 
-static int write_str_i64(FILE *out, const int64_t *src) {
-  return fprintf(out, "%"PRIi64"i64", *src);
+static int write_str_i64(FILE *out, const void *src) {
+  return fprintf(out, "%"PRIi64"i64", *(const int64_t*)src);
 }
 
-static int write_str_u64(FILE *out, const uint64_t *src) {
-  return fprintf(out, "%"PRIu64"u64", *src);
+static int write_str_u64(FILE *out, const void *src) {
+  return fprintf(out, "%"PRIu64"u64", *(const uint64_t*)src);
 }
 
 // FLT_DECIMAL_DIG and DBL_DECIMAL_DIG are defined in C11.
@@ -445,8 +445,8 @@ static int write_str_u64(FILE *out, const uint64_t *src) {
   #endif
 #endif
 
-static int write_str_f16(FILE *out, const uint16_t *src) {
-  float x = halfbits2float(*src);
+static int write_str_f16(FILE *out, const void *src) {
+  float x = halfbits2float(*(const uint16_t*)src);
   if (isnan(x)) {
     return fprintf(out, "f16.nan");
   } else if (isinf(x) && x >= 0) {
@@ -458,8 +458,8 @@ static int write_str_f16(FILE *out, const uint16_t *src) {
   }
 }
 
-static int write_str_f32(FILE *out, const float *src) {
-  float x = *src;
+static int write_str_f32(FILE *out, const void *src) {
+  float x = *(const float*)src;
   if (isnan(x)) {
     return fprintf(out, "f32.nan");
   } else if (isinf(x) && x >= 0) {
@@ -471,8 +471,8 @@ static int write_str_f32(FILE *out, const float *src) {
   }
 }
 
-static int write_str_f64(FILE *out, const double *src) {
-  double x = *src;
+static int write_str_f64(FILE *out, const void *src) {
+  double x = *(const double*)src;
   if (isnan(x)) {
     return fprintf(out, "f64.nan");
   } else if (isinf(x) && x >= 0) {
