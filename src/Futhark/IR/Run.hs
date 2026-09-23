@@ -187,9 +187,6 @@ writeArrayValue (UnitArrayValues values) index UnitValue =
 writeArrayValue _ _ _ =
   interpError "array element type mismatch"
 
--- Runtime arrays use mutable storage, but the interpreter does not track the
--- IR's uniqueness and consumption guarantees. Consuming operations clone this
--- storage before writing so aliases retained in the environment remain unchanged.
 cloneArrayValues :: ArrayValues -> IO ArrayValues
 cloneArrayValues (I8ArrayValues values) = I8ArrayValues <$> MSVec.clone values
 cloneArrayValues (I16ArrayValues values) = I16ArrayValues <$> MSVec.clone values
@@ -439,8 +436,7 @@ evalWithAcc funs env inputs lambda = do
         else do
           arrays <- mapM lookupArray array_names
           mapM_ (validateArray index_shape) arrays
-          arrays' <- mapM cloneArray arrays
-          pure (index_shape, arrays', operator)
+          pure (index_shape, arrays, operator)
 
     lookupArray name =
       case M.lookup name env of
@@ -459,12 +455,6 @@ evalWithAcc funs env inputs lambda = do
       | otherwise =
           pure ()
     validateArray _ _ =
-      interpError "WithAcc input must be an array"
-
-    cloneArray (ArrayValue shape element_type values) = do
-      values' <- liftIO $ cloneArrayValues values
-      pure $ ArrayValue shape element_type values'
-    cloneArray _ =
       interpError "WithAcc input must be an array"
 
     validateAccumulatorResult (expected_id, AccValue actual_id)
@@ -652,6 +642,9 @@ evalBasicOp env (Replicate (Shape shape_exps) val_exp) = do
       let copies = product dimensions
 
       case (dimensions, val) of
+        ([], ArrayValue shape element_type values) -> do
+          values' <- liftIO $ cloneArrayValues values
+          pure [ArrayValue shape element_type values']
         ([], _) -> pure [val]
         (_, PrimVal primitive_value) ->
           pure <$> newArrayValue dimensions (P.primValueType primitive_value) (replicate copies primitive_value)
@@ -759,14 +752,13 @@ evalBasicOp env (Update _ array_name slice value_exp) = do
       replacement_values <-
         updateValues element_type slice_shape replacement
 
-      values' <- liftIO $ cloneArrayValues values
       let offsets = map (linearIndex shape) coordinates
 
       mapM_
-        (uncurry $ writeArrayValue values')
+        (uncurry $ writeArrayValue values)
         (zip offsets replacement_values)
 
-      pure [ArrayValue shape element_type values']
+      pure [ArrayValue shape element_type values]
 evalBasicOp env (FlatIndex array_name flat_slice) = do
   array <-
     maybe
@@ -817,13 +809,11 @@ evalBasicOp env (FlatUpdate source_name flat_slice replacement_name) = do
       if not $ all (validOffset source_values) offsets
         then interpError "flat update out of bounds"
         else do
-          source_values' <- liftIO $ cloneArrayValues source_values
-
           mapM_
-            (uncurry $ writeArrayValue source_values')
+            (uncurry $ writeArrayValue source_values)
             (zip offsets replacement_values)
 
-          pure [ArrayValue source_shape source_type source_values']
+          pure [ArrayValue source_shape source_type source_values]
     ArrayValue {} ->
       interpError "flat update source must be one-dimensional"
     PrimVal {} ->
@@ -1951,13 +1941,11 @@ writeHistogramBin
     if length replacement_values /= bin_size
       then interpError "invalid Hist operator result storage"
       else do
-        values' <- liftIO $ cloneArrayValues values
-
         mapM_
-          (uncurry $ writeArrayValue values')
+          (uncurry $ writeArrayValue values)
           (zip [offset ..] replacement_values)
 
-        pure $ ArrayValue shape element_type values'
+        pure $ ArrayValue shape element_type values
 writeHistogramBin _ PrimVal {} _ =
   interpError "Hist destination must be an array"
 writeHistogramBin _ AccValue {} _ =
