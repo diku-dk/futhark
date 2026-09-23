@@ -1004,15 +1004,59 @@ doFPConv v Float16 = Float16Value $ floatToHalf v
 doFPConv v Float32 = Float32Value $ floatToFloat v
 doFPConv v Float64 = Float64Value $ floatToDouble v
 
+-- | Minimum and maximum value of this signed integer type.
+signedMinMax :: (Num a) => IntType -> (a, a)
+signedMinMax Int8 =
+  ( fromIntegral (minBound :: Int8),
+    fromIntegral (maxBound :: Int8)
+  )
+signedMinMax Int16 =
+  ( fromIntegral (minBound :: Int16),
+    fromIntegral (maxBound :: Int16)
+  )
+signedMinMax Int32 =
+  ( fromIntegral (minBound :: Int32),
+    fromIntegral (maxBound :: Int32)
+  )
+signedMinMax Int64 =
+  ( fromIntegral (minBound :: Int64),
+    fromIntegral (maxBound :: Int64)
+  )
+
+-- | Maximum value of this unsigned integer type.
+unsignedMax :: (Num a) => IntType -> a
+unsignedMax Int8 =
+  fromIntegral (maxBound :: Word8)
+unsignedMax Int16 =
+  fromIntegral (minBound :: Word16)
+unsignedMax Int32 =
+  fromIntegral (maxBound :: Word32)
+unsignedMax Int64 =
+  fromIntegral (maxBound :: Word64)
+
 -- | Convert a floating-point value to the nearest
 -- unsigned integer (rounding towards zero).
 doFPToUI :: FloatValue -> IntType -> IntValue
-doFPToUI v t = intValue t (truncate $ floatToDouble v :: Word64)
+doFPToUI v t =
+  intValue t $
+    if v' < 0 || v' > high || isNaN v'
+      then 0
+      else truncate v' :: Word64
+  where
+    v' = floatToDouble v
+    high = unsignedMax t
 
 -- | Convert a floating-point value to the nearest
 -- signed integer (rounding towards zero).
 doFPToSI :: FloatValue -> IntType -> IntValue
-doFPToSI v t = intValue t (truncate $ floatToDouble v :: Word64)
+doFPToSI v t =
+  intValue t $
+    if v' < low || v' > high || isNaN v'
+      then 0
+      else truncate v' :: Word64
+  where
+    v' = floatToDouble v
+    (low, high) = signedMinMax t
 
 -- | Convert an unsigned integer to a floating-point value.
 doUIToFP :: IntValue -> FloatType -> FloatValue

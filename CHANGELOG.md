@@ -44,6 +44,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Mishandling of abstract types could lead to compiler crash. (#2538)
 
+* Conversion of floating-point numbers to integers would trigger UB whenever the
+  number was too large to fit in the integer. (#2543)
+
 ## [0.27.1]
 
 ### Added
