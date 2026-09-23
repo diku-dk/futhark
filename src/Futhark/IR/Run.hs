@@ -105,8 +105,12 @@ newArrayValue shape element_type values
     newValues Bool = BoolArrayValues <$> newPrimVector expectBool
     newValues Unit = UnitArrayValues <$> newPrimVector expectUnit
 
-    newPrimVector unwrap =
-      mapM unwrap values >>= liftIO . SVec.thaw . SVec.fromList
+    newPrimVector unwrap = do
+      elements <- mapM unwrap values
+      liftIO $ do
+        vector <- MSVec.new (length elements)
+        zipWithM_ (MSVec.write vector) [0 ..] elements
+        pure vector
 
     expectInt8 (IntValue (Int8Value element)) = pure element
     expectInt8 _ = interpError "expected an i8 value"
@@ -197,6 +201,26 @@ cloneArrayValues (F32ArrayValues values) = F32ArrayValues <$> MSVec.clone values
 cloneArrayValues (F64ArrayValues values) = F64ArrayValues <$> MSVec.clone values
 cloneArrayValues (BoolArrayValues values) = BoolArrayValues <$> MSVec.clone values
 cloneArrayValues (UnitArrayValues values) = UnitArrayValues <$> MSVec.clone values
+
+sliceArrayValues :: Int -> Int -> ArrayValues -> ArrayValues
+sliceArrayValues offset count (I8ArrayValues values) =
+  I8ArrayValues $ MSVec.slice offset count values
+sliceArrayValues offset count (I16ArrayValues values) =
+  I16ArrayValues $ MSVec.slice offset count values
+sliceArrayValues offset count (I32ArrayValues values) =
+  I32ArrayValues $ MSVec.slice offset count values
+sliceArrayValues offset count (I64ArrayValues values) =
+  I64ArrayValues $ MSVec.slice offset count values
+sliceArrayValues offset count (F16ArrayValues values) =
+  F16ArrayValues $ MSVec.slice offset count values
+sliceArrayValues offset count (F32ArrayValues values) =
+  F32ArrayValues $ MSVec.slice offset count values
+sliceArrayValues offset count (F64ArrayValues values) =
+  F64ArrayValues $ MSVec.slice offset count values
+sliceArrayValues offset count (BoolArrayValues values) =
+  BoolArrayValues $ MSVec.slice offset count values
+sliceArrayValues offset count (UnitArrayValues values) =
+  UnitArrayValues $ MSVec.slice offset count values
 
 evalStms :: FunEnv rep -> Env -> Stms rep -> InterpM rep Env
 evalStms funs env stms =
@@ -666,9 +690,11 @@ evalBasicOp env (Rearrange array_name permutation) = do
                 sequence [[0 .. dimension - 1] | dimension <- new_shape]
               oldCoordinate new_coordinate =
                 [new_coordinate !! position | position <- inversePermutation permutation]
-          primitive_values <- arrayValues values
-          let new_values = [primitive_values !! linearIndex old_shape (oldCoordinate coordinate) | coordinate <- new_coordinates]
-           in pure <$> newArrayValue new_shape element_type new_values
+          new_values <-
+            mapM
+              (readArrayValue values . linearIndex old_shape . oldCoordinate)
+              new_coordinates
+          pure <$> newArrayValue new_shape element_type new_values
     PrimVal _ -> interpError "cannot rearrange a primitive value"
     AccValue _ -> interpError "cannot rearrange an accumulator value"
 evalBasicOp env (Concat concat_dim array_names result_size_exp) = do
@@ -773,13 +799,28 @@ evalBasicOp env (FlatIndex array_name flat_slice) = do
       | not $ all (validOffset values) offsets ->
           interpError "flat index out of bounds"
       | otherwise -> do
-          selected_values <- mapM (readArrayValue values) offsets
+          let count = product result_shape
+              view offset =
+                pure
+                  [ ArrayValue result_shape element_type $
+                      sliceArrayValues offset count values
+                  ]
           case result_shape of
             [] ->
-              case selected_values of
-                [primitive_value] -> pure [PrimVal primitive_value]
+              case offsets of
+                [offset] -> do
+                  primitive_value <- readArrayValue values offset
+                  pure [PrimVal primitive_value]
                 _ -> interpError "invalid scalar flat index"
-            _ -> pure <$> newArrayValue result_shape element_type selected_values
+            _ ->
+              case offsets of
+                [] -> view 0
+                offset : _
+                  | offsets == [offset .. offset + count - 1] ->
+                      view offset
+                _ -> do
+                  selected_values <- mapM (readArrayValue values) offsets
+                  pure <$> newArrayValue result_shape element_type selected_values
     ArrayValue {} ->
       interpError "flat index source must be one-dimensional"
     PrimVal {} ->
@@ -897,13 +938,13 @@ evalUpdateAcc funs env safety accumulator_name index_exps value_exps = do
             Safe -> pure ()
             Unsafe -> interpError "unsafe accumulator update out of bounds"
       | otherwise = do
-          old_values <-
-            mapM (readAccumulatorElement indices) $
-              accumulatorArrays info
           replacement_values <-
             case accumulatorOperator info of
               Nothing -> pure new_values
-              Just (operator_lambda, _) ->
+              Just (operator_lambda, _) -> do
+                old_values <-
+                  mapM (readAccumulatorElement indices) $
+                    accumulatorArrays info
                 evalLambda
                   funs
                   env
@@ -1062,20 +1103,67 @@ indexArray ::
   ArrayValues ->
   Slice SubExp ->
   InterpM rep [Val]
-indexArray env shape element_type values slice = do
-  (result_shape, coordinates) <- resolveSlice env shape slice
-  selected_values <-
-    mapM
-      (readArrayValue values . linearIndex shape)
-      coordinates
+indexArray env shape element_type values slice@(Slice dimensions)
+  | length shape /= length dimensions =
+      interpError "slice dimensions do not match array dimensions"
+  | otherwise = do
+      selections <-
+        zipWithM
+          evalDimension
+          (zip shape $ tail $ scanr (*) 1 shape)
+          dimensions
+      let offset = sum $ map fst selections
+          axes = concatMap snd selections
+          result_shape = map fst axes
+          count = product result_shape
+          expected_strides = tail $ scanr (*) 1 result_shape
+          contiguous =
+            and $
+              zipWith
+                (\(size, stride) expected -> size <= 1 || stride == expected)
+                axes
+                expected_strides
+          view start =
+            pure
+              [ ArrayValue result_shape element_type $
+                  sliceArrayValues start count values
+              ]
+      case result_shape of
+        [] -> pure . pure . PrimVal =<< readArrayValue values offset
+        _
+          | count == 0 -> view 0
+          | contiguous -> view offset
+          | otherwise -> do
+              (_, coordinates) <- resolveSlice env shape slice
+              selected_values <-
+                mapM (readArrayValue values . linearIndex shape) coordinates
+              pure <$> newArrayValue result_shape element_type selected_values
+  where
+    evalInt sub_exp =
+      evalSubExp env sub_exp >>= expectPrimVal >>= expectInt
 
-  case result_shape of
-    [] ->
-      case selected_values of
-        [val] -> pure [PrimVal val]
-        _ -> interpError "invalid scalar index result"
-    _ ->
-      pure <$> newArrayValue result_shape element_type selected_values
+    evalDimension (dimension, source_stride) (DimFix index_exp) = do
+      index <- evalInt index_exp
+      checkIndex dimension index
+      pure (index * source_stride, [])
+    evalDimension (dimension, source_stride) (DimSlice start_exp count_exp stride_exp) = do
+      start <- evalInt start_exp
+      count <- evalInt count_exp
+      stride <- evalInt stride_exp
+      if count < 0
+        then interpError "slice length cannot be negative"
+        else do
+          if count == 0
+            then pure ()
+            else do
+              checkIndex dimension start
+              checkIndex dimension (start + (count - 1) * stride)
+          pure (start * source_stride, [(count, stride * source_stride)])
+
+    checkIndex dimension index
+      | index < 0 || index >= dimension =
+          interpError "array index out of bounds"
+      | otherwise = pure ()
 
 linearIndex :: [Int] -> [Int] -> Int
 linearIndex shape indices =
@@ -1122,7 +1210,7 @@ evalFlatMap funs env width_exp input_names lambda = do
               (collectFlatMapOutput env sizes total_size)
               return_types
               columns
-          let flags = L.foldl' markSegmentStart (replicate total_size False) (zip offsets sizes)
+          let flags = concatMap segmentFlags sizes
           sizes_array <- newArrayValue [width] int64_type $ map int64Prim sizes
           flags_array <- newArrayValue [total_size] Bool $ map BoolValue flags
           offsets_array <- newArrayValue [width] int64_type $ map int64Prim offsets
@@ -1144,9 +1232,9 @@ evalFlatMap funs env width_exp input_names lambda = do
         [] ->
           interpError "FlatMap lambda returned no segment size"
 
-    markSegmentStart flags (offset, size)
-      | size > 0 = replaceAt offset True flags
-      | otherwise = flags
+    segmentFlags size
+      | size > 0 = True : replicate (size - 1) False
+      | otherwise = []
 
     int64_type = IntType Int64
     int64Prim = IntValue . Int64Value . fromIntegral
@@ -1346,10 +1434,14 @@ expectKernelValue KernelRegTile {} =
   interpError "RegTileReturns cannot be used as a segmented contribution"
 
 segmentRows :: Int -> Int -> [a] -> [[a]]
-segmentRows segment_count segment_width rows =
-  [ take segment_width $ drop (segment * segment_width) rows
-  | segment <- [0 .. segment_count - 1]
-  ]
+segmentRows segment_count segment_width =
+  go segment_count
+  where
+    go remaining rows
+      | remaining <= 0 = []
+      | otherwise =
+          let (segment, rest) = splitAt segment_width rows
+           in segment : go (remaining - 1) rest
 
 splitSegContributions ::
   [Seg.SegBinOp rep] ->
