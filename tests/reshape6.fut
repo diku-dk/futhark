@@ -4,6 +4,7 @@
 -- ==
 -- input { [[0i64, 1i64], [2i64, 3i64]] }
 -- output { [[[0i64], [1i64]], [[2i64], [3i64]]] }
+-- structure { Reshape 1 }
 
 entry main (x: [2][2]i64) =
   let y = unflatten (flatten x :> [4 * 1]i64) :> [4][1]i64
