@@ -334,8 +334,9 @@ move (_, DimSplice i1 1 (Shape [_])) (DimSplice i2 n2 s2 : ss)
       Just $ DimSplice i2 n2 s2 : ss
 --
 -- A flatten with an inverse unflatten turns into nothing.
-move (shape_bef, DimSplice i1 n1 _s1) (DimSplice i2 _n2 s2 : ss)
+move (shape_bef, DimSplice i1 n1 s1) (DimSplice i2 n2 s2 : ss)
   | i1 == i2,
+    length s1 == n2,
     dimSpan i1 n1 shape_bef == s2 =
       Just ss
 --
