@@ -207,7 +207,9 @@ flipReshapeRearrange v0_shape v1_shape perm = do
       num_b_dims_expanded = length v0_shape - num_map_dims - num_a_dims
       num_a_dims_expanded = length v0_shape - num_map_dims - num_b_dims
       caseA = do
-        guard $ take num_a_dims v0_shape == take num_b_dims v1_shape
+        guard $
+          take num_a_dims (drop num_map_dims v0_shape)
+            == take num_b_dims (drop num_map_dims v1_shape)
         let perm' =
               [0 .. num_map_dims - 1]
                 ++ map (+ num_map_dims) ([1 .. num_b_dims_expanded] ++ [0])
