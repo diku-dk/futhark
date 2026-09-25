@@ -133,7 +133,12 @@ simplifyTests :: TestTree
 simplifyTests =
   testGroup
     "simplifyNewShape"
-    [ testCase "Inverse flatten and unflatten - simple case" $
+    [ testCase "Partial inverse must preserve extra dimension" $
+        lhs
+          ["A", "B", "C"]
+          [dimSplice 0 2 ["AB", "1"], dimUnflatten 0 ["A", "B"]]
+          @?= Nothing,
+      testCase "Inverse flatten and unflatten - simple case" $
         lhs
           ["A", "B"]
           [dimFlatten 0 2 "AB", dimUnflatten 0 ["A", "B"]]
