@@ -65,7 +65,12 @@ flipReshapeRearrangeTests =
       )
       $ flipReshapeRearrange v0_shape v1_shape perm @?= res
   | (v0_shape :: [String], v1_shape, perm, res) <-
-      [ ( ["A", "B", "C"],
+      [ ( ["M", "A", "B"],
+          ["M", "C", "D"],
+          [0, 2, 1],
+          Nothing
+        ),
+        ( ["A", "B", "C"],
           ["A", "BC"],
           [1, 0],
           Just [1, 2, 0]
