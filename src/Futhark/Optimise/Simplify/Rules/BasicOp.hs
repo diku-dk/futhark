@@ -195,7 +195,7 @@ ruleBasicOp vtable pat aux (Update Unsafe dest is se)
               Reshape v $
                 reshapeAll (arrayShape v_t) (arrayShape dest_t)
           letBind pat $ BasicOp $ Replicate mempty v_reshaped
-        _ -> letBind pat $ BasicOp $ ArrayLit [se] $ rowType dest_t
+        _ -> letBind pat $ BasicOp $ Replicate (arrayShape dest_t) se
 ruleBasicOp vtable pat aux (Update safety1 dest1 is1 (Var v1))
   | Just (Update safety2 dest2 is2 se2, cs2) <- ST.lookupBasicOp v1 vtable,
     Just (Replicate (Shape []) (Var v3), cs3) <- ST.lookupBasicOp dest2 vtable,
