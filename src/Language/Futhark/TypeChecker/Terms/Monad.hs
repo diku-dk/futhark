@@ -34,6 +34,7 @@ module Language.Futhark.TypeChecker.Terms.Monad
     checkTypeExpNonrigid,
     lookupVar,
     lookupMod,
+    declaredTypes,
     lookupAbsTy,
 
     -- * Sizes
@@ -594,6 +595,20 @@ lookupVar loc qn@(QualName qs name) inst_t = do
     -- Language.Futhark.TypeChecker.Terms.
     Just RecursiveV ->
       replaceTyVars loc inst_t
+
+-- | A pure function for looking up the declared type of a global, along with
+-- the type parameters it is polymorphic in.  Used by consumption checking to
+-- exploit parametricity; see Note [Parametric results] in
+-- "Language.Futhark.TypeChecker.Consumption".
+declaredTypes :: TermTypeM (QualName VName -> Maybe ([TypeParam], StructType))
+declaredTypes = do
+  scope <- asks termScope
+  outer_env <- asks termOuterEnv
+  pure $ \qn@(QualName _ name) ->
+    case (M.lookup name . scopeVtable =<< Scope.lookupQualNameEnvMaybe id scope qn)
+      `mplus` Scope.lookupOuterVal id outer_env name of
+      Just (BoundV tparams t) -> Just (tparams, t)
+      _ -> Nothing
 
 -- | Look up the liftedness of an abstract type.
 lookupAbsTy :: QualName VName -> TermTypeM Liftedness
