@@ -1106,7 +1106,7 @@ indexArray env shape element_type values slice@(Slice dimensions)
                   sliceArrayValues start count values
               ]
       case result_shape of
-        [] -> pure . pure . PrimVal =<< readArrayValue values offset
+        [] -> (pure . PrimVal) <$> readArrayValue values offset
         _
           | count == 0 -> view 0
           | contiguous -> view offset
