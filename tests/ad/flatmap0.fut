@@ -1,4 +1,5 @@
 -- ==
+-- tags { autodiff }
 -- entry: fwd_map fwd_vec rev_map rev_vec
 -- input { [1i64,2i64,3i64] [4.0,5.0,6.0] }
 -- output {
