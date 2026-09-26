@@ -112,14 +112,14 @@ segMap2D ::
     Builder GPU Result
   ) ->
   Builder GPU [VName]
-segMap2D desc lvl manifest (dim_y, dim_x) f = do
-  ltid_xx <- newVName "ltid_x"
-  ltid_yy <- newVName "ltid_y"
+segMap2D desc lvl manifest (dim_x, dim_y) f = do
+  ltid_x <- newVName "ltid_x"
+  ltid_y <- newVName "ltid_y"
   ltid_flat <- newVName "ltid_flat"
-  let segspace = SegSpace ltid_flat [(ltid_yy, dim_y), (ltid_xx, dim_x)]
+  let segspace = SegSpace ltid_flat [(ltid_x, dim_x), (ltid_y, dim_y)]
 
   ((ts, res), stms) <- localScope (scopeOfSegSpace segspace) . runBuilder $ do
-    res <- f (ltid_yy, ltid_xx)
+    res <- f (ltid_x, ltid_y)
     ts <- mapM subExpResType res
     pure (ts, res)
 
@@ -132,20 +132,20 @@ segMap3D ::
   Name -> -- desc
   SegLevel -> -- lvl
   ResultManifest -> -- manifest
-  (SubExp, SubExp, SubExp) -> -- (dim_z, dim_y, dim_x)
+  (SubExp, SubExp, SubExp) -> -- (dim_x, dim_y, dim_z)
   ( (VName, VName, VName) -> -- f
     Builder GPU Result
   ) ->
   Builder GPU [VName]
-segMap3D desc lvl manifest (dim_z, dim_y, dim_x) f = do
+segMap3D desc lvl manifest (dim_x, dim_y, dim_z) f = do
   ltid_flat <- newVName "ltid_flat"
-  ltid_z <- newVName "ltid_z"
-  ltid_y <- newVName "ltid_y"
   ltid_x <- newVName "ltid_x"
-  let segspace = SegSpace ltid_flat [(ltid_z, dim_z), (ltid_y, dim_y), (ltid_x, dim_x)]
+  ltid_y <- newVName "ltid_y"
+  ltid_z <- newVName "ltid_z"
+  let segspace = SegSpace ltid_flat [(ltid_x, dim_x), (ltid_y, dim_y), (ltid_z, dim_z)]
 
   ((ts, res), stms) <- localScope (scopeOfSegSpace segspace) . runBuilder $ do
-    res <- f (ltid_z, ltid_y, ltid_x)
+    res <- f (ltid_x, ltid_y, ltid_z)
     ts <- mapM subExpResType res
     pure (ts, res)
 
@@ -158,19 +158,19 @@ segScatter2D ::
   Name ->
   VName ->
   [SubExp] -> -- dims of sequential loop on top
-  (SubExp, SubExp) -> -- (dim_y, dim_x)
+  (SubExp, SubExp) -> -- (dim_x, dim_y)
   ([VName] -> (VName, VName) -> Builder GPU (SubExp, SubExp)) -> -- f
   Builder GPU VName
 segScatter2D desc updt_arr seq_dims (dim_x, dim_y) f =
   letExp desc <=< withAcc [updt_arr] 1 $ \ ~[acc] -> do
     ltid_flat <- newVName "ltid_flat"
-    ltid_y <- newVName "ltid_y"
     ltid_x <- newVName "ltid_x"
+    ltid_y <- newVName "ltid_y"
 
     seq_is <- replicateM (length seq_dims) (newVName "ltid_seq")
     let seq_space = zip seq_is seq_dims
 
-    let segspace = SegSpace ltid_flat $ seq_space ++ [(ltid_y, dim_y), (ltid_x, dim_x)]
+    let segspace = SegSpace ltid_flat $ seq_space ++ [(ltid_x, dim_x), (ltid_y, dim_y)]
         lvl =
           SegThreadInBlock
             (SegNoVirtFull (SegSeqDims [0 .. length seq_dims - 1]))
@@ -178,7 +178,7 @@ segScatter2D desc updt_arr seq_dims (dim_x, dim_y) f =
     body <- buildBody_ $ do
       (res_v, res_i) <-
         localScope (scopeOfSegSpace segspace) $
-          f seq_is (ltid_y, ltid_x)
+          f seq_is (ltid_x, ltid_y)
       acc' <- letExp "acc" $ BasicOp $ UpdateAcc Safe acc [res_i] [res_v]
       pure [Returns ResultMaySimplify mempty $ Var acc']
 
