@@ -96,36 +96,38 @@ kkLoopBody
     kk <- letExp "kk" =<< toExp (le64 kk0 * pe64 tk)
     -- copy A to shared memory
     (a_loc, aCopyLoc2Reg) <-
-      copyGlb2ShMem kk (gtid_y, iii, map_t1, height_A, inp_A, load_A, a_loc_init')
+      copyGlb2ShMem False kk (gtid_y, iii, map_t1, height_A, inp_A, load_A, a_loc_init')
 
     -- copy B from global to shared memory
     (b_loc, bCopyLoc2Reg) <-
-      copyGlb2ShMem kk (gtid_x, jjj, map_t2, width_B, inp_B, load_B, b_loc_init')
+      copyGlb2ShMem True kk (gtid_x, jjj, map_t2, width_B, inp_B, load_B, b_loc_init')
 
     -- inner loop updating this thread's accumulator (loop k in mmm_kernels).
     thd_acc <- mkRedomapOneTileBody kk thd_res_merge aCopyLoc2Reg bCopyLoc2Reg True
     pure [thd_acc, a_loc, b_loc]
     where
-      mk_ik is_coal (thd_y, thd_x) (i0, k0)
+      mk_ik pad is_coal (thd_y, thd_x) (i0, k0)
         | is_coal = do
             -- not-transposed case (i.e., already coalesced)
             let (t_par, t_seq) = (tx, tk)
             k <- letExp "k" =<< toExp (le64 thd_x + le64 k0 * pe64 t_par)
             i <- letExp "i" =<< toExp (le64 thd_y + le64 i0 * pe64 t_par)
-            -- rows are padded to an odd length to avoid bank conflicts.
-            let e = le64 k + le64 i * oddUp (pe64 t_seq)
+            -- the rx rows of each thread form a block with a padded stride.
+            let e =
+                  le64 k
+                    + le64 i * pe64 t_seq
+                    + le64 i `IE.quot` pe64 rx * (pad (pe64 rx * pe64 t_seq) - pe64 rx * pe64 t_seq)
             pure (i, k, e)
-      mk_ik _ (thd_y, thd_x) (i0, k0) = do
+      mk_ik pad _ (thd_y, thd_x) (i0, k0) = do
         -- matrix is transposed case (i.e., uncoalesced):
         let t_par = tx
         k <- letExp "k" =<< toExp (le64 thd_y + le64 k0 * pe64 t_par)
         i <- letExp "i" =<< toExp (le64 thd_x + le64 i0 * pe64 t_par)
-        -- the rx elements of each thread are padded to an odd stride to
-        -- avoid bank conflicts.
+        -- the rx elements of each thread form a block with a padded stride.
         let e =
               le64 i
-                + le64 i `IE.quot` pe64 rx * (oddUp (pe64 rx) - pe64 rx)
-                + le64 k * pe64 tx * oddUp (pe64 rx)
+                + le64 i `IE.quot` pe64 rx * (pad (pe64 rx) - pe64 rx)
+                + le64 k * pe64 tx * pad (pe64 rx)
         pure (i, k, e)
       --
       mkCompLoopRxRy fits_ij css_init (a_idx_fn, b_idx_fn) (ltid_y, ltid_x) = do
@@ -187,10 +189,11 @@ kkLoopBody
         pure $ head redomap_res
       --
       copyGlb2ShMem ::
+        Bool ->
         VName ->
         (VName, VName, PrimType, SubExp, VName, Stms GPU, VName) ->
         Builder GPU (VName, VName -> VName -> VName -> Builder GPU VName)
-      copyGlb2ShMem kk (gtid, ii, ptp_X_el, parlen_X, inp_X, load_X, x_loc_init') = do
+      copyGlb2ShMem is_B kk (gtid, ii, ptp_X_el, parlen_X, inp_X, load_X, x_loc_init') = do
         let (t_par, r_par, tseq_div_tpar) = (tx, rx, tk_div_tx)
             is_inner_coal = isInnerCoal env inp_X load_X
             str_A = baseName inp_X
@@ -199,6 +202,14 @@ kkLoopBody
             scatterFun is_inner_coal
         pure (x_loc, indexLocMem is_inner_coal str_A x_loc)
         where
+          -- The stride between the blocks of consecutive threads is padded
+          -- to be odd, avoiding bank conflicts.  A warp reads A at only a
+          -- few distinct addresses, which only conflict in the coalesced
+          -- layout.
+          pad
+            | is_B || isInnerCoal env inp_X load_X = oddUp
+            | otherwise = id
+          --
           indexLocMem ::
             Bool ->
             Name ->
@@ -213,8 +224,8 @@ kkLoopBody
               letExp (str_A <> "_loc_ind_64")
                 =<< toExp
                   ( if is_inner_coal -- ToDo: check this is correct + turn to i32
-                      then le64 k + (le64 ltid_yx * pe64 r_par + le64 ij) * oddUp (pe64 t_seq)
-                      else le64 ij + le64 ltid_yx * oddUp (pe64 r_par) + le64 k * pe64 tx * oddUp (pe64 r_par)
+                      then le64 k + le64 ij * pe64 t_seq + le64 ltid_yx * pad (pe64 r_par * pe64 t_seq)
+                      else le64 ij + le64 ltid_yx * pad (pe64 r_par) + le64 k * pe64 tx * pad (pe64 r_par)
                   )
             index (str_A <> "_loc_elem") x_loc [x_loc_ind_32]
           --
@@ -226,7 +237,7 @@ kkLoopBody
           scatterFun is_inner_coal [i0, k0] (thd_y, thd_x) = do
             let str_A = baseName inp_X
                 t_seq = tk
-            (i, k, epx_loc_fi) <- mk_ik is_inner_coal (thd_y, thd_x) (i0, k0)
+            (i, k, epx_loc_fi) <- mk_ik pad is_inner_coal (thd_y, thd_x) (i0, k0)
             letBindNames [gtid] =<< toExp (le64 ii + le64 i)
             a_seqdim_idx <- letExp (str_A <> "_seqdim_idx") =<< toExp (le64 kk + le64 k)
 
@@ -744,10 +755,13 @@ mkTileMemSizes height_A _width_B common_dim = do
   -- Large enough for either layout, including padding (see mk_ik).
   a_loc_sz <-
     letSubExp "a_loc_sz"
-      =<< toExp (pe64 ty * (pe64 ry + 1) * (pe64 tk + 1))
+      =<< toExp (pe64 ty * oddUp (pe64 ry * pe64 tk))
   b_loc_sz <-
     letSubExp "b_loc_sz"
-      =<< toExp (pe64 tx * (pe64 rx + 1) * (pe64 tk + 1))
+      =<< toExp
+        ( pe64 tx
+            * sMax64 (oddUp (pe64 rx * pe64 tk)) (oddUp (pe64 rx) * pe64 tk)
+        )
   pure (rx, ry, tx, ty, tk, tk_div_tx, tk_div_ty, tx_rx, ty_ry, a_loc_sz, b_loc_sz)
 
 mkNewSegthdLvl ::
