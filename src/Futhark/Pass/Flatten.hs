@@ -490,7 +490,10 @@ liftFunDef attrs funHasParallelism funSizeParams const_scope fd = do
         { funDefName = name,
           funDefBody = body',
           funDefParams = fparams'',
-          funDefRetType = rettype'
+          funDefRetType = rettype',
+          -- We have to remove #[cpu_function] if present because this function
+          -- really contains parallel code now.
+          funDefAttrs = funDefAttrs fd `withoutAttrs` oneAttr "cpu_function"
         },
       needs
     )
@@ -553,7 +556,10 @@ liftUniformFunDef attrs funHasParallelism funSizeParams const_scope fd = do
         { funDefName = name,
           funDefBody = body',
           funDefParams = fparams'',
-          funDefRetType = rettype'
+          funDefRetType = rettype',
+          -- We have to remove #[cpu_function] if present because this function
+          -- really contains parallel code now.
+          funDefAttrs = funDefAttrs fd `withoutAttrs` oneAttr "cpu_function"
         },
       needs
     )
@@ -637,6 +643,9 @@ transformFunDef ::
   Scope SOACS ->
   FunDef SOACS ->
   PassM (FunDef GPU, S.Set DemandFn)
+transformFunDef _ _ _ consts_scope fd
+  | "cpu_function" `inAttrs` funDefAttrs fd =
+      (,mempty) <$> FOT.transformFunDef (castScope consts_scope) fd
 transformFunDef attrs funHasParallelism funSizeParams consts_scope fd = do
   let FunDef
         { funDefBody = body,
