@@ -489,29 +489,30 @@ expectInt :: PrimValue -> InterpM rep Int
 expectInt (IntValue i) = pure $ P.valueIntegral i
 expectInt _ = interpError "expected an integer value"
 
-safeBinOp :: BinOp -> Bool
-safeBinOp (UDiv _ Safe) = True
-safeBinOp (SDiv _ Safe) = True
-safeBinOp (UMod _ Safe) = True
-safeBinOp (SMod _ Safe) = True
-safeBinOp (SQuot _ Safe) = True
-safeBinOp (SRem _ Safe) = True
-safeBinOp _ = False
+-- Safe division-like operations yield zero on a zero divisor, like the code generators.
+evalBinOp :: BinOp -> PrimValue -> PrimValue -> Maybe PrimValue
+evalBinOp op x y
+  | safeDivision op, P.zeroIsh y = Just $ P.blankPrimValue $ P.binOpType op
+  | otherwise = P.doBinOp op x y
+  where
+    safeDivision (UDiv _ Safe) = True
+    safeDivision (UCeilDiv _ Safe) = True
+    safeDivision (SDiv _ Safe) = True
+    safeDivision (SCeilDiv _ Safe) = True
+    safeDivision (UMod _ Safe) = True
+    safeDivision (SMod _ Safe) = True
+    safeDivision (SQuot _ Safe) = True
+    safeDivision (SRem _ Safe) = True
+    safeDivision _ = False
 
 evalBasicOp :: Env -> BasicOp -> InterpM rep [Val]
 evalBasicOp env (SubExp se) = pure <$> evalSubExp env se
 evalBasicOp env (BinOp op x y) = do
   xv <- expectPrimVal =<< evalSubExp env x
   yv <- expectPrimVal =<< evalSubExp env y
-  case P.doBinOp op xv yv of
+  case evalBinOp op xv yv of
     Just result -> pure [PrimVal result]
-    Nothing
-      -- handle failed safe integer operations with a dummy result to allow assertions
-      -- to produe the intended error (tests/slice4.fut)
-      | safeBinOp op ->
-          pure [PrimVal $ P.blankPrimValue $ P.binOpType op]
-      | otherwise ->
-          interpError "invalid binary operation"
+    Nothing -> interpError "invalid binary operation"
 evalBasicOp env (UnOp op x) = do
   xv <- expectPrimVal =<< evalSubExp env x
   case P.doUnOp op xv of
