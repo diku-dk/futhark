@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * `futhark bench`: JSON files now contain metadata about the configuration and
   execution environment (#2381). Work by Yifan Chen.
 
+* New attribute: `cpu_function`.
+
 ### Removed
 
 ### Changed

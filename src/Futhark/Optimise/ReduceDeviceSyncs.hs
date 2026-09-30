@@ -40,9 +40,11 @@ reduceDeviceSyncs =
   where
     onConsts consts_mt stms =
       runReduceM consts_mt (optimizeStms stms)
-    onFun hof consts_mt fd = do
-      let mt = consts_mt <> analyseFunDef hof fd
-      runReduceM mt (optimizeFunDef fd)
+    onFun hof consts_mt fd
+      | "cpu_function" `inAttrs` funDefAttrs fd = pure fd
+      | otherwise = do
+          let mt = consts_mt <> analyseFunDef hof fd
+          runReduceM mt (optimizeFunDef fd)
 
 --------------------------------------------------------------------------------
 --                            AD HOC OPTIMIZATION                             --
