@@ -39,7 +39,7 @@ import Numeric.Half qualified as H
 
 data Val
   = PrimVal PrimValue
-  | ArrayValue [Int] PrimType ArrayValues
+  | ArrayValue [Int] ArrayValues
   | AccValue Accumulator
 
 -- Operator receives (indices <> old values <> new values).
@@ -61,6 +61,17 @@ data ArrayValues
   | F64ArrayValues (MSVec.IOVector Double)
   | BoolArrayValues (MSVec.IOVector Bool)
   | UnitArrayValues (MSVec.IOVector ())
+
+arrayValuesType :: ArrayValues -> PrimType
+arrayValuesType I8ArrayValues {} = IntType Int8
+arrayValuesType I16ArrayValues {} = IntType Int16
+arrayValuesType I32ArrayValues {} = IntType Int32
+arrayValuesType I64ArrayValues {} = IntType Int64
+arrayValuesType F16ArrayValues {} = FloatType Float16
+arrayValuesType F32ArrayValues {} = FloatType Float32
+arrayValuesType F64ArrayValues {} = FloatType Float64
+arrayValuesType BoolArrayValues {} = Bool
+arrayValuesType UnitArrayValues {} = Unit
 
 data DimSelection
   = Fixed Int
@@ -92,10 +103,8 @@ interpError :: T.Text -> InterpM rep a
 interpError = throwError
 
 newArrayValue :: [Int] -> PrimType -> [PrimValue] -> InterpM rep Val
-newArrayValue shape element_type values
-  | length values /= product shape =
-      interpError "invalid array storage"
-  | otherwise = ArrayValue shape element_type <$> newValues element_type
+newArrayValue shape element_type values =
+  ArrayValue shape <$> newValues element_type
   where
     newValues (IntType Int8) = I8ArrayValues <$> newPrimVector expectInt8
     newValues (IntType Int16) = I16ArrayValues <$> newPrimVector expectInt16
@@ -107,31 +116,29 @@ newArrayValue shape element_type values
     newValues Bool = BoolArrayValues <$> newPrimVector expectBool
     newValues Unit = UnitArrayValues <$> newPrimVector expectUnit
 
-    newPrimVector unwrap = do
-      elements <- mapM unwrap values
-      liftIO $ do
-        vector <- MSVec.new (length elements)
-        zipWithM_ (MSVec.write vector) [0 ..] elements
-        pure vector
+    newPrimVector unwrap = liftIO $ do
+      vector <- MSVec.new (length values)
+      zipWithM_ (MSVec.write vector) [0 ..] (map unwrap values)
+      pure vector
 
-    expectInt8 (IntValue (Int8Value element)) = pure element
-    expectInt8 _ = interpError "expected an i8 value"
-    expectInt16 (IntValue (Int16Value element)) = pure element
-    expectInt16 _ = interpError "expected an i16 value"
-    expectInt32 (IntValue (Int32Value element)) = pure element
-    expectInt32 _ = interpError "expected an i32 value"
-    expectInt64 (IntValue (Int64Value element)) = pure element
-    expectInt64 _ = interpError "expected an i64 value"
-    expectFloat16 (FloatValue (Float16Value element)) = pure element
-    expectFloat16 _ = interpError "expected an f16 value"
-    expectFloat32 (FloatValue (Float32Value element)) = pure element
-    expectFloat32 _ = interpError "expected an f32 value"
-    expectFloat64 (FloatValue (Float64Value element)) = pure element
-    expectFloat64 _ = interpError "expected an f64 value"
-    expectBool (BoolValue element) = pure element
-    expectBool _ = interpError "expected a bool value"
-    expectUnit UnitValue = pure ()
-    expectUnit _ = interpError "expected a unit value"
+    expectInt8 (IntValue (Int8Value element)) = element
+    expectInt8 _ = error "expected an i8 value"
+    expectInt16 (IntValue (Int16Value element)) = element
+    expectInt16 _ = error "expected an i16 value"
+    expectInt32 (IntValue (Int32Value element)) = element
+    expectInt32 _ = error "expected an i32 value"
+    expectInt64 (IntValue (Int64Value element)) = element
+    expectInt64 _ = error "expected an i64 value"
+    expectFloat16 (FloatValue (Float16Value element)) = element
+    expectFloat16 _ = error "expected an f16 value"
+    expectFloat32 (FloatValue (Float32Value element)) = element
+    expectFloat32 _ = error "expected an f32 value"
+    expectFloat64 (FloatValue (Float64Value element)) = element
+    expectFloat64 _ = error "expected an f64 value"
+    expectBool (BoolValue element) = element
+    expectBool _ = error "expected a bool value"
+    expectUnit UnitValue = ()
+    expectUnit _ = error "expected a unit value"
 
 arrayValues :: ArrayValues -> InterpM rep [PrimValue]
 arrayValues values =
@@ -191,7 +198,7 @@ writeArrayValue (BoolArrayValues values) index (BoolValue element) =
 writeArrayValue (UnitArrayValues values) index UnitValue =
   liftIO $ MSVec.write values index ()
 writeArrayValue _ _ _ =
-  interpError "array element type mismatch"
+  error "array element type mismatch"
 
 cloneArrayValues :: ArrayValues -> IO ArrayValues
 cloneArrayValues (I8ArrayValues values) = I8ArrayValues <$> MSVec.clone values
@@ -288,9 +295,7 @@ evalExp funs env (Match ses cases default_body _) = do
       | otherwise = selectCase values remaining
     selectCase _ [] = default_body
 
-    matches patterns values =
-      length patterns == length values
-        && and (zipWith matchesValue patterns values)
+    matches patterns values = and $ zipWith matchesValue patterns values
 
     matchesValue Nothing _ = True
     matchesValue (Just expected) actual = expected == actual
@@ -316,10 +321,7 @@ evalExp funs env (Loop merge (ForLoop iterator int_type bound_exp) body) = do
                 M.union loop_bindings env
 
           next_values <- evalBody funs iteration_env body
-
-          if length next_values /= length merge_names
-            then interpError "loop result count mismatch"
-            else runIterations (iteration + 1) bound next_values
+          runIterations (iteration + 1) bound next_values
 evalExp funs env (Loop merge (WhileLoop condition) body) = do
   initial_values <- mapM (evalSubExp env . snd) merge
   runWhile initial_values
@@ -337,25 +339,17 @@ evalExp funs env (Loop merge (WhileLoop condition) body) = do
       case condition_value of
         PrimVal (BoolValue False) ->
           pure current_values
-        PrimVal (BoolValue True) -> do
-          next_values <- evalBody funs loop_env body
-          if length next_values /= length merge_names
-            then interpError "loop result count mismatch"
-            else runWhile next_values
+        PrimVal (BoolValue True) ->
+          runWhile =<< evalBody funs loop_env body
         _ ->
-          interpError "while-loop condition is not boolean"
+          error "while-loop condition is not boolean"
 evalExp funs env (Apply fname args _ _) = do
   arg_vals <- mapM (evalSubExp env . fst) args
 
   case M.lookup fname funs of
-    Just callee -> do
-      let params = map paramName $ funDefParams callee
-      if length params /= length arg_vals
-        then interpError "function argument count mismatch"
-        else
-          let bindings = M.fromList $ zip params arg_vals
-              callee_env = M.union bindings env
-           in evalBody funs callee_env (funDefBody callee)
+    Just callee ->
+      let bindings = M.fromList $ zip (map paramName $ funDefParams callee) arg_vals
+       in evalBody funs (M.union bindings env) (funDefBody callee)
     Nothing ->
       evalPrimitiveFunction fname arg_vals
 evalExp funs env (Op op) = do
@@ -371,22 +365,13 @@ evalPrimitiveFunction ::
 evalPrimitiveFunction fname args =
   case M.lookup (nameToText fname) P.primFuns of
     Nothing ->
-      interpError $ "function not found: " <> prettyText fname
-    Just (parameter_types, result_type, function) -> do
+      error $ "function not found: " <> prettyString fname
+    Just (_, _, function) -> do
       values <- mapM expectPrimVal args
-
-      if map P.primValueType values /= parameter_types
-        then interpError "primitive function argument type mismatch"
-        else case function values of
-          Just result
-            | P.primValueType result == result_type ->
-                pure [PrimVal result]
-            | otherwise ->
-                interpError "primitive function result type mismatch"
-          Nothing ->
-            interpError $
-              "invalid arguments to primitive function: "
-                <> prettyText fname
+      case function values of
+        Just result -> pure [PrimVal result]
+        Nothing ->
+          error $ "invalid arguments to primitive function: " <> prettyString fname
 
 evalWithAcc ::
   FunEnv rep ->
@@ -396,37 +381,23 @@ evalWithAcc ::
   InterpM rep [Val]
 evalWithAcc funs env inputs lambda = do
   evaluated_inputs <- mapM evaluateInput inputs
+  interp_env <- ask
 
   let accumulator_count = length inputs
       (certificate_params, accumulator_params) =
         splitAt accumulator_count $ lambdaParams lambda
+      accumulators = map (mkAccumulator interp_env) evaluated_inputs
+      -- Certificates are bound to their accumulator so that zero-iteration
+      -- maps can recover it from the result type 'Acc c ...'.
+      bindings =
+        M.fromList $
+          zip (map paramName certificate_params) accumulators
+            <> zip (map paramName accumulator_params) accumulators
 
-  if length certificate_params /= accumulator_count
-    || length accumulator_params /= accumulator_count
-    then interpError "WithAcc lambda parameter count mismatch"
-    else do
-      interp_env <- ask
-      let accumulators = map (mkAccumulator interp_env) evaluated_inputs
-          -- Certificates are bound to their accumulator so that zero-iteration
-          -- maps can recover it from the result type 'Acc c ...'.
-          bindings =
-            M.fromList $
-              zip (map paramName certificate_params) accumulators
-                <> zip (map paramName accumulator_params) accumulators
-          lambda_env = M.union bindings env
-
-      results <- evalBody funs lambda_env $ lambdaBody lambda
-
-      let (accumulator_results, ordinary_results) =
-            splitAt accumulator_count results
-
-      if length accumulator_results /= accumulator_count
-        then interpError "WithAcc lambda returned too few accumulators"
-        else do
-          mapM_ validateAccumulatorResult accumulator_results
-          pure $
-            concatMap (\(_, arrays, _) -> arrays) evaluated_inputs
-              <> ordinary_results
+  results <- evalBody funs (M.union bindings env) $ lambdaBody lambda
+  pure $
+    concatMap (\(_, arrays, _) -> arrays) evaluated_inputs
+      <> drop accumulator_count results
   where
     mkAccumulator interp_env (index_shape, arrays, operator) =
       AccValue $
@@ -438,56 +409,23 @@ evalWithAcc funs env inputs lambda = do
           (unInterpM $ evalLambda funs env operator_lambda args)
           interp_env
 
-    evaluateInput (Shape dimension_exps, array_names, operator) = do
-      index_shape <-
-        mapM
-          (\dimension -> evalSubExp env dimension >>= expectPrimVal >>= expectInt)
-          dimension_exps
-
-      if any (< 0) index_shape
-        then interpError "WithAcc index-space dimensions cannot be negative"
-        else do
-          arrays <- mapM lookupArray array_names
-          mapM_ (validateArray index_shape) arrays
-          pure (index_shape, arrays, operator)
-
-    lookupArray name =
-      case M.lookup name env of
-        Just array@ArrayValue {} ->
-          pure array
-        Just _ ->
-          interpError "WithAcc input must be an array"
-        Nothing ->
-          interpError $ "unbound WithAcc input: " <> prettyText name
-
-    validateArray index_shape (ArrayValue shape _ values)
-      | index_shape /= take (length index_shape) shape =
-          interpError "WithAcc input array does not match index space"
-      | arrayValuesLength values /= product shape =
-          interpError "invalid WithAcc input array storage"
-      | otherwise =
-          pure ()
-    validateArray _ _ =
-      interpError "WithAcc input must be an array"
-
-    validateAccumulatorResult AccValue {} = pure ()
-    validateAccumulatorResult _ =
-      interpError "WithAcc lambda did not return an accumulator"
+    evaluateInput (shape, array_names, operator) = do
+      index_shape <- evalShape env shape
+      arrays <- mapM (evalSubExp env . Var) array_names
+      pure (index_shape, arrays, operator)
 
 evalSubExp :: Env -> SubExp -> InterpM rep Val
 evalSubExp _ (Constant pv) = pure $ PrimVal pv
 evalSubExp env (Var v) =
-  maybe (interpError $ "unbound variable: " <> prettyText v) pure $ M.lookup v env
+  maybe (error $ "unbound variable: " <> prettyString v) pure $ M.lookup v env
 
 expectPrimVal :: Val -> InterpM rep PrimValue
 expectPrimVal (PrimVal pv) = pure pv
-expectPrimVal ArrayValue {} = interpError "expected a primitive value"
-expectPrimVal AccValue {} =
-  interpError "expected a primitive value"
+expectPrimVal _ = error "expected a primitive value"
 
 expectInt :: PrimValue -> InterpM rep Int
 expectInt (IntValue i) = pure $ P.valueIntegral i
-expectInt _ = interpError "expected an integer value"
+expectInt _ = error "expected an integer value"
 
 -- Safe division-like operations yield zero on a zero divisor, like the code generators.
 evalBinOp :: BinOp -> PrimValue -> PrimValue -> Maybe PrimValue
@@ -517,62 +455,35 @@ evalBasicOp env (UnOp op x) = do
   xv <- expectPrimVal =<< evalSubExp env x
   case P.doUnOp op xv of
     Just result -> pure [PrimVal result]
-    Nothing -> interpError "invalid unary operation"
+    Nothing -> error "invalid unary operation"
 evalBasicOp env (CmpOp op x y) = do
   xv <- expectPrimVal =<< evalSubExp env x
   yv <- expectPrimVal =<< evalSubExp env y
   case P.doCmpOp op xv yv of
     Just result -> pure [PrimVal $ BoolValue result]
-    Nothing -> interpError "invalid comparison operation"
+    Nothing -> error "invalid comparison operation"
 evalBasicOp env (ConvOp op x) = do
   xv <- expectPrimVal =<< evalSubExp env x
   case P.doConvOp op xv of
     Just result -> pure [PrimVal result]
-    Nothing -> interpError "invalid conversion operation"
+    Nothing -> error "invalid conversion operation"
 evalBasicOp env (ArrayLit elements (Prim element_type)) = do
   values <- mapM (evalSubExp env) elements
   primitive_values <- mapM expectPrimVal values
   pure <$> newArrayValue [length elements] element_type primitive_values
-evalBasicOp env (ArrayLit elements (Array element_type (Shape row_shape_exps) _)) = do
-  expected_row_shape <-
-    mapM
-      ( \dimension ->
-          evalSubExp env dimension >>= expectPrimVal >>= expectInt
-      )
-      row_shape_exps
-
-  if any (< 0) expected_row_shape
-    then interpError "array literal dimensions cannot be negative"
-    else do
-      rows <- mapM (evalSubExp env) elements
-      row_values <- mapM (expectRow expected_row_shape element_type) rows
-      result <-
-        newArrayValue
-          (length elements : expected_row_shape)
-          element_type
-          (concat row_values)
-      pure [result]
-  where
-    expectRow
-      expected_shape
-      expected_type
-      (ArrayValue actual_shape actual_type values)
-        | actual_shape /= expected_shape =
-            interpError "array literal row shape mismatch"
-        | actual_type /= expected_type =
-            interpError "array literal row element type mismatch"
-        | arrayValuesLength values /= product actual_shape =
-            interpError "invalid array literal row storage"
-        | otherwise =
-            arrayValues values
-    expectRow _ _ PrimVal {} =
-      interpError "expected an array-valued row"
-    expectRow _ _ AccValue {} =
-      interpError "expected an array-valued row"
+evalBasicOp env (ArrayLit elements (Array element_type row_shape_exps _)) = do
+  row_shape <- evalShape env row_shape_exps
+  rows <- mapM (evalSubExp env) elements
+  row_values <- mapM valElements rows
+  pure
+    <$> newArrayValue
+      (length elements : row_shape)
+      element_type
+      (concat row_values)
 evalBasicOp _ (ArrayLit _ Acc {}) =
-  interpError "accumulator array literals are not implemented"
+  error "accumulator array literals are not implemented"
 evalBasicOp _ (ArrayLit _ Mem {}) =
-  interpError "memory array literals are unsupported in SOACS"
+  error "memory array literals are unsupported"
 evalBasicOp _ (ArrayVal values element_type) =
   pure <$> newArrayValue [length values] element_type values
 evalBasicOp env (Assert condition message) = do
@@ -580,54 +491,40 @@ evalBasicOp env (Assert condition message) = do
   case condition_value of
     BoolValue True -> pure [PrimVal UnitValue]
     BoolValue False -> interpError =<< evalErrorMsg env message
-    _ -> interpError "assert condition is not boolean"
+    _ -> error "assert condition is not boolean"
 evalBasicOp env (Index array_name slice) = do
-  array <-
-    maybe (interpError $ "unbound array: " <> prettyText array_name) pure $
-      M.lookup array_name env
+  array <- evalSubExp env (Var array_name)
   case array of
-    ArrayValue shape element_type values ->
-      indexArray env shape element_type values slice
-    PrimVal _ ->
-      interpError "cannot index a primitive value"
-    AccValue _ ->
-      interpError "cannot index an accumulator value"
+    ArrayValue shape values ->
+      indexArray env shape values slice
+    _ ->
+      error "cannot index a non-array value"
 evalBasicOp env (Reshape array_name reshape) = do
-  array <-
-    maybe (interpError $ "unbound array: " <> prettyText array_name) pure $
-      M.lookup array_name env
-
+  array <- evalSubExp env (Var array_name)
   case array of
-    ArrayValue old_shape element_type values ->
+    ArrayValue old_shape values ->
       case reshapeKind reshape of
         ReshapeCoerce ->
-          pure [ArrayValue old_shape element_type values]
+          pure [ArrayValue old_shape values]
         ReshapeArbitrary -> do
-          dimensions <-
-            mapM
-              (evalSubExp env >=> expectPrimVal >=> expectInt)
-              (shapeDims $ newShape reshape)
-
+          dimensions <- evalShape env $ newShape reshape
           if product dimensions == arrayValuesLength values
-            then pure [ArrayValue dimensions element_type values]
+            then pure [ArrayValue dimensions values]
             else interpError "reshape element count mismatch"
-    PrimVal _ ->
-      interpError "cannot reshape a primitive value"
-    AccValue _ ->
-      interpError "cannot reshape an accumulator value"
+    _ ->
+      error "cannot reshape a non-array value"
 evalBasicOp env (Opaque OpaqueNil se) =
   pure <$> evalSubExp env se
 evalBasicOp env (Opaque (OpaqueTrace t) se) = do
   liftIO $ TIO.putStrLn t
   pure <$> evalSubExp env se
-evalBasicOp env (Manifest array_name _) =
-  case M.lookup array_name env of
-    Just (ArrayValue shape element_type values) -> do
-      values' <- liftIO $ cloneArrayValues values
-      pure [ArrayValue shape element_type values']
-    Just PrimVal {} -> interpError "cannot manifest a primitive value"
-    Just AccValue {} -> interpError "cannot manifest an accumulator value"
-    Nothing -> interpError $ "unbound array: " <> prettyText array_name
+evalBasicOp env (Manifest array_name _) = do
+  array <- evalSubExp env (Var array_name)
+  case array of
+    ArrayValue shape values ->
+      pure . ArrayValue shape <$> liftIO (cloneArrayValues values)
+    _ ->
+      error "cannot manifest a non-array value"
 evalBasicOp env (Iota count_sub_exp start_sub_exp stride_sub_exp int_type) = do
   count <- evalSubExp env count_sub_exp >>= expectPrimVal >>= expectInt
   stride <- evalSubExp env stride_sub_exp >>= expectPrimVal >>= expectInt
@@ -654,37 +551,31 @@ evalBasicOp env (Replicate (Shape shape_exps) val_exp) = do
       let copies = product dimensions
 
       case (dimensions, val) of
-        ([], ArrayValue shape element_type values) -> do
-          values' <- liftIO $ cloneArrayValues values
-          pure [ArrayValue shape element_type values']
+        ([], ArrayValue shape values) ->
+          pure . ArrayValue shape <$> liftIO (cloneArrayValues values)
         ([], _) -> pure [val]
         (_, PrimVal primitive_value) ->
           pure <$> newArrayValue dimensions (P.primValueType primitive_value) (replicate copies primitive_value)
-        (_, ArrayValue old_shape element_type values) -> do
+        (_, ArrayValue old_shape values) -> do
           primitive_values <- arrayValues values
-          pure <$> newArrayValue (dimensions <> old_shape) element_type (concat $ replicate copies primitive_values)
+          pure <$> newArrayValue (dimensions <> old_shape) (arrayValuesType values) (concat $ replicate copies primitive_values)
         (_, AccValue {}) ->
-          interpError "cannot replicate an accumulator value"
+          error "cannot replicate an accumulator value"
 evalBasicOp env (Rearrange array_name permutation) = do
-  array <-
-    maybe (interpError $ "unbound array: " <> prettyText array_name) pure $
-      M.lookup array_name env
+  array <- evalSubExp env (Var array_name)
   case array of
-    ArrayValue old_shape element_type values
-      | not $ validPermutation (length old_shape) permutation -> interpError "invalid rearrange permutation"
-      | otherwise -> do
-          let new_shape = map (old_shape !!) permutation
-              new_coordinates =
-                sequence [[0 .. dimension - 1] | dimension <- new_shape]
-              oldCoordinate new_coordinate =
-                [new_coordinate !! position | position <- inversePermutation permutation]
-          new_values <-
-            mapM
-              (readArrayValue values . linearIndex old_shape . oldCoordinate)
-              new_coordinates
-          pure <$> newArrayValue new_shape element_type new_values
-    PrimVal _ -> interpError "cannot rearrange a primitive value"
-    AccValue _ -> interpError "cannot rearrange an accumulator value"
+    ArrayValue old_shape values -> do
+      let new_shape = map (old_shape !!) permutation
+          new_coordinates =
+            sequence [[0 .. dimension - 1] | dimension <- new_shape]
+          oldCoordinate new_coordinate =
+            [new_coordinate !! position | position <- inversePermutation permutation]
+      new_values <-
+        mapM
+          (readArrayValue values . linearIndex old_shape . oldCoordinate)
+          new_coordinates
+      pure <$> newArrayValue new_shape (arrayValuesType values) new_values
+    _ -> error "cannot rearrange a non-array value"
 evalBasicOp env (Concat concat_dim array_names result_size_exp) = do
   arrays <- mapM lookupArray $ NE.toList array_names
   declared_size <-
@@ -692,12 +583,8 @@ evalBasicOp env (Concat concat_dim array_names result_size_exp) = do
 
   case arrays of
     [] ->
-      interpError "concat requires at least one array"
-    first_array@(first_shape, element_type, _) : remaining
-      | concat_dim < 0 || concat_dim >= length first_shape ->
-          interpError "concat dimension out of bounds"
-      | not $ all (compatible first_array) remaining ->
-          interpError "concat array shapes or element types do not match"
+      error "concat requires at least one array"
+    (first_shape, first_values) : _
       | declared_size /= actualSize arrays ->
           interpError "concat result size mismatch"
       | otherwise -> do
@@ -707,33 +594,22 @@ evalBasicOp env (Concat concat_dim array_names result_size_exp) = do
                 sequence [[0 .. size - 1] | size <- result_shape]
 
           result_values <- mapM (valueAt arrays) coordinates
-          pure <$> newArrayValue result_shape element_type result_values
+          pure <$> newArrayValue result_shape (arrayValuesType first_values) result_values
   where
-    lookupArray name =
-      case M.lookup name env of
-        Just (ArrayValue shape element_type values) ->
-          pure (shape, element_type, values)
-        Just PrimVal {} ->
-          interpError "cannot concatenate a primitive value"
-        Just AccValue {} ->
-          interpError "cannot concatenate an accumulator value"
-        Nothing ->
-          interpError $ "unbound array: " <> prettyText name
-
-    compatible (first_shape, first_type, _) (shape, element_type, _) =
-      first_type == element_type
-        && length first_shape == length shape
-        && removeAt concat_dim first_shape == removeAt concat_dim shape
+    lookupArray name = do
+      array <- evalSubExp env (Var name)
+      case array of
+        ArrayValue shape values -> pure (shape, values)
+        _ -> error "cannot concatenate a non-array value"
 
     actualSize =
-      sum . map (\(shape, _, _) -> shape !! concat_dim)
+      sum . map ((!! concat_dim) . fst)
 
     valueAt arrays coordinate = do
       let concat_index = coordinate !! concat_dim
-      (source_shape, source_values, local_index) <-
-        findSource concat_index arrays
-
-      let source_coordinate =
+          (source_shape, source_values, local_index) =
+            findSource concat_index arrays
+          source_coordinate =
             replaceAt concat_dim local_index coordinate
           offset =
             linearIndex source_shape source_coordinate
@@ -741,56 +617,43 @@ evalBasicOp env (Concat concat_dim array_names result_size_exp) = do
       readArrayValue source_values offset
 
     findSource _ [] =
-      interpError "invalid concat coordinate"
-    findSource index ((shape, _, values) : arrays)
+      error "invalid concat coordinate"
+    findSource index ((shape, values) : arrays)
       | index < size =
-          pure (shape, values, index)
+          (shape, values, index)
       | otherwise =
           findSource (index - size) arrays
       where
         size = shape !! concat_dim
 evalBasicOp env (Update _ array_name slice value_exp) = do
-  array <-
-    maybe (interpError $ "unbound array: " <> prettyText array_name) pure $
-      M.lookup array_name env
-
+  array <- evalSubExp env (Var array_name)
   replacement <- evalSubExp env value_exp
 
   case array of
-    PrimVal _ ->
-      interpError "cannot update a primitive value"
-    AccValue _ ->
-      interpError "cannot update an accumulator value"
-    ArrayValue shape element_type values -> do
-      (slice_shape, coordinates) <- resolveSlice env shape slice
-      replacement_values <-
-        updateValues element_type slice_shape replacement
-
-      let offsets = map (linearIndex shape) coordinates
+    ArrayValue shape values -> do
+      coordinates <- resolveSlice env shape slice
+      replacement_values <- valElements replacement
 
       mapM_
         (uncurry $ writeArrayValue values)
-        (zip offsets replacement_values)
+        (zip (map (linearIndex shape) coordinates) replacement_values)
 
-      pure [ArrayValue shape element_type values]
+      pure [array]
+    _ ->
+      error "cannot update a non-array value"
 evalBasicOp env (FlatIndex array_name flat_slice) = do
-  array <-
-    maybe
-      (interpError $ "unbound array: " <> prettyText array_name)
-      pure
-      (M.lookup array_name env)
-
+  array <- evalSubExp env (Var array_name)
   (result_shape, offsets) <- evalFlatSlice env flat_slice
 
   case array of
-    ArrayValue [_] element_type values
+    ArrayValue _ values
       | not $ all (validOffset values) offsets ->
           interpError "flat index out of bounds"
       | otherwise -> do
           let count = product result_shape
               view offset =
                 pure
-                  [ ArrayValue result_shape element_type $
+                  [ ArrayValue result_shape $
                       sliceArrayValues offset count values
                   ]
           case result_shape of
@@ -799,7 +662,7 @@ evalBasicOp env (FlatIndex array_name flat_slice) = do
                 [offset] -> do
                   primitive_value <- readArrayValue values offset
                   pure [PrimVal primitive_value]
-                _ -> interpError "invalid scalar flat index"
+                _ -> error "invalid scalar flat index"
             _ ->
               case offsets of
                 [] -> view 0
@@ -808,67 +671,31 @@ evalBasicOp env (FlatIndex array_name flat_slice) = do
                       view offset
                 _ -> do
                   selected_values <- mapM (readArrayValue values) offsets
-                  pure <$> newArrayValue result_shape element_type selected_values
-    ArrayValue {} ->
-      interpError "flat index source must be one-dimensional"
-    PrimVal {} ->
-      interpError "cannot flat-index a primitive value"
-    AccValue {} ->
-      interpError "cannot flat-index an accumulator value"
+                  pure <$> newArrayValue result_shape (arrayValuesType values) selected_values
+    _ ->
+      error "cannot flat-index a non-array value"
   where
     validOffset values offset =
       offset >= 0 && offset < arrayValuesLength values
 evalBasicOp env (FlatUpdate source_name flat_slice replacement_name) = do
-  source <-
-    maybe
-      (interpError $ "unbound array: " <> prettyText source_name)
-      pure
-      (M.lookup source_name env)
-  replacement <-
-    maybe
-      (interpError $ "unbound replacement: " <> prettyText source_name)
-      pure
-      (M.lookup replacement_name env)
-  (replacement_shape, offsets) <- evalFlatSlice env flat_slice
+  source <- evalSubExp env (Var source_name)
+  replacement <- evalSubExp env (Var replacement_name)
+  (_, offsets) <- evalFlatSlice env flat_slice
   case source of
-    ArrayValue source_shape@[_] source_type source_values -> do
-      replacement_values <-
-        valuesForReplacement source_type replacement_shape replacement
-
-      if not $ all (validOffset source_values) offsets
-        then interpError "flat update out of bounds"
-        else do
+    ArrayValue _ source_values
+      | not $ all (validOffset source_values) offsets ->
+          interpError "flat update out of bounds"
+      | otherwise -> do
+          replacement_values <- valElements replacement
           mapM_
             (uncurry $ writeArrayValue source_values)
             (zip offsets replacement_values)
-
-          pure [ArrayValue source_shape source_type source_values]
-    ArrayValue {} ->
-      interpError "flat update source must be one-dimensional"
-    PrimVal {} ->
-      interpError "cannot flat-update a primitive value"
-    AccValue {} -> interpError "cannot flat-update an accumulator value"
+          pure [source]
+    _ ->
+      error "cannot flat-update a non-array value"
   where
     validOffset values offset =
       offset >= 0 && offset < arrayValuesLength values
-
-    valuesForReplacement expected_type [] (PrimVal val)
-      | P.primValueType val == expected_type =
-          pure [val]
-      | otherwise =
-          interpError "flat update element type mismatch"
-    valuesForReplacement
-      expected_type
-      expected_shape
-      (ArrayValue actual_shape actual_type values)
-        | actual_shape /= expected_shape =
-            interpError "flat update replacement shape mismatch"
-        | actual_type /= expected_type =
-            interpError "flat update element type mismatch"
-        | otherwise =
-            arrayValues values
-    valuesForReplacement _ _ _ =
-      interpError "invalid flat update replacement"
 evalBasicOp env (Scratch element_type dimension_exps) = do
   dimensions <-
     mapM (\dimension_exp -> evalSubExp env dimension_exp >>= expectPrimVal >>= expectInt) dimension_exps
@@ -891,11 +718,7 @@ evalUpdateAcc ::
   [SubExp] ->
   InterpM rep [Val]
 evalUpdateAcc env safety accumulator_name index_exps value_exps = do
-  accumulator <-
-    maybe
-      (interpError $ "unbound accumulator: " <> prettyText accumulator_name)
-      pure
-      (M.lookup accumulator_name env)
+  accumulator <- evalSubExp env (Var accumulator_name)
 
   indices <-
     mapM
@@ -908,13 +731,9 @@ evalUpdateAcc env safety accumulator_name index_exps value_exps = do
       updateAccumulator acc indices values
       pure [accumulator]
     _ ->
-      interpError "UpdateAcc argument is not an accumulator"
+      error "UpdateAcc argument is not an accumulator"
   where
     updateAccumulator acc indices new_values
-      | length indices /= length (accShape acc) =
-          interpError "accumulator update index rank mismatch"
-      | length new_values /= length (accArrays acc) =
-          interpError "accumulator update value count mismatch"
       | not $ indicesInBounds (accShape acc) indices =
           case safety of
             Safe -> pure ()
@@ -929,13 +748,10 @@ evalUpdateAcc env safety accumulator_name index_exps value_exps = do
                 liftIO (operator (map int64Val indices <> old_values <> new_values))
                   >>= either throwError pure
 
-          if length replacement_values /= length (accArrays acc)
-            then interpError "accumulator operator result count mismatch"
-            else
-              zipWithM_
-                (writeAccumulatorElementInPlace indices)
-                (accArrays acc)
-                replacement_values
+          zipWithM_
+            (writeAccumulatorElementInPlace indices)
+            (accArrays acc)
+            replacement_values
 
     indicesInBounds shape indices =
       and $ zipWith (\size index -> index >= 0 && index < size) shape indices
@@ -946,11 +762,8 @@ evalErrorMsg env (ErrorMsg parts) = do
   pure $ T.concat ("Error " : evaluatedParts)
   where
     evalPart (ErrorString text) = pure text
-    evalPart (ErrorVal expected_type sub_exp) = do
-      val <- evalSubExp env sub_exp >>= expectPrimVal
-      if P.primValueType val == expected_type
-        then pure $ renderErrorValue val
-        else interpError "assert error-message value type mismatch"
+    evalPart (ErrorVal _ sub_exp) =
+      renderErrorValue <$> (evalSubExp env sub_exp >>= expectPrimVal)
 
 renderErrorValue :: PrimValue -> T.Text
 renderErrorValue (IntValue val) =
@@ -989,59 +802,25 @@ replaceAt :: Int -> a -> [a] -> [a]
 replaceAt index val xs =
   take index xs <> [val] <> drop (index + 1) xs
 
-removeAt :: Int -> [a] -> [a]
-removeAt index xs =
-  take index xs <> drop (index + 1) xs
-
-validPermutation :: Int -> [Int] -> Bool
-validPermutation rank permutation =
-  L.sort permutation == [0 .. rank - 1]
-
 inversePermutation :: [Int] -> [Int]
 inversePermutation permutation =
   map snd $ L.sortOn fst $ zip permutation [0 ..]
 
-updateValues ::
-  PrimType ->
-  [Int] ->
-  Val ->
-  InterpM rep [PrimValue]
-updateValues element_type slc_shape replacement =
-  case replacement of
-    PrimVal primitive_value
-      | slc_shape /= [] ->
-          interpError "cannot use a scalar to update a non-scalar slice"
-      | P.primValueType primitive_value /= element_type ->
-          interpError "update element type mismatch"
-      | otherwise ->
-          pure [primitive_value]
-    ArrayValue replacement_shape replacement_type replacement_values
-      | replacement_type /= element_type ->
-          interpError "update element type mismatch"
-      | replacement_shape /= slc_shape ->
-          interpError "update value shape does not match slice shape"
-      | otherwise ->
-          arrayValues replacement_values
-    AccValue {} -> interpError "cannot use an accumulator as an update value"
+-- The elements of a value in row-major order.
+valElements :: Val -> InterpM rep [PrimValue]
+valElements (PrimVal primitive_value) = pure [primitive_value]
+valElements (ArrayValue _ values) = arrayValues values
+valElements AccValue {} = error "accumulators have no elements"
 
 resolveSlice ::
   Env ->
   [Int] ->
   Slice SubExp ->
-  InterpM rep ([Int], [[Int]])
-resolveSlice env shape (Slice dimensions)
-  | length shape /= length dimensions =
-      interpError "slice dimensions do not match array dimensions"
-  | otherwise = do
-      selections <- mapM evalDimension dimensions
-      mapM_ checkSelectionBounds $ zip shape selections
-
-      let result_shape =
-            [length indices | Selected indices <- selections]
-          coordinates =
-            mapM selectionIndices selections
-
-      pure (result_shape, coordinates)
+  InterpM rep [[Int]]
+resolveSlice env shape (Slice dimensions) = do
+  selections <- mapM evalDimension dimensions
+  mapM_ checkSelectionBounds $ zip shape selections
+  pure $ mapM selectionIndices selections
   where
     evalDimension (DimFix index_exp) =
       Fixed <$> evalInt index_exp
@@ -1077,45 +856,41 @@ resolveSlice env shape (Slice dimensions)
 indexArray ::
   Env ->
   [Int] ->
-  PrimType ->
   ArrayValues ->
   Slice SubExp ->
   InterpM rep [Val]
-indexArray env shape element_type values slice@(Slice dimensions)
-  | length shape /= length dimensions =
-      interpError "slice dimensions do not match array dimensions"
-  | otherwise = do
-      selections <-
-        zipWithM
-          evalDimension
-          (zip shape $ tail $ scanr (*) 1 shape)
-          dimensions
-      let offset = sum $ map fst selections
-          axes = concatMap snd selections
-          result_shape = map fst axes
-          count = product result_shape
-          expected_strides = tail $ scanr (*) 1 result_shape
-          contiguous =
-            and $
-              zipWith
-                (\(size, stride) expected -> size <= 1 || stride == expected)
-                axes
-                expected_strides
-          view start =
-            pure
-              [ ArrayValue result_shape element_type $
-                  sliceArrayValues start count values
-              ]
-      case result_shape of
-        [] -> pure . PrimVal <$> readArrayValue values offset
-        _
-          | count == 0 -> view 0
-          | contiguous -> view offset
-          | otherwise -> do
-              (_, coordinates) <- resolveSlice env shape slice
-              selected_values <-
-                mapM (readArrayValue values . linearIndex shape) coordinates
-              pure <$> newArrayValue result_shape element_type selected_values
+indexArray env shape values slice@(Slice dimensions) = do
+  selections <-
+    zipWithM
+      evalDimension
+      (zip shape $ tail $ scanr (*) 1 shape)
+      dimensions
+  let offset = sum $ map fst selections
+      axes = concatMap snd selections
+      result_shape = map fst axes
+      count = product result_shape
+      expected_strides = tail $ scanr (*) 1 result_shape
+      contiguous =
+        and $
+          zipWith
+            (\(size, stride) expected -> size <= 1 || stride == expected)
+            axes
+            expected_strides
+      view start =
+        pure
+          [ ArrayValue result_shape $
+              sliceArrayValues start count values
+          ]
+  case result_shape of
+    [] -> pure . PrimVal <$> readArrayValue values offset
+    _
+      | count == 0 -> view 0
+      | contiguous -> view offset
+      | otherwise -> do
+          coordinates <- resolveSlice env shape slice
+          selected_values <-
+            mapM (readArrayValue values . linearIndex shape) coordinates
+          pure <$> newArrayValue result_shape (arrayValuesType values) selected_values
   where
     evalInt sub_exp =
       evalSubExp env sub_exp >>= expectPrimVal >>= expectInt
@@ -1154,7 +929,7 @@ evalSOAC funs env (Stream width_exp input_names initial_accumulators lambda) =
   evalStream funs env width_exp input_names initial_accumulators lambda
 evalSOAC funs env (Hist width_exp input_names hist_ops lambda) = evalHist funs env width_exp input_names hist_ops lambda
 evalSOAC funs env (FlatMap width_exp input_names lambda) = evalFlatMap funs env width_exp input_names lambda
-evalSOAC _ _ _ = interpError "SOAC not implemented yet"
+evalSOAC _ _ _ = error "SOAC not implemented yet"
 
 evalFlatMap ::
   FunEnv rep ->
@@ -1165,37 +940,29 @@ evalFlatMap ::
   InterpM rep [Val]
 evalFlatMap funs env width_exp input_names lambda = do
   width <- evalSubExp env width_exp >>= expectPrimVal >>= expectInt
-  if width < 0
-    then interpError "FlatMap width cannot be negative"
-    else do
-      inputs <- mapM (lookupSoacInput env) input_names
-      mapM_ (validateSoacInput width) inputs
+  inputs <- mapM (evalSubExp env . Var) input_names
+  rows <- mapM (runIteration inputs) [0 .. width - 1]
+  let sizes = map fst rows
+      value_rows = map snd rows
+      offsets = init $ scanl (+) 0 sizes
+      total_size = sum sizes
+      return_types = drop 1 $ lambdaReturnType lambda
+      columns
+        | null value_rows = replicate (length return_types) []
+        | otherwise = L.transpose value_rows
+  values <-
+    zipWithM
+      (collectFlatMapOutput env total_size)
+      return_types
+      columns
+  let flags = concatMap segmentFlags sizes
+  sizes_array <- newArrayValue [width] int64_type $ map int64Prim sizes
+  flags_array <- newArrayValue [total_size] Bool $ map BoolValue flags
+  offsets_array <- newArrayValue [width] int64_type $ map int64Prim offsets
 
-      if length inputs /= length (lambdaParams lambda)
-        then interpError "FlatMap input count does not match lambda parameters"
-        else do
-          rows <- mapM (runIteration inputs) [0 .. width - 1]
-          let sizes = map fst rows
-              value_rows = map snd rows
-              offsets = init $ scanl (+) 0 sizes
-              total_size = sum sizes
-              return_types = drop 1 $ lambdaReturnType lambda
-              columns
-                | null value_rows = replicate (length return_types) []
-                | otherwise = L.transpose value_rows
-          values <-
-            zipWithM
-              (collectFlatMapOutput env sizes total_size)
-              return_types
-              columns
-          let flags = concatMap segmentFlags sizes
-          sizes_array <- newArrayValue [width] int64_type $ map int64Prim sizes
-          flags_array <- newArrayValue [total_size] Bool $ map BoolValue flags
-          offsets_array <- newArrayValue [width] int64_type $ map int64Prim offsets
-
-          pure $
-            [int64Val total_size, sizes_array, flags_array, offsets_array]
-              <> values
+  pure $
+    [int64Val total_size, sizes_array, flags_array, offsets_array]
+      <> values
   where
     runIteration inputs index = do
       input_rows <- mapM (rowAt index) inputs
@@ -1208,7 +975,7 @@ evalFlatMap funs env width_exp input_names lambda = do
             then interpError "FlatMap segment size cannot be negative"
             else pure (size, values)
         [] ->
-          interpError "FlatMap lambda returned no segment size"
+          error "FlatMap lambda returned no segment size"
 
     segmentFlags size
       | size > 0 = True : replicate (size - 1) False
@@ -1227,79 +994,50 @@ evalHist ::
   InterpM rep [Val]
 evalHist funs env width_exp input_names hist_ops bucket_lambda = do
   width <- evalSubExp env width_exp >>= expectPrimVal >>= expectInt
+  inputs <- mapM (evalSubExp env . Var) input_names
+  initial_histograms <- mapM (mapM (evalSubExp env . Var) . histDest) hist_ops
+  final_histograms <-
+    foldM
+      (runIteration inputs)
+      initial_histograms
+      [0 .. width - 1]
 
-  if width < 0
-    then interpError "Hist width cannot be negative"
-    else do
-      inputs <- mapM (lookupSoacInput env) input_names
-      mapM_ (validateSoacInput width) inputs
-
-      initial_histograms <- mapM initialHistogramsFor hist_ops
-      final_histograms <-
-        foldM
-          (runIteration inputs)
-          initial_histograms
-          [0 .. width - 1]
-
-      pure $ concat final_histograms
+  pure $ concat final_histograms
   where
     index_counts = map (shapeRank . histShape) hist_ops
     value_counts = map (length . histDest) hist_ops
-
-    initialHistogramsFor hist_op =
-      mapM lookupHistogram $ histDest hist_op
-
-    lookupHistogram name =
-      case M.lookup name env of
-        Just histogram@ArrayValue {} -> pure histogram
-        Just PrimVal {} -> interpError "Hist destination must be an array"
-        Just AccValue {} -> interpError "Hist destination must be an array"
-        Nothing -> interpError $ "unbound Hist destination: " <> prettyText name
 
     runIteration inputs histograms iteration = do
       input_rows <- mapM (rowAt iteration) inputs
       bucket_results <- evalLambda funs env bucket_lambda input_rows
 
-      (index_groups, remaining) <- splitGroups index_counts bucket_results
-      (value_groups, extra) <- splitGroups value_counts remaining
+      let (index_groups, remaining) = splitGroups index_counts bucket_results
+          (value_groups, _) = splitGroups value_counts remaining
 
       index_groups' <-
         mapM
           (mapM (expectPrimVal >=> expectInt))
           index_groups
 
-      if null extra
-        then
-          if length hist_ops /= length index_groups'
-            || length hist_ops /= length value_groups
-            || length hist_ops /= length histograms
-            then interpError "Hist operation count mismatch"
-            else
-              mapM
-                ( \(hist_operation, indices, value_and_histograms) ->
-                    updateHistogram hist_operation indices value_and_histograms
-                )
-                (zip3 hist_ops index_groups' (zip value_groups histograms))
-        else interpError "Hist bucket lambda returned too many values"
+      mapM
+        ( \(hist_operation, indices, value_and_histograms) ->
+            updateHistogram hist_operation indices value_and_histograms
+        )
+        (zip3 hist_ops index_groups' (zip value_groups histograms))
 
     updateHistogram hist_operation indices (values, histograms)
-      | length histograms /= length (histDest hist_operation) =
-          interpError "Hist destination count mismatch"
       | not (inBounds indices histograms) =
           pure histograms
       | otherwise = do
           old_bins <- mapM (readHistogramBin indices) histograms
           new_bins <-
             evalLambda funs env (histOp hist_operation) (old_bins <> values)
-
-          if length new_bins /= length histograms
-            then interpError "Hist operator result count mismatch"
-            else zipWithM (writeHistogramBin indices) histograms new_bins
+          zipWithM (writeHistogramBin indices) histograms new_bins
 
     inBounds indices histograms =
       case histograms of
         [] -> False
-        ArrayValue shape _ _ : _ ->
+        ArrayValue shape _ : _ ->
           length indices <= length shape
             && and (zipWith validIndex indices shape)
         _ -> False
@@ -1309,47 +1047,30 @@ evalHist funs env width_exp input_names hist_ops bucket_lambda = do
 
 evalStream :: FunEnv rep -> Env -> SubExp -> [VName] -> [SubExp] -> Lambda rep -> InterpM rep [Val]
 evalStream funs env width_exp input_names initial_accumulators lambda = do
-  width_value <- evalSubExp env width_exp >>= expectPrimVal
-  width <- expectInt width_value
-
-  if width < 0
-    then interpError "Stream width cannot be negative"
-    else do
-      inputs <- mapM (lookupSoacInput env) input_names
-      mapM_ (validateSoacInput width) inputs
-      accumulators <- mapM (evalSubExp env) initial_accumulators
-
-      let chunk_size = PrimVal $ IntValue $ Int64Value $ fromIntegral width
-          lambda_args = chunk_size : accumulators <> inputs
-      evalLambda funs env lambda lambda_args
+  width <- evalSubExp env width_exp
+  inputs <- mapM (evalSubExp env . Var) input_names
+  accumulators <- mapM (evalSubExp env) initial_accumulators
+  evalLambda funs env lambda $ width : accumulators <> inputs
 
 evalScrema :: FunEnv rep -> Env -> SubExp -> [VName] -> ScremaForm rep -> InterpM rep [Val]
 evalScrema funs env width_exp input_names (ScremaForm pre_lambda scans reductions post_lambda) = do
   width <- evalSubExp env width_exp >>= expectPrimVal >>= expectInt
-  if width < 0
-    then interpError "Screma width cannot be negative"
-    else do
-      inputs <- mapM (lookupSoacInput env) input_names
-      mapM_ (validateSoacInput width) inputs
+  inputs <- mapM (evalSubExp env . Var) input_names
+  initial_scan_states <- mapM (mapM (evalSubExp env) . scanNeutral) scans
+  initial_reduction_states <- mapM (mapM (evalSubExp env) . redNeutral) reductions
+  (_, final_reduction_states, reversed_output_rows) <-
+    foldM
+      (runIteration inputs)
+      (initial_scan_states, initial_reduction_states, [])
+      [0 .. width - 1]
+  collected_outputs <-
+    collectScremaOutputs
+      env
+      width
+      (lambdaReturnType post_lambda)
+      (reverse reversed_output_rows)
 
-      if length inputs /= length (lambdaParams pre_lambda)
-        then interpError "Screma input count does not match lambda parameters"
-        else do
-          initial_scan_states <- mapM (mapM (evalSubExp env) . scanNeutral) scans
-          initial_reduction_states <- mapM (mapM (evalSubExp env) . redNeutral) reductions
-          (_, final_reduction_states, reversed_output_rows) <-
-            foldM
-              (runIteration inputs)
-              (initial_scan_states, initial_reduction_states, [])
-              [0 .. width - 1]
-          collected_outputs <-
-            collectScremaOutputs
-              env
-              width
-              (lambdaReturnType post_lambda)
-              (reverse reversed_output_rows)
-
-          pure $ concat final_reduction_states <> collected_outputs
+  pure $ concat final_reduction_states <> collected_outputs
   where
     scan_sizes =
       map (length . scanNeutral) scans
@@ -1362,8 +1083,8 @@ evalScrema funs env width_exp input_names (ScremaForm pre_lambda scans reduction
       index = do
         input_rows <- mapM (rowAt index) inputs
         pre_results <- evalLambda funs env pre_lambda input_rows
-        (scan_contributions, after_scans) <- splitGroups scan_sizes pre_results
-        (reduction_contributions, map_values) <- splitGroups reduction_sizes after_scans
+        let (scan_contributions, after_scans) = splitGroups scan_sizes pre_results
+            (reduction_contributions, map_values) = splitGroups reduction_sizes after_scans
         next_scan_states <- updateScanStates funs env scans scan_states scan_contributions
         next_reduction_states <- updateReductionStates funs env reductions reduction_states reduction_contributions
         post_results <- evalLambda funs env post_lambda (concat next_scan_states <> map_values)
@@ -1375,12 +1096,9 @@ int64Val = PrimVal . IntValue . Int64Value . fromIntegral
 evalSegSpace :: FunEnv rep -> M.Map VName Val -> Seg.SegSpace -> Seg.KernelBody rep -> InterpM rep ([Int], [([Int], [KernelResultValue])])
 evalSegSpace funs env space@(Seg.SegSpace _ dimensions) body = do
   sizes <- mapM (evalSubExp env . snd >=> expectPrimVal >=> expectInt) dimensions
-  if any (< 0) sizes
-    then interpError "negative SegSpace dimension"
-    else do
-      let coordinates = sequence [[0 .. size - 1] | size <- sizes]
-      rows <- mapM (runWorker sizes) coordinates
-      pure (sizes, rows)
+  let coordinates = sequence [[0 .. size - 1] | size <- sizes]
+  rows <- mapM (runWorker sizes) coordinates
+  pure (sizes, rows)
   where
     runWorker sizes coordinate = do
       let worker_env = segSpaceEnv env space sizes coordinate
@@ -1407,9 +1125,9 @@ evalShape env =
 expectKernelValue :: KernelResultValue -> InterpM rep Val
 expectKernelValue (KernelValue result_value) = pure result_value
 expectKernelValue KernelTile {} =
-  interpError "TileReturns cannot be used as a segmented contribution"
+  error "TileReturns cannot be used as a segmented contribution"
 expectKernelValue KernelRegTile {} =
-  interpError "RegTileReturns cannot be used as a segmented contribution"
+  error "RegTileReturns cannot be used as a segmented contribution"
 
 segmentRows :: Int -> Int -> [a] -> [[a]]
 segmentRows segment_count segment_width =
@@ -1421,16 +1139,9 @@ segmentRows segment_count segment_width =
           let (segment, rest) = splitAt segment_width rows
            in segment : go (remaining - 1) rest
 
-splitSegContributions ::
-  [Seg.SegBinOp rep] ->
-  [Val] ->
-  InterpM rep [[Val]]
-splitSegContributions operators values = do
-  let sizes = map (length . Seg.segBinOpNeutral) operators
-  (groups, extra) <- splitGroups sizes values
-  if null extra
-    then pure groups
-    else interpError "segmented operator received too many values"
+splitSegContributions :: [Seg.SegBinOp rep] -> [Val] -> [[Val]]
+splitSegContributions operators =
+  fst . splitGroups (map (length . Seg.segBinOpNeutral) operators)
 
 initialSegBinOp ::
   Env ->
@@ -1460,37 +1171,34 @@ applySegBinOp funs env operator state contribution = do
   vector_shape <- evalShape env $ Seg.segBinOpShape operator
   let operator_lambda = Seg.segBinOpLambda operator
 
-  if length state /= length contribution
-    then interpError "segmented operator argument count mismatch"
-    else
-      if null vector_shape
-        then evalLambda funs env operator_lambda $ state <> contribution
-        else do
-          let coordinates =
-                sequence [[0 .. size - 1] | size <- vector_shape]
+  if null vector_shape
+    then evalLambda funs env operator_lambda $ state <> contribution
+    else do
+      let coordinates =
+            sequence [[0 .. size - 1] | size <- vector_shape]
 
-          result_rows <-
-            mapM
-              ( \coordinate -> do
-                  state_elements <-
-                    mapM (readAccumulatorElement coordinate) state
-                  contribution_elements <-
-                    mapM
-                      (readAccumulatorElement coordinate)
-                      contribution
-                  evalLambda
-                    funs
-                    env
-                    operator_lambda
-                    (state_elements <> contribution_elements)
-              )
-              coordinates
+      result_rows <-
+        mapM
+          ( \coordinate -> do
+              state_elements <-
+                mapM (readAccumulatorElement coordinate) state
+              contribution_elements <-
+                mapM
+                  (readAccumulatorElement coordinate)
+                  contribution
+              evalLambda
+                funs
+                env
+                operator_lambda
+                (state_elements <> contribution_elements)
+          )
+          coordinates
 
-          collectOutputs
-            env
-            vector_shape
-            (lambdaReturnType operator_lambda)
-            result_rows
+      collectOutputs
+        env
+        vector_shape
+        (lambdaReturnType operator_lambda)
+        result_rows
 
 initialSegStates ::
   Env ->
@@ -1506,17 +1214,13 @@ updateSegStates ::
   [[Val]] ->
   [[Val]] ->
   InterpM rep [[Val]]
-updateSegStates funs env operators states contributions
-  | length operators /= length states
-      || length operators /= length contributions =
-      interpError "segmented operator count mismatch"
-  | otherwise =
-      zipWithM
-        ( \operator (state, contribution) ->
-            applySegBinOp funs env operator state contribution
-        )
-        operators
-        (zip states contributions)
+updateSegStates funs env operators states contributions =
+  zipWithM
+    ( \operator (state, contribution) ->
+        applySegBinOp funs env operator state contribution
+    )
+    operators
+    (zip states contributions)
 
 evalSegOp ::
   FunEnv rep -> Env -> Seg.SegOp level rep -> InterpM rep [Val]
@@ -1531,7 +1235,7 @@ evalSegOp
 
     case shape of
       [] ->
-        interpError "SegRed requires a nonempty index space"
+        error "SegRed requires a nonempty index space"
       _ -> do
         let segment_shape = init shape
             segment_width = last shape
@@ -1577,10 +1281,9 @@ evalSegOp
         final_states <- foldM reduceRow initial_states rows
         pure $ concat final_states
 
-      reduceRow states values = do
-        contributions <-
+      reduceRow states values =
+        updateSegStates funs env operators states $
           splitSegContributions operators values
-        updateSegStates funs env operators states contributions
 evalSegOp
   funs
   env
@@ -1590,7 +1293,7 @@ evalSegOp
 
     case shape of
       [] ->
-        interpError "SegScan requires a nonempty index space"
+        error "SegScan requires a nonempty index space"
       _ -> do
         let segment_shape = init shape
             segment_width = last shape
@@ -1629,16 +1332,13 @@ evalSegOp
         let (contribution_values, map_values) =
               splitAt contribution_count values
 
-        contributions <-
-          splitSegContributions operators contribution_values
-
         next_states <-
           updateSegStates
             funs
             env
             operators
             states
-            contributions
+            (splitSegContributions operators contribution_values)
 
         post_results <-
           evalLambda
@@ -1656,9 +1356,10 @@ evalSegOp
 
     case shape of
       [] ->
-        interpError "SegHist requires a nonempty index space"
+        error "SegHist requires a nonempty index space"
       _ -> do
-        initial_histograms <- mapM initialHistogramsFor operators
+        initial_histograms <-
+          mapM (mapM (evalSubExp env . Var) . Seg.histDest) operators
 
         final_histograms <-
           foldM
@@ -1674,67 +1375,40 @@ evalSegOp
       value_counts =
         map (length . Seg.histDest) operators
 
-      initialHistogramsFor operator =
-        mapM lookupHistogram $ Seg.histDest operator
-
-      lookupHistogram name =
-        case M.lookup name env of
-          Just histogram@ArrayValue {} ->
-            pure histogram
-          Just PrimVal {} ->
-            interpError "SegHist destination must be an array"
-          Just AccValue {} ->
-            interpError "SegHist destination must be an array"
-          Nothing ->
-            interpError $
-              "unbound SegHist destination: " <> prettyText name
-
       updateFromWorker histograms (coordinate, worker_values) = do
         let segment_indices = init coordinate
 
         worker_values' <- mapM expectKernelValue worker_values
 
-        (index_groups, remaining) <-
-          splitGroups index_counts worker_values'
-        (value_groups, extra) <-
-          splitGroups value_counts remaining
+        let (index_groups, remaining) =
+              splitGroups index_counts worker_values'
+            (value_groups, _) =
+              splitGroups value_counts remaining
 
-        if not $ null extra
-          then
-            interpError "SegHist kernel body returned too many values"
-          else do
-            evaluated_indices <-
-              mapM
-                (mapM (expectPrimVal >=> expectInt))
-                index_groups
+        evaluated_indices <-
+          mapM
+            (mapM (expectPrimVal >=> expectInt))
+            index_groups
 
-            if length operators /= length evaluated_indices
-              || length operators /= length value_groups
-              || length operators /= length histograms
-              then
-                interpError "SegHist operation count mismatch"
-              else
-                mapM
-                  ( \(operator, bucket_indices, values_and_histograms) ->
-                      updateHistogram
-                        segment_indices
-                        operator
-                        bucket_indices
-                        values_and_histograms
-                  )
-                  ( zip3
-                      operators
-                      evaluated_indices
-                      (zip value_groups histograms)
-                  )
+        mapM
+          ( \(operator, bucket_indices, values_and_histograms) ->
+              updateHistogram
+                segment_indices
+                operator
+                bucket_indices
+                values_and_histograms
+          )
+          ( zip3
+              operators
+              evaluated_indices
+              (zip value_groups histograms)
+          )
 
       updateHistogram
         segment_indices
         operator
         bucket_indices
         (new_values, histograms)
-          | length histograms /= length (Seg.histDest operator) =
-              interpError "SegHist destination count mismatch"
           | not $ indicesInBounds full_indices histograms =
               pure histograms
           | otherwise = do
@@ -1774,14 +1448,10 @@ evalSegOp
                       (lambdaReturnType $ Seg.histOp operator)
                       result_rows
 
-              if length replacement_values /= length histograms
-                then
-                  interpError "SegHist operator result count mismatch"
-                else
-                  zipWithM
-                    (writeHistogramBin full_indices)
-                    histograms
-                    replacement_values
+              zipWithM
+                (writeHistogramBin full_indices)
+                histograms
+                replacement_values
           where
             full_indices =
               segment_indices <> bucket_indices
@@ -1791,7 +1461,7 @@ evalSegOp
 
       histogramIndicesInBounds
         indices
-        (ArrayValue histogram_shape _ _) =
+        (ArrayValue histogram_shape _) =
           length indices <= length histogram_shape
             && and
               (zipWith validIndex indices histogram_shape)
@@ -1801,17 +1471,12 @@ evalSegOp
       validIndex index dimension =
         index >= 0 && index < dimension
 
-splitGroups :: [Int] -> [a] -> InterpM rep ([[a]], [a])
-splitGroups [] values =
-  pure ([], values)
-splitGroups (size : sizes) values
-  | length group /= size =
-      interpError "Screma lambda returned too few values"
-  | otherwise = do
-      (groups, remaining) <- splitGroups sizes rest
-      pure (group : groups, remaining)
-  where
-    (group, rest) = splitAt size values
+splitGroups :: [Int] -> [a] -> ([[a]], [a])
+splitGroups [] values = ([], values)
+splitGroups (size : sizes) values =
+  let (group, rest) = splitAt size values
+      (groups, remaining) = splitGroups sizes rest
+   in (group : groups, remaining)
 
 evalLambda ::
   FunEnv rep ->
@@ -1819,20 +1484,8 @@ evalLambda ::
   GLambda rep return_type ->
   [Val] ->
   InterpM rep [Val]
-evalLambda funs env (Lambda params return_types body) args
-  | length params /= length args =
-      interpError "lambda argument count mismatch"
-  | otherwise = do
-      let bindings =
-            M.fromList $ zip (map paramName params) args
-          lambda_env =
-            M.union bindings env
-
-      results <- evalBody funs lambda_env body
-
-      if length results /= length return_types
-        then interpError "lambda result count mismatch"
-        else pure results
+evalLambda funs env (Lambda params _ body) args =
+  evalBody funs (M.union (M.fromList $ zip (map paramName params) args) env) body
 
 updateScanStates ::
   FunEnv rep ->
@@ -1841,24 +1494,11 @@ updateScanStates ::
   [[Val]] ->
   [[Val]] ->
   InterpM rep [[Val]]
-updateScanStates funs env scans states contributions
-  | length scans /= length states
-      || length scans /= length contributions =
-      interpError "Screma scan state count mismatch"
-  | otherwise =
-      zipWithM updateOne scans (zip states contributions)
+updateScanStates funs env scans states contributions =
+  zipWithM updateOne scans (zip states contributions)
   where
-    updateOne scan (state, contribution) = do
-      next <-
-        evalLambda
-          funs
-          env
-          (scanLambda scan)
-          (state <> contribution)
-
-      if length next /= length state
-        then interpError "scan result count mismatch"
-        else pure next
+    updateOne scan (state, contribution) =
+      evalLambda funs env (scanLambda scan) (state <> contribution)
 
 updateReductionStates ::
   FunEnv rep ->
@@ -1867,55 +1507,14 @@ updateReductionStates ::
   [[Val]] ->
   [[Val]] ->
   InterpM rep [[Val]]
-updateReductionStates funs env reductions states contributions
-  | length reductions /= length states
-      || length reductions /= length contributions =
-      interpError "Screma reduction state count mismatch"
-  | otherwise =
-      zipWithM updateOne reductions (zip states contributions)
+updateReductionStates funs env reductions states contributions =
+  zipWithM updateOne reductions (zip states contributions)
   where
-    updateOne reduction (state, contribution) = do
-      next <-
-        evalLambda
-          funs
-          env
-          (redLambda reduction)
-          (state <> contribution)
-
-      if length next /= length state
-        then interpError "reduction result count mismatch"
-        else pure next
-
-lookupSoacInput :: Env -> VName -> InterpM rep Val
-lookupSoacInput env name =
-  case M.lookup name env of
-    Just array@ArrayValue {} ->
-      pure array
-    Just val@AccValue {} ->
-      pure val
-    Just PrimVal {} ->
-      interpError "Screma input must be an array"
-    Nothing ->
-      interpError $ "unbound Screma input: " <> prettyText name
-
-validateSoacInput :: Int -> Val -> InterpM rep ()
-validateSoacInput width (ArrayValue shape _ values) =
-  case shape of
-    outer_size : _
-      | outer_size /= width ->
-          interpError "Screma input outer size mismatch"
-      | arrayValuesLength values /= product shape ->
-          interpError "invalid Screma input storage"
-      | otherwise ->
-          pure ()
-    [] ->
-      interpError "Screma input must have positive rank"
-validateSoacInput _ PrimVal {} =
-  interpError "Screma input must be an array"
-validateSoacInput _ AccValue {} = pure ()
+    updateOne reduction (state, contribution) =
+      evalLambda funs env (redLambda reduction) (state <> contribution)
 
 rowAt :: Int -> Val -> InterpM rep Val
-rowAt index (ArrayValue (_ : row_shape) element_type values)
+rowAt index (ArrayValue (_ : row_shape) values)
   | null row_shape =
       PrimVal <$> readArrayValue values index
   | otherwise = do
@@ -1923,199 +1522,97 @@ rowAt index (ArrayValue (_ : row_shape) element_type values)
           offset = index * row_size
       row_values <-
         mapM (readArrayValue values) [offset .. offset + row_size - 1]
-      newArrayValue row_shape element_type row_values
+      newArrayValue row_shape (arrayValuesType values) row_values
 rowAt _ accumulator@AccValue {} =
   pure accumulator
 rowAt _ _ =
-  interpError "cannot extract a row from this value"
+  error "cannot extract a row from this value"
 
 readAccumulatorElement :: [Int] -> Val -> InterpM rep Val
-readAccumulatorElement indices (ArrayValue shape element_type values)
-  | length indices > length shape =
-      interpError "accumulator index rank exceeds array rank"
-  | arrayValuesLength values /= product shape =
-      interpError "invalid accumulator backing-array storage"
-  | otherwise = do
-      let index_rank = length indices
-          index_shape = take index_rank shape
-          element_shape = drop index_rank shape
-          element_size = product element_shape
-          offset = linearIndex index_shape indices * element_size
+readAccumulatorElement indices (ArrayValue shape values) = do
+  let index_rank = length indices
+      element_shape = drop index_rank shape
+      element_size = product element_shape
+      offset = linearIndex (take index_rank shape) indices * element_size
+  case element_shape of
+    [] -> PrimVal <$> readArrayValue values offset
+    _ -> do
       element_values <- mapM (readArrayValue values) [offset .. offset + element_size - 1]
-      case element_shape of
-        [] ->
-          case element_values of
-            [val] -> pure $ PrimVal val
-            _ -> interpError "invalid scalar accumulator element"
-        _ -> newArrayValue element_shape element_type element_values
+      newArrayValue element_shape (arrayValuesType values) element_values
 readAccumulatorElement _ _ =
-  interpError "accumulator backing value must be an array"
+  error "accumulator backing value must be an array"
 
 writeAccumulatorElementInPlace :: [Int] -> Val -> Val -> InterpM rep ()
-writeAccumulatorElementInPlace
-  indices
-  (ArrayValue shape element_type values)
-  replacement
-    | length indices > length shape =
-        interpError "accumulator index rank exceeds array rank"
-    | otherwise = do
-        let index_rank = length indices
-            index_shape = take index_rank shape
-            element_shape = drop index_rank shape
-            element_size = product element_shape
-            offset = linearIndex index_shape indices * element_size
-
-        replacement_values <-
-          updateValues element_type element_shape replacement
-
-        mapM_
-          (uncurry $ writeArrayValue values)
-          (zip [offset ..] replacement_values)
+writeAccumulatorElementInPlace indices (ArrayValue shape values) replacement = do
+  let index_rank = length indices
+      element_size = product $ drop index_rank shape
+      offset = linearIndex (take index_rank shape) indices * element_size
+  replacement_values <- valElements replacement
+  mapM_
+    (uncurry $ writeArrayValue values)
+    (zip [offset ..] replacement_values)
 writeAccumulatorElementInPlace _ _ _ =
-  interpError "accumulator backing value must be an array"
+  error "accumulator backing value must be an array"
 
 readHistogramBin :: [Int] -> Val -> InterpM rep Val
-readHistogramBin indices (ArrayValue shape element_type values) = do
+readHistogramBin indices (ArrayValue shape values) = do
   let rank = length indices
       bin_shape = drop rank shape
       bin_size = product bin_shape
       offset = linearIndex (take rank shape) indices * bin_size
-  bin_values <- mapM (readArrayValue values) [offset .. offset + bin_size - 1]
   case bin_shape of
-    [] ->
-      case bin_values of
-        [val] -> pure $ PrimVal val
-        _ -> interpError "invalid scalar Hist bin"
-    _ ->
-      if length bin_values == bin_size
-        then newArrayValue bin_shape element_type bin_values
-        else interpError "invalid Hist bin storage"
-readHistogramBin _ PrimVal {} =
-  interpError "Hist destination must be an array"
-readHistogramBin _ AccValue {} =
-  interpError "Hist destination must be an array"
+    [] -> PrimVal <$> readArrayValue values offset
+    _ -> do
+      bin_values <- mapM (readArrayValue values) [offset .. offset + bin_size - 1]
+      newArrayValue bin_shape (arrayValuesType values) bin_values
+readHistogramBin _ _ =
+  error "Hist destination must be an array"
 
 writeHistogramBin :: [Int] -> Val -> Val -> InterpM rep Val
-writeHistogramBin
-  indices
-  (ArrayValue shape element_type values)
-  replacement = do
-    let rank = length indices
-        bin_shape = drop rank shape
-        bin_size = product bin_shape
-        offset = linearIndex (take rank shape) indices * bin_size
-
-    replacement_values <-
-      updateValues element_type bin_shape replacement
-
-    if length replacement_values /= bin_size
-      then interpError "invalid Hist operator result storage"
-      else do
-        mapM_
-          (uncurry $ writeArrayValue values)
-          (zip [offset ..] replacement_values)
-
-        pure $ ArrayValue shape element_type values
-writeHistogramBin _ PrimVal {} _ =
-  interpError "Hist destination must be an array"
-writeHistogramBin _ AccValue {} _ =
-  interpError "Hist destination must be an array"
+writeHistogramBin indices histogram@(ArrayValue shape values) replacement = do
+  let rank = length indices
+      bin_size = product $ drop rank shape
+      offset = linearIndex (take rank shape) indices * bin_size
+  replacement_values <- valElements replacement
+  mapM_
+    (uncurry $ writeArrayValue values)
+    (zip [offset ..] replacement_values)
+  pure histogram
+writeHistogramBin _ _ _ =
+  error "Hist destination must be an array"
 
 collectFlatMapOutput ::
   Env ->
-  [Int] ->
   Int ->
   ExtType ->
   [Val] ->
   InterpM rep Val
-collectFlatMapOutput env sizes total_size result_type rows
+collectFlatMapOutput env total_size result_type rows
   | flatMapNonuniform result_type =
-      collectNonuniform
-  | otherwise =
-      collectUniform
-  where
-    collectNonuniform = do
-      arrays <- zipWithM expectSegment sizes rows
-
-      case arrays of
-        [] -> do
+      case rows of
+        ArrayValue (_ : row_shape) values : _ -> do
+          element_values <- concat <$> mapM valElements rows
+          newArrayValue (total_size : row_shape) (arrayValuesType values) element_values
+        _ -> do
           (element_type, row_shape) <- emptyArrayType True
           newArrayValue (total_size : row_shape) element_type []
-        (row_shape, element_type, values) : remaining
-          | not $ all (sameArray row_shape element_type) remaining ->
-              interpError "inconsistent FlatMap segment results"
-          | otherwise ->
-              newArrayValue
-                (total_size : row_shape)
-                element_type
-                (values <> concatMap third remaining)
-
-    collectUniform =
+  | otherwise =
       case result_type of
-        Prim expected_type -> do
-          values <- mapM expectPrimitive rows
-          if all ((== expected_type) . P.primValueType) values
-            then newArrayValue [length rows] expected_type values
-            else interpError "FlatMap uniform result type mismatch"
-        Array expected_type _ _ ->
+        Prim element_type ->
+          newArrayValue [length rows] element_type =<< mapM expectPrimVal rows
+        Array element_type _ _ ->
           case rows of
-            [] -> do
-              (_, row_shape) <- emptyArrayType False
-              newArrayValue (0 : row_shape) expected_type []
+            ArrayValue row_shape _ : _ -> do
+              element_values <- concat <$> mapM valElements rows
+              newArrayValue (length rows : row_shape) element_type element_values
             _ -> do
-              arrays <- mapM expectArray rows
-              case arrays of
-                [] ->
-                  interpError "internal empty FlatMap output"
-                (row_shape, element_type, values) : remaining
-                  | element_type /= expected_type ->
-                      interpError "FlatMap uniform result type mismatch"
-                  | not $ all (sameArray row_shape element_type) remaining ->
-                      interpError "inconsistent FlatMap uniform results"
-                  | otherwise ->
-                      newArrayValue
-                        (length rows : row_shape)
-                        element_type
-                        (values <> concatMap third remaining)
+              (_, row_shape) <- emptyArrayType False
+              newArrayValue (0 : row_shape) element_type []
         Acc {} ->
-          interpError "FlatMap accumulator outputs are unsupported"
+          error "FlatMap accumulator outputs are unsupported"
         Mem {} ->
-          interpError "FlatMap memory outputs are unsupported"
-
-    expectSegment expected_size (ArrayValue (size : row_shape) element_type values)
-      | size /= expected_size =
-          interpError "FlatMap segment size does not match returned size"
-      | arrayValuesLength values /= product (size : row_shape) =
-          interpError "invalid FlatMap segment storage"
-      | otherwise = do
-          primitive_values <- arrayValues values
-          pure (row_shape, element_type, primitive_values)
-    expectSegment _ _ =
-      interpError "nonuniform FlatMap result must be an array"
-
-    expectPrimitive (PrimVal val) = pure val
-    expectPrimitive ArrayValue {} =
-      interpError "expected primitive FlatMap result"
-    expectPrimitive AccValue {} =
-      interpError "expected primitive FlatMap result"
-
-    expectArray (ArrayValue shape element_type values)
-      | arrayValuesLength values == product shape = do
-          primitive_values <- arrayValues values
-          pure (shape, element_type, primitive_values)
-      | otherwise =
-          interpError "invalid FlatMap result storage"
-    expectArray PrimVal {} =
-      interpError "expected array-valued FlatMap result"
-    expectArray AccValue {} =
-      interpError "expected array-valued FlatMap result"
-
-    sameArray shape element_type (other_shape, other_type, _) =
-      shape == other_shape
-        && element_type == other_type
-
-    third (_, _, values) = values
-
+          error "FlatMap memory outputs are unsupported"
+  where
     emptyArrayType drop_existential =
       case result_type of
         Array element_type (Shape dimensions) _ -> do
@@ -2125,12 +1622,12 @@ collectFlatMapOutput env sizes total_size result_type rows
           shape <- mapM evalFreeDimension dimensions'
           pure (element_type, shape)
         _ ->
-          interpError "nonuniform FlatMap result must be an array"
+          error "nonuniform FlatMap result must be an array"
 
     evalFreeDimension (Free dimension) =
       evalSubExp env dimension >>= expectPrimVal >>= expectInt
     evalFreeDimension (Ext _) =
-      interpError "unexpected existential FlatMap result dimension"
+      error "unexpected existential FlatMap result dimension"
 
 collectOutputs ::
   Env ->
@@ -2138,11 +1635,8 @@ collectOutputs ::
   [Type] ->
   [[Val]] ->
   InterpM rep [Val]
-collectOutputs env outer_shape return_types iteration_results
-  | any ((/= length return_types) . length) iteration_results =
-      interpError "inconsistent output count"
-  | otherwise =
-      zipWithM collectOne return_types columns
+collectOutputs env outer_shape return_types iteration_results =
+  zipWithM collectOne return_types columns
   where
     columns
       | null iteration_results =
@@ -2150,69 +1644,28 @@ collectOutputs env outer_shape return_types iteration_results
       | otherwise =
           L.transpose iteration_results
 
-    collectOne (Prim expected_type) rows = do
-      values <- mapM expectPrimitive rows
-      if not $ all ((== expected_type) . P.primValueType) values
-        then interpError "primitive output type mismatch"
-        else case (outer_shape, values) of
-          ([], [val]) ->
-            pure $ PrimVal val
-          ([], _) ->
-            interpError "invalid scalar output count"
-          _ ->
-            newArrayValue outer_shape expected_type values
-    collectOne (Array expected_type annotated_shape _) [] = do
-      row_shape <-
-        mapM
-          ( \dimension ->
-              evalSubExp env dimension >>= expectPrimVal >>= expectInt
-          )
-          (shapeDims annotated_shape)
-      newArrayValue (outer_shape <> row_shape) expected_type []
-    collectOne (Array expected_type _ _) rows = do
-      evaluated_rows <- mapM expectArray rows
-      case evaluated_rows of
-        [] ->
-          interpError "internal empty output"
-        (first_shape, first_type, first_values) : remaining
-          | first_type /= expected_type ->
-              interpError "array output type mismatch"
-          | not $ all (sameRow first_shape first_type) remaining ->
-              interpError "inconsistent array output rows"
-          | otherwise ->
-              newArrayValue
-                (outer_shape <> first_shape)
-                expected_type
-                (first_values <> concatMap third remaining)
+    collectOne (Prim element_type) rows = do
+      values <- mapM expectPrimVal rows
+      case (outer_shape, values) of
+        ([], [val]) -> pure $ PrimVal val
+        ([], _) -> error "invalid scalar output count"
+        _ -> newArrayValue outer_shape element_type values
+    collectOne (Array element_type annotated_shape _) [] = do
+      row_shape <- evalShape env annotated_shape
+      newArrayValue (outer_shape <> row_shape) element_type []
+    collectOne (Array element_type _ _) rows@(ArrayValue row_shape _ : _) = do
+      element_values <- concat <$> mapM valElements rows
+      newArrayValue (outer_shape <> row_shape) element_type element_values
+    collectOne Array {} _ =
+      error "expected array output"
     collectOne (Acc certificate _ _) [] =
       case M.lookup certificate env of
         Just accumulator@AccValue {} -> pure accumulator
-        _ -> interpError "accumulator output has no backing storage"
-    collectOne Acc {} rows@(row : _) =
-      row <$ mapM_ expectAccumulator rows
+        _ -> error "accumulator output has no backing storage"
+    collectOne Acc {} (row : _) =
+      pure row
     collectOne Mem {} _ =
-      interpError "memory outputs are unsupported"
-
-    expectPrimitive (PrimVal val) = pure val
-    expectPrimitive _ = interpError "expected primitive output"
-
-    expectArray (ArrayValue shape element_type values)
-      | arrayValuesLength values == product shape = do
-          primitive_values <- arrayValues values
-          pure (shape, element_type, primitive_values)
-      | otherwise =
-          interpError "invalid array output storage"
-    expectArray _ = interpError "expected array output"
-
-    expectAccumulator AccValue {} = pure ()
-    expectAccumulator _ = interpError "expected accumulator output"
-
-    sameRow expected_shape expected_type (shape, element_type, values) =
-      shape == expected_shape
-        && element_type == expected_type
-        && length values == product shape
-
-    third (_, _, values) = values
+      error "memory outputs are unsupported"
 
 collectScremaOutputs :: Env -> Int -> [Type] -> [[Val]] -> InterpM rep [Val]
 collectScremaOutputs env width = collectOutputs env [width]
@@ -2225,10 +1678,6 @@ collectSegOutputs ::
   [([Int], [KernelResultValue])] ->
   InterpM rep [Val]
 collectSegOutputs env worker_shape return_types result_specs worker_rows
-  | length return_types /= length result_specs =
-      interpError "segmented result type count mismatch"
-  | any ((/= length return_types) . length . snd) worker_rows =
-      interpError "inconsistent segmented output count"
   | null worker_rows =
       zipWithM collectEmpty return_types result_specs
   | otherwise =
@@ -2245,7 +1694,7 @@ collectSegOutputs env worker_shape return_types result_specs worker_rows
 
     collectOne result_type rows =
       case rows of
-        [] -> interpError "internal empty segmented output"
+        [] -> error "internal empty segmented output"
         (_, KernelValue {}) : _ -> do
           values <- mapM (expectOrdinary . snd) rows
           collectOutputs env worker_shape [result_type] (map pure values)
@@ -2253,7 +1702,6 @@ collectSegOutputs env worker_shape return_types result_specs worker_rows
         (_, KernelTile dimensions _) : _ -> do
           let output_shape = map fst dimensions
               tile_sizes = map snd dimensions
-          validateTileDimensions output_shape tile_sizes
           collectTiled
             result_type
             output_shape
@@ -2263,8 +1711,6 @@ collectSegOutputs env worker_shape return_types result_specs worker_rows
           let output_shape = map firstOf3 dimensions
               block_sizes = map secondOf3 dimensions
               reg_sizes = map thirdOf3 dimensions
-          validateTileDimensions output_shape block_sizes
-          validateTileDimensions output_shape reg_sizes
           collectTiled
             result_type
             output_shape
@@ -2281,15 +1727,10 @@ collectSegOutputs env worker_shape return_types result_specs worker_rows
     tiledValueAt rows source_indices output_coordinate = do
       let (worker_coordinate, source_coordinate) =
             source_indices output_coordinate
-      result <-
-        maybe
-          (interpError "missing worker for tiled result")
-          pure
-          (lookup worker_coordinate rows)
-      tile <- case result of
-        KernelTile _ tile_value -> pure tile_value
-        KernelRegTile _ tile_value -> pure tile_value
-        KernelValue {} -> interpError "inconsistent segmented result layout"
+          tile = case lookup worker_coordinate rows of
+            Just (KernelTile _ tile_value) -> tile_value
+            Just (KernelRegTile _ tile_value) -> tile_value
+            _ -> error "inconsistent segmented result layout"
       readAccumulatorElement source_coordinate tile
 
     tileSourceIndices tile_sizes output_coordinate =
@@ -2312,21 +1753,14 @@ collectSegOutputs env worker_shape return_types result_specs worker_rows
     resultShape (Seg.RegTileReturns _ dimensions _) =
       mapM (evalInt . firstOf3) dimensions
 
-    validateTileDimensions output_shape tile_sizes
-      | any (< 0) output_shape =
-          interpError "negative tiled result dimension"
-      | any (<= 0) tile_sizes =
-          interpError "nonpositive tile size"
-      | otherwise = pure ()
-
     evalInt sub_exp =
       evalSubExp env sub_exp >>= expectPrimVal >>= expectInt
 
     expectOrdinary (KernelValue result_value) = pure result_value
-    expectOrdinary _ = interpError "inconsistent segmented result layout"
+    expectOrdinary _ = error "inconsistent segmented result layout"
 
     expectOne [result_value] = pure result_value
-    expectOne _ = interpError "invalid segmented output count"
+    expectOne _ = error "invalid segmented output count"
 
     firstOf3 (first, _, _) = first
     secondOf3 (_, second, _) = second
@@ -2363,14 +1797,10 @@ runProgram eval_op prog entry inputs = runExceptT $ flip runReaderT initial_inte
               consts_env
       results <- evalBody funs env (funDefBody fun)
       result_signedness <- entryResultSignedness prog fun
-      let result_context_count = length results - length result_signedness
-      if result_context_count < 0
-        then interpError "entry point returned too few values"
-        else
-          zipWithM
-            toValue
-            result_signedness
-            (drop result_context_count results)
+      zipWithM
+        toValue
+        result_signedness
+        (drop (length results - length result_signedness) results)
   where
     initial_interp_env =
       InterpEnv
@@ -2398,11 +1828,11 @@ runProgram eval_op prog entry inputs = runExceptT $ flip runReaderT initial_inte
       | expected == actual = pure bindings
       | otherwise = interpError "entry point input shape mismatch"
     bindDimension _ _ =
-      interpError "invalid entry point input dimension"
+      error "invalid entry point input dimension"
 
     lookupContextArg bindings param =
       maybe
-        (interpError "unbound entry point shape parameter")
+        (error "unbound entry point shape parameter")
         pure
         (M.lookup (paramName param) bindings)
 
@@ -2415,13 +1845,13 @@ entryResultSignedness prog fun =
     Just (_, _, result, _) ->
       entryPointTypeSignedness (progTypes prog) $ entryResultType result
     Nothing ->
-      interpError "function is not an entry point"
+      error "function is not an entry point"
   where
     entryPointTypeSignedness _ (TypeTransparent value_type) =
       pure [valueTypeSignedness value_type]
     entryPointTypeSignedness types@(OpaqueTypes opaque_types) (TypeOpaque name) =
       case lookup name opaque_types of
-        Nothing -> interpError $ "unknown opaque type: " <> prettyText name
+        Nothing -> error $ "unknown opaque type: " <> prettyString name
         Just (opaque_type, _) -> opaqueTypeSignedness types opaque_type
 
     opaqueTypeSignedness _ (OpaqueArray _ _ value_types) =
@@ -2506,73 +1936,73 @@ fromPrimitiveVector shape element_type wrap values
 toValue :: Signedness -> Val -> InterpM rep V.Value
 toValue signedness (PrimVal primitive_value) =
   toPrimitiveValue signedness [] (P.primValueType primitive_value) [primitive_value]
-toValue signedness (ArrayValue shape element_type values) = do
+toValue signedness (ArrayValue shape values) = do
   primitive_values <- arrayValues values
-  toPrimitiveValue signedness shape element_type primitive_values
+  toPrimitiveValue signedness shape (arrayValuesType values) primitive_values
 toValue _ AccValue {} =
-  interpError "accumulators cannot be represented as external values"
+  error "accumulators cannot be represented as external values"
 
 toPrimitiveValue :: Signedness -> [Int] -> PrimType -> [PrimValue] -> InterpM rep V.Value
 toPrimitiveValue Signed shape (IntType Int8) values =
-  V.I8Value (shapeVector shape) . SVec.fromList <$> mapM expectInt8 values
+  pure $ V.I8Value (shapeVector shape) $ SVec.fromList $ map expectInt8 values
   where
-    expectInt8 (IntValue (Int8Value element)) = pure element
-    expectInt8 _ = interpError "expected an i8 value"
+    expectInt8 (IntValue (Int8Value element)) = element
+    expectInt8 _ = error "expected an i8 value"
 toPrimitiveValue Signed shape (IntType Int16) values =
-  V.I16Value (shapeVector shape) . SVec.fromList <$> mapM expectInt16 values
+  pure $ V.I16Value (shapeVector shape) $ SVec.fromList $ map expectInt16 values
   where
-    expectInt16 (IntValue (Int16Value element)) = pure element
-    expectInt16 _ = interpError "expected an i16 value"
+    expectInt16 (IntValue (Int16Value element)) = element
+    expectInt16 _ = error "expected an i16 value"
 toPrimitiveValue Signed shape (IntType Int32) values =
-  V.I32Value (shapeVector shape) . SVec.fromList <$> mapM expectInt32 values
+  pure $ V.I32Value (shapeVector shape) $ SVec.fromList $ map expectInt32 values
   where
-    expectInt32 (IntValue (Int32Value element)) = pure element
-    expectInt32 _ = interpError "expected an i32 value"
+    expectInt32 (IntValue (Int32Value element)) = element
+    expectInt32 _ = error "expected an i32 value"
 toPrimitiveValue Signed shape (IntType Int64) values =
-  V.I64Value (shapeVector shape) . SVec.fromList <$> mapM expectInt64 values
+  pure $ V.I64Value (shapeVector shape) $ SVec.fromList $ map expectInt64 values
   where
-    expectInt64 (IntValue (Int64Value element)) = pure element
-    expectInt64 _ = interpError "expected an i64 value"
+    expectInt64 (IntValue (Int64Value element)) = element
+    expectInt64 _ = error "expected an i64 value"
 toPrimitiveValue Unsigned shape (IntType Int8) values =
-  V.U8Value (shapeVector shape) . SVec.fromList <$> mapM expectUInt8 values
+  pure $ V.U8Value (shapeVector shape) $ SVec.fromList $ map expectUInt8 values
   where
-    expectUInt8 (IntValue (Int8Value element)) = pure $ fromIntegral element
-    expectUInt8 _ = interpError "expected a u8 value"
+    expectUInt8 (IntValue (Int8Value element)) = fromIntegral element
+    expectUInt8 _ = error "expected a u8 value"
 toPrimitiveValue Unsigned shape (IntType Int16) values =
-  V.U16Value (shapeVector shape) . SVec.fromList <$> mapM expectUInt16 values
+  pure $ V.U16Value (shapeVector shape) $ SVec.fromList $ map expectUInt16 values
   where
-    expectUInt16 (IntValue (Int16Value element)) = pure $ fromIntegral element
-    expectUInt16 _ = interpError "expected a u16 value"
+    expectUInt16 (IntValue (Int16Value element)) = fromIntegral element
+    expectUInt16 _ = error "expected a u16 value"
 toPrimitiveValue Unsigned shape (IntType Int32) values =
-  V.U32Value (shapeVector shape) . SVec.fromList <$> mapM expectUInt32 values
+  pure $ V.U32Value (shapeVector shape) $ SVec.fromList $ map expectUInt32 values
   where
-    expectUInt32 (IntValue (Int32Value element)) = pure $ fromIntegral element
-    expectUInt32 _ = interpError "expected a u32 value"
+    expectUInt32 (IntValue (Int32Value element)) = fromIntegral element
+    expectUInt32 _ = error "expected a u32 value"
 toPrimitiveValue Unsigned shape (IntType Int64) values =
-  V.U64Value (shapeVector shape) . SVec.fromList <$> mapM expectUInt64 values
+  pure $ V.U64Value (shapeVector shape) $ SVec.fromList $ map expectUInt64 values
   where
-    expectUInt64 (IntValue (Int64Value element)) = pure $ fromIntegral element
-    expectUInt64 _ = interpError "expected a u64 value"
+    expectUInt64 (IntValue (Int64Value element)) = fromIntegral element
+    expectUInt64 _ = error "expected a u64 value"
 toPrimitiveValue _ shape (FloatType Float16) values =
-  V.F16Value (shapeVector shape) . SVec.fromList <$> mapM expectFloat16 values
+  pure $ V.F16Value (shapeVector shape) $ SVec.fromList $ map expectFloat16 values
   where
-    expectFloat16 (FloatValue (Float16Value element)) = pure element
-    expectFloat16 _ = interpError "expected an f16 value"
+    expectFloat16 (FloatValue (Float16Value element)) = element
+    expectFloat16 _ = error "expected an f16 value"
 toPrimitiveValue _ shape (FloatType Float32) values =
-  V.F32Value (shapeVector shape) . SVec.fromList <$> mapM expectFloat32 values
+  pure $ V.F32Value (shapeVector shape) $ SVec.fromList $ map expectFloat32 values
   where
-    expectFloat32 (FloatValue (Float32Value element)) = pure element
-    expectFloat32 _ = interpError "expected an f32 value"
+    expectFloat32 (FloatValue (Float32Value element)) = element
+    expectFloat32 _ = error "expected an f32 value"
 toPrimitiveValue _ shape (FloatType Float64) values =
-  V.F64Value (shapeVector shape) . SVec.fromList <$> mapM expectFloat64 values
+  pure $ V.F64Value (shapeVector shape) $ SVec.fromList $ map expectFloat64 values
   where
-    expectFloat64 (FloatValue (Float64Value element)) = pure element
-    expectFloat64 _ = interpError "expected an f64 value"
+    expectFloat64 (FloatValue (Float64Value element)) = element
+    expectFloat64 _ = error "expected an f64 value"
 toPrimitiveValue _ shape Bool values =
-  V.BoolValue (shapeVector shape) . SVec.fromList <$> mapM expectBool values
+  pure $ V.BoolValue (shapeVector shape) $ SVec.fromList $ map expectBool values
   where
-    expectBool (BoolValue element) = pure element
-    expectBool _ = interpError "expected a bool value"
+    expectBool (BoolValue element) = element
+    expectBool _ = error "expected a bool value"
 toPrimitiveValue _ _ Unit _ =
   interpError "unit values cannot be represented as external values"
 
@@ -2619,7 +2049,7 @@ evalSizeOp env (CalcNumBlocks width_exp _ block_size_exp) = do
   width <- evalSubExp env width_exp >>= expectPrimVal >>= expectInt
   block_size <- evalSubExp env block_size_exp >>= expectPrimVal >>= expectInt
   if block_size <= 0
-    then interpError "thread-block size must be positive"
+    then error "thread-block size must be positive"
     else
       pure
         [ int64Val $
