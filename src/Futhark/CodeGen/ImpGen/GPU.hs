@@ -255,10 +255,10 @@ expCompiler (Pat [pe]) (BasicOp (Iota n x s et)) = do
   sIota (patElemName pe) (pe64 n) x' s' et
 expCompiler (Pat [pe]) (BasicOp (Replicate shape se))
   | Acc {} <- patElemType pe = pure ()
+  | shapeRank shape == 0 =
+      copyDWIM (patElemName pe) [] se []
   | otherwise =
-      if shapeRank shape == 0
-        then copyDWIM (patElemName pe) [] se []
-        else sReplicate (patElemName pe) se
+      sReplicate (patElemName pe) se
 -- Allocation in the "shared" space is just a placeholder.
 expCompiler _ (Op (Alloc _ (Space "shared"))) =
   pure ()
