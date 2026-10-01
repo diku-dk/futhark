@@ -220,10 +220,11 @@ allocsForStm ::
   (Allocable fromrep torep inner) =>
   [Ident] ->
   StmAux a ->
-  Exp torep ->
+  Exp fromrep ->
   AllocM fromrep torep (Stm torep)
-allocsForStm idents aux e = do
+allocsForStm idents aux e0 = do
   def_space <- askDefaultSpace
+  e <- allocInExp e0
   hints <- expHints e
   (rts, e') <- expReturns' e
   pes <- allocsForPat def_space idents rts hints
@@ -757,7 +758,7 @@ allocInStm ::
   Stm fromrep ->
   AllocM fromrep torep ()
 allocInStm (Let (Pat pes) aux e) =
-  addStm =<< allocsForStm (map patElemIdent pes) aux =<< allocInExp e
+  addStm =<< allocsForStm (map patElemIdent pes) aux e
 
 allocInLambda ::
   (Allocable fromrep torep inner) =>
