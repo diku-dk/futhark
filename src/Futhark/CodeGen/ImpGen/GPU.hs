@@ -249,16 +249,25 @@ withAcc pat inputs lam = do
 
 expCompiler :: ExpCompiler GPUMem HostEnv Imp.HostOp
 -- We generate a simple kernel for iota and replicate.
-expCompiler (Pat [pe]) (BasicOp (Iota n x s et)) = do
-  x' <- toExp x
-  s' <- toExp s
-  sIota (patElemName pe) (pe64 n) x' s' et
-expCompiler (Pat [pe]) (BasicOp (Replicate shape se))
+expCompiler dest@(Pat [pe]) e@(BasicOp (Iota n x s et)) = do
+  space <- lookupArraySpace $ patElemName pe
+  -- Might still have non-GPU iotas.
+  if space == Space "device"
+    then do
+      x' <- toExp x
+      s' <- toExp s
+      sIota (patElemName pe) (pe64 n) x' s' et
+    else defCompileExp dest e
+expCompiler dest@(Pat [pe]) e@(BasicOp (Replicate shape se))
   | Acc {} <- patElemType pe = pure ()
   | shapeRank shape == 0 =
       copyDWIM (patElemName pe) [] se []
-  | otherwise =
-      sReplicate (patElemName pe) se
+  | otherwise = do
+      space <- lookupArraySpace $ patElemName pe
+      -- Might still have non-GPU replicates.
+      if space == Space "device"
+        then sReplicate (patElemName pe) se
+        else defCompileExp dest e
 -- Allocation in the "shared" space is just a placeholder.
 expCompiler _ (Op (Alloc _ (Space "shared"))) =
   pure ()
