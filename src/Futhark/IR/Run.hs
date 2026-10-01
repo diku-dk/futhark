@@ -9,7 +9,7 @@
 -- Hence you should not expect programs to run fast at all.
 module Futhark.IR.Run (runSOACS, runGPU) where
 
-import Control.Monad (foldM, zipWithM, zipWithM_, (>=>))
+import Control.Monad (foldM, forM, zipWithM, zipWithM_, (>=>))
 import Control.Monad.Error.Class
 import Control.Monad.Except (ExceptT, runExceptT)
 import Control.Monad.IO.Class
@@ -260,8 +260,6 @@ evalKernelBody funs env (Body _ stms results) = do
         <$> evalInt env' size
         <*> evalInt env' block_tile
         <*> evalInt env' reg_tile
-    evalInt env' sub_exp =
-      evalSubExp env' sub_exp >>= expectPrimVal >>= expectInt
 
 -- Evaluate the expression then bind the pattern names to its results
 evalStm :: FunEnv rep -> Env -> Stm rep -> InterpM rep Env
@@ -427,6 +425,9 @@ expectInt :: PrimValue -> InterpM rep Int
 expectInt (IntValue i) = pure $ P.valueIntegral i
 expectInt _ = error "expected an integer value"
 
+evalInt :: Env -> SubExp -> InterpM rep Int
+evalInt env = evalSubExp env >=> expectPrimVal >=> expectInt
+
 -- Safe division-like operations yield zero on a zero divisor, like the code generators.
 evalBinOp :: BinOp -> PrimValue -> PrimValue -> Maybe PrimValue
 evalBinOp op x y
@@ -526,9 +527,9 @@ evalBasicOp env (Manifest array_name _) = do
     _ ->
       error "cannot manifest a non-array value"
 evalBasicOp env (Iota count_sub_exp start_sub_exp stride_sub_exp int_type) = do
-  count <- evalSubExp env count_sub_exp >>= expectPrimVal >>= expectInt
-  stride <- evalSubExp env stride_sub_exp >>= expectPrimVal >>= expectInt
-  start <- evalSubExp env start_sub_exp >>= expectPrimVal >>= expectInt
+  count <- evalInt env count_sub_exp
+  stride <- evalInt env stride_sub_exp
+  start <- evalInt env start_sub_exp
 
   if count < 0
     then interpError "iota length cannot be negative"
@@ -543,7 +544,7 @@ evalBasicOp env (Iota count_sub_exp start_sub_exp stride_sub_exp int_type) = do
       pure
         [values]
 evalBasicOp env (Replicate (Shape shape_exps) val_exp) = do
-  dimensions <- mapM (\dim -> evalSubExp env dim >>= expectPrimVal >>= expectInt) shape_exps
+  dimensions <- mapM (evalInt env) shape_exps
   if any (< 0) dimensions
     then interpError " replicate dimensions cannot be negative"
     else do
@@ -578,8 +579,7 @@ evalBasicOp env (Rearrange array_name permutation) = do
     _ -> error "cannot rearrange a non-array value"
 evalBasicOp env (Concat concat_dim array_names result_size_exp) = do
   arrays <- mapM lookupArray $ NE.toList array_names
-  declared_size <-
-    evalSubExp env result_size_exp >>= expectPrimVal >>= expectInt
+  declared_size <- evalInt env result_size_exp
 
   case arrays of
     [] ->
@@ -697,8 +697,7 @@ evalBasicOp env (FlatUpdate source_name flat_slice replacement_name) = do
     validOffset values offset =
       offset >= 0 && offset < arrayValuesLength values
 evalBasicOp env (Scratch element_type dimension_exps) = do
-  dimensions <-
-    mapM (\dimension_exp -> evalSubExp env dimension_exp >>= expectPrimVal >>= expectInt) dimension_exps
+  dimensions <- mapM (evalInt env) dimension_exps
   if any (< 0) dimensions
     then interpError "scratch dimensions cannot be negative"
     else
@@ -719,11 +718,7 @@ evalUpdateAcc ::
   InterpM rep [Val]
 evalUpdateAcc env safety accumulator_name index_exps value_exps = do
   accumulator <- evalSubExp env (Var accumulator_name)
-
-  indices <-
-    mapM
-      (\index_exp -> evalSubExp env index_exp >>= expectPrimVal >>= expectInt)
-      index_exps
+  indices <- mapM (evalInt env) index_exps
   values <- mapM (evalSubExp env) value_exps
 
   case accumulator of
@@ -780,7 +775,7 @@ renderErrorValue UnitValue = "()"
 
 evalFlatSlice :: Env -> FlatSlice SubExp -> InterpM rep ([Int], [Int])
 evalFlatSlice env (FlatSlice offset_exp dimensions) = do
-  offset <- evalInt offset_exp
+  offset <- evalInt env offset_exp
   evaluated_dimensions <- mapM evalDimension dimensions
 
   let result_shape = map fst evaluated_dimensions
@@ -791,11 +786,9 @@ evalFlatSlice env (FlatSlice offset_exp dimensions) = do
     then interpError "flat slice dimensions cannot be negative"
     else pure (result_shape, offsets)
   where
-    evalInt sub_exp = evalSubExp env sub_exp >>= expectPrimVal >>= expectInt
-
     evalDimension (FlatDimIndex size_exp stride_exp) = do
-      size <- evalInt size_exp
-      stride <- evalInt stride_exp
+      size <- evalInt env size_exp
+      stride <- evalInt env stride_exp
       pure (size, stride)
 
 replaceAt :: Int -> a -> [a] -> [a]
@@ -823,11 +816,11 @@ resolveSlice env shape (Slice dimensions) = do
   pure $ mapM selectionIndices selections
   where
     evalDimension (DimFix index_exp) =
-      Fixed <$> evalInt index_exp
+      Fixed <$> evalInt env index_exp
     evalDimension (DimSlice start_exp count_exp stride_exp) = do
-      start <- evalInt start_exp
-      count <- evalInt count_exp
-      stride <- evalInt stride_exp
+      start <- evalInt env start_exp
+      count <- evalInt env count_exp
+      stride <- evalInt env stride_exp
 
       if count < 0
         then interpError "slice length cannot be negative"
@@ -835,9 +828,6 @@ resolveSlice env shape (Slice dimensions) = do
           pure $
             Selected
               [start + position * stride | position <- [0 .. count - 1]]
-
-    evalInt sub_exp =
-      evalSubExp env sub_exp >>= expectPrimVal >>= expectInt
 
     selectionIndices (Fixed index) = [index]
     selectionIndices (Selected indices) = indices
@@ -892,17 +882,14 @@ indexArray env shape values slice@(Slice dimensions) = do
             mapM (readArrayValue values . linearIndex shape) coordinates
           pure <$> newArrayValue result_shape (arrayValuesType values) selected_values
   where
-    evalInt sub_exp =
-      evalSubExp env sub_exp >>= expectPrimVal >>= expectInt
-
     evalDimension (dimension, source_stride) (DimFix index_exp) = do
-      index <- evalInt index_exp
+      index <- evalInt env index_exp
       checkIndex dimension index
       pure (index * source_stride, [])
     evalDimension (dimension, source_stride) (DimSlice start_exp count_exp stride_exp) = do
-      start <- evalInt start_exp
-      count <- evalInt count_exp
-      stride <- evalInt stride_exp
+      start <- evalInt env start_exp
+      count <- evalInt env count_exp
+      stride <- evalInt env stride_exp
       if count < 0
         then interpError "slice length cannot be negative"
         else do
@@ -939,7 +926,7 @@ evalFlatMap ::
   ExtLambda rep ->
   InterpM rep [Val]
 evalFlatMap funs env width_exp input_names lambda = do
-  width <- evalSubExp env width_exp >>= expectPrimVal >>= expectInt
+  width <- evalInt env width_exp
   inputs <- mapM (evalSubExp env . Var) input_names
   rows <- mapM (runIteration inputs) [0 .. width - 1]
   let sizes = map fst rows
@@ -993,7 +980,7 @@ evalHist ::
   Lambda rep ->
   InterpM rep [Val]
 evalHist funs env width_exp input_names hist_ops bucket_lambda = do
-  width <- evalSubExp env width_exp >>= expectPrimVal >>= expectInt
+  width <- evalInt env width_exp
   inputs <- mapM (evalSubExp env . Var) input_names
   initial_histograms <- mapM (mapM (evalSubExp env . Var) . histDest) hist_ops
   final_histograms <-
@@ -1019,11 +1006,9 @@ evalHist funs env width_exp input_names hist_ops bucket_lambda = do
           (mapM (expectPrimVal >=> expectInt))
           index_groups
 
-      mapM
-        ( \(hist_operation, indices, value_and_histograms) ->
-            updateHistogram hist_operation indices value_and_histograms
-        )
-        (zip3 hist_ops index_groups' (zip value_groups histograms))
+      forM (zip3 hist_ops index_groups' (zip value_groups histograms)) $
+        \(hist_operation, indices, value_and_histograms) ->
+          updateHistogram hist_operation indices value_and_histograms
 
     updateHistogram hist_operation indices (values, histograms)
       | not (inBounds indices histograms) =
@@ -1054,7 +1039,7 @@ evalStream funs env width_exp input_names initial_accumulators lambda = do
 
 evalScrema :: FunEnv rep -> Env -> SubExp -> [VName] -> ScremaForm rep -> InterpM rep [Val]
 evalScrema funs env width_exp input_names (ScremaForm pre_lambda scans reductions post_lambda) = do
-  width <- evalSubExp env width_exp >>= expectPrimVal >>= expectInt
+  width <- evalInt env width_exp
   inputs <- mapM (evalSubExp env . Var) input_names
   initial_scan_states <- mapM (mapM (evalSubExp env) . scanNeutral) scans
   initial_reduction_states <- mapM (mapM (evalSubExp env) . redNeutral) reductions
@@ -1095,7 +1080,7 @@ int64Val = PrimVal . IntValue . Int64Value . fromIntegral
 
 evalSegSpace :: FunEnv rep -> M.Map VName Val -> Seg.SegSpace -> Seg.KernelBody rep -> InterpM rep ([Int], [([Int], [KernelResultValue])])
 evalSegSpace funs env space@(Seg.SegSpace _ dimensions) body = do
-  sizes <- mapM (evalSubExp env . snd >=> expectPrimVal >=> expectInt) dimensions
+  sizes <- mapM (evalInt env . snd) dimensions
   let coordinates = sequence [[0 .. size - 1] | size <- sizes]
   rows <- mapM (runWorker sizes) coordinates
   pure (sizes, rows)
@@ -1115,12 +1100,7 @@ segSpaceEnv env (Seg.SegSpace flat dimensions) shape coordinate =
           : zip (map fst dimensions) (map int64Val coordinate)
 
 evalShape :: Env -> Shape -> InterpM rep [Int]
-evalShape env =
-  mapM
-    ( \dimension ->
-        evalSubExp env dimension >>= expectPrimVal >>= expectInt
-    )
-    . shapeDims
+evalShape env = mapM (evalInt env) . shapeDims
 
 expectKernelValue :: KernelResultValue -> InterpM rep Val
 expectKernelValue (KernelValue result_value) = pure result_value
@@ -1178,21 +1158,16 @@ applySegBinOp funs env operator state contribution = do
             sequence [[0 .. size - 1] | size <- vector_shape]
 
       result_rows <-
-        mapM
-          ( \coordinate -> do
-              state_elements <-
-                mapM (readAccumulatorElement coordinate) state
-              contribution_elements <-
-                mapM
-                  (readAccumulatorElement coordinate)
-                  contribution
-              evalLambda
-                funs
-                env
-                operator_lambda
-                (state_elements <> contribution_elements)
-          )
-          coordinates
+        forM coordinates $ \coordinate -> do
+          state_elements <-
+            mapM (readAccumulatorElement coordinate) state
+          contribution_elements <-
+            mapM (readAccumulatorElement coordinate) contribution
+          evalLambda
+            funs
+            env
+            operator_lambda
+            (state_elements <> contribution_elements)
 
       collectOutputs
         env
@@ -1390,19 +1365,13 @@ evalSegOp
             (mapM (expectPrimVal >=> expectInt))
             index_groups
 
-        mapM
-          ( \(operator, bucket_indices, values_and_histograms) ->
-              updateHistogram
-                segment_indices
-                operator
-                bucket_indices
-                values_and_histograms
-          )
-          ( zip3
-              operators
-              evaluated_indices
-              (zip value_groups histograms)
-          )
+        forM (zip3 operators evaluated_indices (zip value_groups histograms)) $
+          \(operator, bucket_indices, values_and_histograms) ->
+            updateHistogram
+              segment_indices
+              operator
+              bucket_indices
+              values_and_histograms
 
       updateHistogram
         segment_indices
@@ -1428,19 +1397,16 @@ evalSegOp
                           sequence [[0 .. size - 1] | size <- vector_shape]
 
                     result_rows <-
-                      mapM
-                        ( \coordinate -> do
-                            old_elements <-
-                              mapM (readAccumulatorElement coordinate) old_values
-                            new_elements <-
-                              mapM (readAccumulatorElement coordinate) new_values
-                            evalLambda
-                              funs
-                              env
-                              (Seg.histOp operator)
-                              (old_elements <> new_elements)
-                        )
-                        coordinates
+                      forM coordinates $ \coordinate -> do
+                        old_elements <-
+                          mapM (readAccumulatorElement coordinate) old_values
+                        new_elements <-
+                          mapM (readAccumulatorElement coordinate) new_values
+                        evalLambda
+                          funs
+                          env
+                          (Seg.histOp operator)
+                          (old_elements <> new_elements)
 
                     collectOutputs
                       env
@@ -1625,7 +1591,7 @@ collectFlatMapOutput env total_size result_type rows
           error "nonuniform FlatMap result must be an array"
 
     evalFreeDimension (Free dimension) =
-      evalSubExp env dimension >>= expectPrimVal >>= expectInt
+      evalInt env dimension
     evalFreeDimension (Ext _) =
       error "unexpected existential FlatMap result dimension"
 
@@ -1749,12 +1715,9 @@ collectSegOutputs env worker_shape return_types result_specs worker_rows
 
     resultShape Seg.Returns {} = pure worker_shape
     resultShape (Seg.TileReturns _ dimensions _) =
-      mapM (evalInt . fst) dimensions
+      mapM (evalInt env . fst) dimensions
     resultShape (Seg.RegTileReturns _ dimensions _) =
-      mapM (evalInt . firstOf3) dimensions
-
-    evalInt sub_exp =
-      evalSubExp env sub_exp >>= expectPrimVal >>= expectInt
+      mapM (evalInt env . firstOf3) dimensions
 
     expectOrdinary (KernelValue result_value) = pure result_value
     expectOrdinary _ = error "inconsistent segmented result layout"
@@ -2043,11 +2006,11 @@ evalSizeOp _ (GetSize _ cls) =
 evalSizeOp _ (GetSizeMax cls) =
   pure [int64Val $ sizeValue cls]
 evalSizeOp env (CmpSizeLe _ cls x) = do
-  limit <- evalSubExp env x >>= expectPrimVal >>= expectInt
+  limit <- evalInt env x
   pure [PrimVal $ BoolValue $ sizeValue cls <= limit]
 evalSizeOp env (CalcNumBlocks width_exp _ block_size_exp) = do
-  width <- evalSubExp env width_exp >>= expectPrimVal >>= expectInt
-  block_size <- evalSubExp env block_size_exp >>= expectPrimVal >>= expectInt
+  width <- evalInt env width_exp
+  block_size <- evalInt env block_size_exp
   if block_size <= 0
     then error "thread-block size must be positive"
     else
