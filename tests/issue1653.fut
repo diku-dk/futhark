@@ -1,8 +1,8 @@
 module type mat = {
   type t
   type~ mat [n] [m]
-  val eye : (n: i64) -> (m: i64) -> mat [n] [m]
-  val dense [n] [m] : mat [n] [m] -> [n][m]t
+  val eye : (n: i64) -> (m: i64) -> *mat [n] [m]
+  val dense [n] [m] : mat [n] [m] -> *[n][m]t
 }
 
 module type sparse = {
@@ -36,7 +36,7 @@ module sparse (T: numeric) : sparse with t = T.t = {
              , vals: [nnz]t
              }
 
-    def eye (n: i64) (m: i64) : mat [n] [m] =
+    def eye (n: i64) (m: i64) : *mat [n] [m] =
       let e = i64.min n m
       let one = T.i64 1
       let row_off =
@@ -47,7 +47,7 @@ module sparse (T: numeric) : sparse with t = T.t = {
          , vals = replicate e one
          }
 
-    def dense [n] [m] (_csr: mat [n] [m]) : [n][m]t =
+    def dense [n] [m] (_csr: mat [n] [m]) : *[n][m]t =
       let arr: *[n][m]t = tabulate_2d n m (\_ _ -> T.i64 0)
       in arr
   }
@@ -55,10 +55,10 @@ module sparse (T: numeric) : sparse with t = T.t = {
   module csc = {
     type t = t
 
-    def eye (n: i64) (m: i64) : csr.mat [m] [n] =
+    def eye (n: i64) (m: i64) : *csr.mat [m] [n] =
       csr.eye m n
 
-    def dense [n] [m] (mat: csr.mat [n] [m]) : [m][n]t =
+    def dense [n] [m] (mat: csr.mat [n] [m]) : *[m][n]t =
       csr.dense mat |> transpose
 
     type~ mat [n] [m] = csr.mat [m] [n]
