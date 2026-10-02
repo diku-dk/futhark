@@ -47,6 +47,14 @@ import Text.Regex.TDFA
 -- the monadic level - a test failing should be handled explicitly.
 type TestM = ExceptT [T.Text] IO
 
+data IRInterpreter = SOACSInterpreter | GPUInterpreter
+
+interpreterOptions :: IRInterpreter -> String -> [String]
+interpreterOptions SOACSInterpreter entry =
+  ["--run-soacs=" <> entry]
+interpreterOptions GPUInterpreter entry =
+  ["--gpu", "--run-gpu=" <> entry]
+
 -- Taken from transformers-0.5.5.0.
 eitherToErrors :: Either e a -> Errors e a
 eitherToErrors = either failure Pure
@@ -146,6 +154,10 @@ data TestMode
     Compiled
   | -- | Test interpreted code.
     Interpreted
+  | -- | Test code interpreted after internalisation to SOACS.
+    SOACSInterpreted
+  | -- | Test code interpreted after internalisation to GPU IR
+    GPUInterpreted
   | -- | Perform structure tests.
     Structure
   deriving (Eq, Show)
@@ -272,6 +284,29 @@ runInterpretedEntry (FutharkExe futhark) program (InputOutputs entry run_cases) 
                     runResult program code output err
    in accErrors_ $ map runInterpretedCase run_cases
 
+runIRInterpretedEntry :: FutharkExe -> IRInterpreter -> FilePath -> InputOutputs -> TestM ()
+runIRInterpretedEntry (FutharkExe futhark) interpreter program (InputOutputs entry run_cases) =
+  let dir = takeDirectory program
+      runInterpretedCase run@(TestRun _ inputValues _ index _) =
+        unless (any (`elem` runTags run) ["compiled", "script"]) $
+          context ("Entry point: " <> entry <> "; dataset: " <> runDescription run) $ do
+            input <- T.unlines . map valueText <$> getValues (FutharkExe futhark) dir inputValues
+            expectedResult' <- getExpectedResult (FutharkExe futhark) program entry run
+            (code, output, err) <-
+              liftIO $
+                readProcessWithExitCode
+                  futhark
+                  (["dev"] <> interpreterOptions interpreter (T.unpack entry) <> [program])
+                  (T.encodeUtf8 input)
+            case code of
+              ExitFailure 127 ->
+                throwError $ progNotFound $ T.pack futhark
+              _ ->
+                liftExcept $
+                  compareResult entry index program expectedResult' $
+                    runResult program code output err
+   in accErrors_ $ map runInterpretedCase run_cases
+
 runTestCase :: TestCase -> TestM ()
 runTestCase (TestCase mode program testcase progs pbtConfig) = do
   futhark <- liftIO $ maybe getExecutablePath pure $ configFuthark progs
@@ -326,7 +361,7 @@ runTestCase (TestCase mode program testcase progs pbtConfig) = do
               phaseRandom = Nothing
             }
 
-      when (mode `elem` [Compiled, Interpreted]) $
+      when (mode `elem` [Compiled, Interpreted, SOACSInterpreted, GPUInterpreted]) $
         context "Generating reference outputs" $
           -- We probably get the concurrency at the test program level,
           -- so force just one data set at a time here.
@@ -375,6 +410,16 @@ runTestCase (TestCase mode program testcase progs pbtConfig) = do
         context "Interpreting" $
           accErrors_ $
             map (runInterpretedEntry (FutharkExe futhark) program) ios
+
+      when (mode == SOACSInterpreted) $
+        context "Interpreting SOACS" $
+          accErrors_ $
+            map (runIRInterpretedEntry (FutharkExe futhark) SOACSInterpreter program) ios
+
+      when (mode == GPUInterpreted) $
+        context "Interpreting GPU IR" $
+          accErrors_ $
+            map (runIRInterpretedEntry (FutharkExe futhark) GPUInterpreter program) ios
 
 liftCommand ::
   (MonadError T.Text m, MonadIO m) =>
@@ -815,6 +860,16 @@ commandLineOptions =
       ["interpreted"]
       (NoArg $ Right $ \config -> config {configTestMode = Interpreted})
       "Only interpret",
+    Option
+      []
+      ["soacs-interpreted"]
+      (NoArg $ Right $ \config -> config {configTestMode = SOACSInterpreted})
+      "Only interpret internalised SOACS code",
+    Option
+      []
+      ["gpu-interpreted"]
+      (NoArg $ Right $ \config -> config {configTestMode = GPUInterpreted})
+      "Only interpret internalised GPU code",
     Option
       "c"
       ["compiled"]
