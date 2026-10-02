@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Removed
 
+* The `futhark script` command has been removed.
+
 ### Changed
 
 ### Fixed

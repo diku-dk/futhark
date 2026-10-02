@@ -42,6 +42,7 @@ import Futhark.Util (chunk, mapAccumLM)
 import Futhark.Util.Pretty
 import Language.Futhark hiding (Shape, matchDims)
 import Language.Futhark.Interpreter.AD qualified as AD
+import Language.Futhark.Interpreter.FFI.ServerM (ValueRef)
 import Language.Futhark.Primitive qualified as P
 import Prelude hiding (break, mod)
 
@@ -93,19 +94,35 @@ typeShape t
   | otherwise =
       ShapeLeaf
 
--- | A fully evaluated Futhark value.
+-- | A Futhark value as produced and used by the interpreter. Some of these
+-- represent semantically meaningful Futhark values, while others represent
+-- internal operational things that should never be returned by an interpreter
+-- entry point, but can be observed in its intermediate stage (e.g. when using
+-- breakpoints to access the environment).
 data Value m
-  = ValuePrim !PrimValue
-  | ValueArray ValueShape !(Array Int (Value m))
-  | -- Stores the full shape.
+  = -- | A primitive value.
+    ValuePrim !PrimValue
+  | -- | An array, with explicit shape. The shape is the full shape of the
+    -- value, including element shape.
+    ValueArray ValueShape !(Array Int (Value m))
+  | -- | A record, which also subsumes tuples.
     ValueRecord (M.Map Name (Value m))
-  | ValueFun (Value m -> m (Value m))
-  | -- Stores the full shape.
+  | -- | A function value.
+    ValueFun (Value m -> m (Value m))
+  | -- | A sum value.
     ValueSum ValueShape Name [Value m]
-  | -- The shape, the update function, and the array.
+  | -- | Internal value: an accumulator. Represented by the shape, the update
+    -- function, and the array.
     ValueAcc ValueShape (Value m -> Value m -> m (Value m)) !(Array Int (Value m))
-  | -- A primitive value with added information used in automatic differentiation
+  | -- | Internal value: A primitive value with added information used in
+    -- automatic differentiation
     ValueAD AD.Depth AD.ADVariable
+  | -- | A lazy reference to a value on a Futhark Server. These can be returned
+    -- by the interpreter, although the only sane way to use them for anything
+    -- is to retrieve them.
+    --
+    -- We store the full shape locally, along with the indexes applied so far.
+    ValueLazyFFI ValueShape ValueRef [Int64]
 
 instance Show (Value m) where
   show (ValuePrim v) = "ValuePrim " <> show v <> ""
@@ -115,6 +132,7 @@ instance Show (Value m) where
   show ValueFun {} = "ValueFun _"
   show ValueAcc {} = "ValueAcc _"
   show (ValueAD d v) = unwords ["ValueAD", show d, show v]
+  show (ValueLazyFFI shape _ os) = unwords ["ValueLazyFFI", show shape, "_", show os]
 
 instance Eq (Value m) where
   ValuePrim (SignedValue x) == ValuePrim (SignedValue y) =
@@ -147,6 +165,7 @@ prettyValueWith pprPrim = pprPrec 0
     pprPrec p (ValueSum _ n vs) =
       parensIf (p > (0 :: Int)) $ "#" <> sep (pretty n : map (pprPrec 1) vs)
     pprPrec _ (ValueAD _ v) = pprPrim $ putV $ AD.varPrimal v
+    pprPrec _ (ValueLazyFFI {}) = "#<ffi_ref>"
     pprElem v@ValueArray {} = pprPrec 0 v
     pprElem v = group $ pprPrec 0 v
 
@@ -182,11 +201,17 @@ prettyValue = prettyValueWith pprPrim
 valueText :: Value m -> T.Text
 valueText = docText . prettyValueWith pretty
 
+-- | The shape of a value.
 valueShape :: Value m -> ValueShape
 valueShape (ValueArray shape _) = shape
 valueShape (ValueAcc shape _ _) = shape
 valueShape (ValueRecord fs) = ShapeRecord $ M.map valueShape fs
 valueShape (ValueSum shape _ _) = shape
+valueShape (ValueLazyFFI shape _ os) = unDim shape $ length os
+  where
+    unDim s 0 = s
+    unDim (ShapeDim _ cshp) n | n > 0 = unDim cshp $ n - 1
+    unDim _ _ = error $ "Invalid offsets " ++ show os ++ " of shape " ++ show shape
 valueShape _ = ShapeLeaf
 
 -- | Retrieve the part of the value shape that corresponds to outer array

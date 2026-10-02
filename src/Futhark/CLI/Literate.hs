@@ -1,26 +1,18 @@
 -- | @futhark literate@
---
--- Also contains various utility definitions used by "Futhark.CLI.Script".
-module Futhark.CLI.Literate
-  ( main,
-    Options (..),
-    initialOptions,
-    scriptCommandLineOptions,
-    prepareServer,
-  )
-where
+module Futhark.CLI.Literate (main) where
 
 import Codec.BMP qualified as BMP
 import Control.Monad
 import Control.Monad.Except
+import Control.Monad.Free.Church (F, runF)
 import Control.Monad.State hiding (State)
+import Control.Monad.Trans.Maybe (MaybeT (..), hoistMaybe)
+import Data.Array qualified as A
 import Data.Bifunctor (first, second)
 import Data.Bits
-import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as LBS
 import Data.Char
 import Data.Functor (($>))
-import Data.Int (Int64)
 import Data.List qualified as L
 import Data.Map qualified as M
 import Data.Maybe
@@ -28,16 +20,23 @@ import Data.Set qualified as S
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
 import Data.Text.IO qualified as T
-import Data.Text.Read qualified as T
 import Data.Vector.Storable qualified as SVec
 import Data.Vector.Storable.ByteString qualified as SVec
 import Data.Void
 import Data.Word (Word32, Word8)
+import Futhark.Compiler (readProgramFilesExceptKnown)
 import Futhark.Data
-import Futhark.Script
+import Futhark.Error (prettyCompilerError)
+import Futhark.Eval
+  ( EvalConfig (..),
+    evalConfig,
+    forceValue,
+    initialiseInterpreter,
+    runFFI,
+  )
+import Futhark.FreshNames (VNameSource)
 import Futhark.Server
 import Futhark.Test
-import Futhark.Test.Values
 import Futhark.Util
   ( directoryContents,
     ensureCacheDirectory,
@@ -47,10 +46,22 @@ import Futhark.Util
     runProgramWithExitCode,
     showText,
   )
+import Futhark.Util.Loc qualified as Loc
 import Futhark.Util.Options
 import Futhark.Util.Pretty (prettyText, prettyTextOneLine)
 import Futhark.Util.Pretty qualified as PP
 import Futhark.Util.ProgressBar
+import Language.Futhark.Interpreter qualified as I
+import Language.Futhark.Interpreter.FFI.ServerM qualified as FFI
+import Language.Futhark.Interpreter.Values qualified as IV
+import Language.Futhark.Parser (SyntaxError (..), parseExpAt)
+import Language.Futhark.Pretty ()
+import Language.Futhark.Primitive qualified as P
+import Language.Futhark.Prop (UncheckedExp, typeOf)
+import Language.Futhark.Semantic qualified as T
+import Language.Futhark.Syntax qualified as F
+import Language.Futhark.Tuple (areTupleFields)
+import Language.Futhark.TypeChecker qualified as T
 import System.Directory
   ( copyFile,
     doesFileExist,
@@ -110,25 +121,15 @@ defaultAudioParams =
     }
 
 data Directive
-  = DirectiveRes Exp
+  = DirectiveRes UncheckedExp
   | DirectiveBrief Directive
   | DirectiveCovert Directive
-  | DirectiveImg Exp ImgParams
-  | DirectivePlot Exp (Maybe (Int, Int))
-  | DirectiveGnuplot Exp T.Text
-  | DirectiveVideo Exp VideoParams
-  | DirectiveAudio Exp AudioParams
+  | DirectiveImg UncheckedExp ImgParams
+  | DirectivePlot UncheckedExp (Maybe (Int, Int))
+  | DirectiveGnuplot UncheckedExp T.Text
+  | DirectiveVideo UncheckedExp VideoParams
+  | DirectiveAudio UncheckedExp AudioParams
   deriving (Show)
-
-varsInDirective :: Directive -> S.Set EntryName
-varsInDirective (DirectiveRes e) = varsInExp e
-varsInDirective (DirectiveBrief d) = varsInDirective d
-varsInDirective (DirectiveCovert d) = varsInDirective d
-varsInDirective (DirectiveImg e _) = varsInExp e
-varsInDirective (DirectivePlot e _) = varsInExp e
-varsInDirective (DirectiveGnuplot e _) = varsInExp e
-varsInDirective (DirectiveVideo e _) = varsInExp e
-varsInDirective (DirectiveAudio e _) = varsInExp e
 
 pprDirective :: Bool -> Directive -> PP.Doc a
 pprDirective _ (DirectiveRes e) =
@@ -197,13 +198,6 @@ data Block
   | BlockComment T.Text
   | BlockDirective Directive T.Text
   deriving (Show)
-
-varsInScripts :: [Block] -> S.Set EntryName
-varsInScripts = foldMap varsInBlock
-  where
-    varsInBlock (BlockDirective d _) = varsInDirective d
-    varsInBlock BlockCode {} = mempty
-    varsInBlock BlockComment {} = mempty
 
 type Parser = Parsec Void T.Text
 
@@ -334,14 +328,6 @@ parseAudioParams =
       s <- lexeme $ takeWhileP Nothing (not . isSpace)
       pure params {audioCodec = Just s}
 
-atStartOfLine :: Parser ()
-atStartOfLine = do
-  col <- sourceColumn <$> getSourcePos
-  when (col /= pos1) empty
-
-afterExp :: Parser ()
-afterExp = choice [atStartOfLine, choice [void eol, eof]]
-
 withParsedSource :: Parser a -> (a -> T.Text -> b) -> Parser b
 withParsedSource p f = do
   s <- getInput
@@ -357,6 +343,67 @@ stripCommentPrefix = T.unlines . map onLine . T.lines
       | "-- " `T.isPrefixOf` s = T.drop 3 s
       | otherwise = T.drop 2 s
 
+-- | The current position, in the form used by the Futhark parser.
+sourcePos :: Parser Loc.Pos
+sourcePos = do
+  p <- getSourcePos
+  Loc.Pos (sourceName p) (unPos (sourceLine p)) (unPos (sourceColumn p)) <$> getOffset
+
+-- | Replace the comment marker on every line but the first with spaces.
+blankCommentPrefix :: T.Text -> T.Text
+blankCommentPrefix s =
+  case T.lines s of
+    [] -> s
+    l : ls -> T.intercalate "\n" $ l : map onLine ls
+  where
+    onLine l = maybe l ("  " <>) $ T.stripPrefix "--" l
+
+-- | A directive expression extends to the end of the enclosing comment block,
+-- or to the ';' that introduces directive parameters. We slice out that text
+-- and hand it to the Futhark parser. This is somewhat clumsy because the
+-- Futhark parser is not written with parser combinators.
+parseDirectiveExp :: Parser UncheckedExp
+parseDirectiveExp = do
+  pos <- sourcePos
+  s <- getInput
+  bef <- getOffset
+  expText
+  aft <- getOffset
+  -- To get the right source positions, we replace comment prefixes with spaces.
+  case parseExpAt pos $ blankCommentPrefix $ T.take (aft - bef) s of
+    Left (SyntaxError loc msg) -> do
+      case loc of
+        Loc.Loc start _ -> setOffset $ Loc.posCoff start
+        Loc.NoLoc -> pure ()
+      fail $ T.unpack $ T.strip msg
+    Right e -> pure e
+  where
+    expText = do
+      more <- expLine
+      -- A line that starts a new directive does not continue this one. The line
+      -- break is consumed only if the expression does continue, as the
+      -- directive parsers expect to find it.
+      cont <- optional $ try $ eol *> notFollowedBy "-- >" *> lookAhead "--"
+      when (more && isJust cont) expText
+
+    -- Consume the expression text on this line (but not the line
+    -- break), returning whether it may continue on the next one.
+    expLine = do
+      l <- lookAhead $ takeWhileP Nothing (/= '\n')
+      case paramsIn l of
+        Just n -> False <$ takeP Nothing n
+        Nothing -> True <$ takeP Nothing (T.length l)
+
+    -- Parameters are introduced by a ';' at the end of a line.  If
+    -- this line has one, how much of it belongs to the expression?
+    paramsIn l =
+      case T.breakOnEnd ";" l of
+        (before, after)
+          | not $ T.null before,
+            T.all isSpace after ->
+              Just $ T.length before - 1
+        _ -> Nothing
+
 parseBlock :: Parser Block
 parseBlock =
   choice
@@ -369,8 +416,7 @@ parseBlock =
   where
     parseDirective =
       choice
-        [ DirectiveRes <$> parseExp postlexeme <* afterExp,
-          directiveName "covert"
+        [ directiveName "covert"
             $> DirectiveCovert
             <*> parseDirective,
           directiveName "brief"
@@ -378,28 +424,29 @@ parseBlock =
             <*> parseDirective,
           directiveName "img"
             $> DirectiveImg
-            <*> parseExp postlexeme
+            <*> parseDirectiveExp
             <*> parseImgParams
             <* choice [void eol, eof],
           directiveName "plot2d"
             $> DirectivePlot
-            <*> parseExp postlexeme
+            <*> parseDirectiveExp
             <*> parsePlotParams
             <* choice [void eol, eof],
           directiveName "gnuplot"
             $> DirectiveGnuplot
-            <*> parseExp postlexeme
+            <*> parseDirectiveExp
             <*> (";" *> hspace *> eol *> parseBlockComment),
           (directiveName "video" <|> directiveName "video")
             $> DirectiveVideo
-            <*> parseExp postlexeme
+            <*> parseDirectiveExp
             <*> parseVideoParams
             <* eol,
           directiveName "audio"
             $> DirectiveAudio
-            <*> parseExp postlexeme
+            <*> parseDirectiveExp
             <*> parseAudioParams
-            <* choice [void eol, eof]
+            <* choice [void eol, eof],
+          DirectiveRes <$> parseDirectiveExp <* choice [void eol, eof]
         ]
     directiveName s = try $ token (":" <> s)
 
@@ -424,7 +471,9 @@ type Files = S.Set FilePath
 
 newtype State = State {stateFiles :: Files}
 
-newtype ScriptM a = ScriptM (ExceptT T.Text (StateT State IO) a)
+-- | The monad in which 'futhark literate' runs. Just does error propagation and
+-- state management on top of IO.
+newtype LiterateM a = LiterateM (ExceptT T.Text (StateT State IO) a)
   deriving
     ( Functor,
       Applicative,
@@ -435,24 +484,24 @@ newtype ScriptM a = ScriptM (ExceptT T.Text (StateT State IO) a)
       MonadState State
     )
 
-runScriptM :: ScriptM a -> IO (Either T.Text a, Files)
-runScriptM (ScriptM m) = second stateFiles <$> runStateT (runExceptT m) s
+runLiterateM :: LiterateM a -> IO (Either T.Text a, Files)
+runLiterateM (LiterateM m) = second stateFiles <$> runStateT (runExceptT m) s
   where
     s = State mempty
 
-withTempFile :: (FilePath -> ScriptM a) -> ScriptM a
+withTempFile :: (FilePath -> LiterateM a) -> LiterateM a
 withTempFile f =
   join . liftIO . withSystemTempFile "futhark-literate" $ \tmpf tmpf_h -> do
     hClose tmpf_h
-    (res, files) <- runScriptM (f tmpf)
+    (res, files) <- runLiterateM (f tmpf)
     pure $ do
       modify $ \s -> s {stateFiles = files <> stateFiles s}
       either throwError pure res
 
-withTempDir :: (FilePath -> ScriptM a) -> ScriptM a
+withTempDir :: (FilePath -> LiterateM a) -> LiterateM a
 withTempDir f =
   join . liftIO . withSystemTempDirectory "futhark-literate" $ \dir -> do
-    (res, files) <- runScriptM (f dir)
+    (res, files) <- runLiterateM (f dir)
     pure $ do
       modify $ \s -> s {stateFiles = files <> stateFiles s}
       either throwError pure res
@@ -560,116 +609,54 @@ videoBlock opts f = "![](" <> T.pack f <> ")" <> opts' <> "\n"
     loop = boolOpt "loop" videoLoop
     autoplay = boolOpt "autoplay" videoAutoplay
 
-plottable :: CompoundValue -> Maybe [Value]
-plottable (ValueTuple vs) = do
+-- | A tuple of one-dimensional arrays of the same length, which is what the
+-- plotting directives expect.
+plottable :: Env -> I.Value -> LiterateM (Maybe [Value])
+plottable env (IV.ValueRecord fs) = runMaybeT $ do
+  vs <- hoistMaybe $ areTupleFields fs
   (vs', ns') <- mapAndUnzipM inspect vs
   guard $ length (nubOrd ns') == 1
-  Just vs'
+  pure vs'
   where
-    inspect (ValueAtom v)
-      | [n] <- valueShape v = Just (v, n)
-    inspect _ = Nothing
-plottable _ = Nothing
+    inspect v = do
+      v' <- MaybeT $ dataValue env v
+      case valueShape v' of
+        [n] -> pure (v', n)
+        _ -> hoistMaybe Nothing
+plottable _ _ = pure Nothing
+
+-- | As 'plottable', but for exactly two arrays, interpreted as x and y values.
+plottable2d :: Env -> I.Value -> LiterateM (Maybe [Value])
+plottable2d env v = do
+  vs <- plottable env v
+  pure $ case vs of
+    Just [x, y] -> Just [x, y]
+    _ -> Nothing
+
+-- | The fields of a record, as expected by the plotting directives. Note that a
+-- tuple is also a record, so this must be tried only after 'plottable'.
+plottableFields ::
+  (I.Value -> LiterateM (Maybe [Value])) ->
+  I.Value ->
+  LiterateM (Maybe [(T.Text, [Value])])
+plottableFields f (IV.ValueRecord fs)
+  | Nothing <- areTupleFields fs =
+      runMaybeT $ mapM onField $ M.toList fs
+  where
+    onField (k, v) = (F.nameToText k,) <$> MaybeT (f v)
+plottableFields _ _ = pure Nothing
 
 withGnuplotData ::
   [(T.Text, T.Text)] ->
   [(T.Text, [Value])] ->
-  ([T.Text] -> [T.Text] -> ScriptM a) ->
-  ScriptM a
+  ([T.Text] -> [T.Text] -> LiterateM a) ->
+  LiterateM a
 withGnuplotData sets [] cont = uncurry cont $ unzip $ reverse sets
 withGnuplotData sets ((f, vs) : xys) cont =
   withTempFile $ \fname -> do
     liftIO $ T.writeFile fname $ formatDataForGnuplot vs
     withGnuplotData ((f, f <> "='" <> T.pack fname <> "'") : sets) xys cont
 
-loadBMP :: FilePath -> ScriptM (Compound Value)
-loadBMP bmpfile = do
-  res <- liftIO $ BMP.readBMP bmpfile
-  case res of
-    Left err ->
-      throwError $ "Failed to read BMP:\n" <> showText err
-    Right bmp -> do
-      let bmp_bs = BMP.unpackBMPToRGBA32 bmp
-          (w, h) = BMP.bmpDimensions bmp
-          shape = SVec.fromList [fromIntegral h, fromIntegral w]
-          pix l =
-            let (i, j) = l `divMod` w
-                l' = (h - 1 - i) * w + j
-                r = fromIntegral $ bmp_bs `BS.index` (l' * 4)
-                g = fromIntegral $ bmp_bs `BS.index` (l' * 4 + 1)
-                b = fromIntegral $ bmp_bs `BS.index` (l' * 4 + 2)
-                a = fromIntegral $ bmp_bs `BS.index` (l' * 4 + 3)
-             in (a `shiftL` 24) .|. (r `shiftL` 16) .|. (g `shiftL` 8) .|. b
-      pure $ ValueAtom $ U32Value shape $ SVec.generate (w * h) pix
-
-loadImage :: FilePath -> ScriptM (Compound Value)
-loadImage imgfile =
-  withTempDir $ \dir -> do
-    let bmpfile = dir </> takeBaseName imgfile `replaceExtension` "bmp"
-    void $ system "convert" [imgfile, "-type", "TrueColorAlpha", bmpfile] mempty
-    loadBMP bmpfile
-
-loadPCM :: Int -> FilePath -> ScriptM (Compound Value)
-loadPCM num_channels pcmfile = do
-  contents <- liftIO $ LBS.readFile pcmfile
-  let v = SVec.byteStringToVector $ LBS.toStrict contents
-      channel_length = SVec.length v `div` num_channels
-      shape =
-        SVec.fromList
-          [ fromIntegral num_channels,
-            fromIntegral channel_length
-          ]
-      -- ffmpeg outputs audio data in column-major format. `backPermuter` computes the
-      -- tranposed indexes for a backpermutation.
-      backPermuter i = (i `mod` channel_length) * num_channels + i `div` channel_length
-      perm = SVec.generate (SVec.length v) backPermuter
-  pure $ ValueAtom $ F64Value shape $ SVec.backpermute v perm
-
-loadAudio :: FilePath -> ScriptM (Compound Value)
-loadAudio audiofile = do
-  s <- system "ffprobe" [audiofile, "-show_entries", "stream=channels", "-select_streams", "a", "-of", "compact=p=0:nk=1", "-v", "0"] mempty
-  case T.decimal s of
-    Right (num_channels, _) -> do
-      withTempDir $ \dir -> do
-        let pcmfile = dir </> takeBaseName audiofile `replaceExtension` "pcm"
-        void $ system "ffmpeg" ["-i", audiofile, "-c:a", "pcm_f64le", "-map", "0", "-f", "data", pcmfile] mempty
-        loadPCM num_channels pcmfile
-    _ -> throwError "$loadImg failed to detect the number of channels in the audio input"
-
-literateBuiltin :: EvalBuiltin ScriptM
-literateBuiltin server "loadimg" vs
-  | [v] <- vs = do
-      v' <- getHaskellValue server v
-      case v' of
-        Just path -> do
-          let path' = map (chr . fromIntegral) (path :: [Word8])
-          valToExpValue <$> loadImage path'
-        _ -> bad
-  | otherwise = bad
-  where
-    bad =
-      throwError $
-        "$loadimg does not accept arguments of types: "
-          <> T.intercalate ", " (map (prettyText . fmap scriptValueType) vs)
-literateBuiltin server "loadaudio" vs
-  | [v] <- vs = do
-      v' <- getHaskellValue server v
-      case v' of
-        Just path -> do
-          let path' = map (chr . fromIntegral) (path :: [Word8])
-          valToExpValue <$> loadAudio path'
-        _ -> bad
-  | otherwise = bad
-  where
-    bad =
-      throwError $
-        "$loadaudio does not accept arguments of types: "
-          <> T.intercalate ", " (map (prettyText . fmap scriptValueType) vs)
-literateBuiltin server f vs =
-  scriptBuiltin "." server f vs
-
--- | Some of these only make sense for @futhark literate@, but enough
--- are also sensible for @futhark script@ that we can share them.
 data Options = Options
   { scriptBackend :: String,
     scriptFuthark :: Maybe FilePath,
@@ -678,12 +665,9 @@ data Options = Options
     scriptSkipCompilation :: Bool,
     scriptOutput :: Maybe FilePath,
     scriptVerbose :: Int,
-    scriptStopOnError :: Bool,
-    scriptBinary :: Bool,
-    scriptExps :: [Either FilePath T.Text]
+    scriptStopOnError :: Bool
   }
 
--- | The configuration before any user-provided options are processed.
 initialOptions :: Options
 initialOptions =
   Options
@@ -694,19 +678,148 @@ initialOptions =
       scriptSkipCompilation = False,
       scriptOutput = Nothing,
       scriptVerbose = 0,
-      scriptStopOnError = False,
-      scriptBinary = False,
-      scriptExps = []
+      scriptStopOnError = False
     }
 
 data Env = Env
   { envImgDir :: FilePath,
     envOpts :: Options,
-    envServer :: ScriptServer,
+    -- | Entry points are not interpreted, but run on this server.
+    envServer :: FFI.Server,
+    envSrc :: VNameSource,
+    envTypeEnv :: T.Env,
+    envCtx :: I.Ctx,
     envHash :: T.Text
   }
 
-newFile :: Env -> (Maybe FilePath, FilePath) -> (FilePath -> ScriptM ()) -> ScriptM FilePath
+-- | Run an interpreter action. Traces are shown when verbose, external calls
+-- are dispatched to the server, and breakpoints are ignored.
+runInterpreter :: Env -> F I.ExtOp a -> LiterateM a
+runInterpreter env m = runF m pure intOp
+  where
+    intOp (I.ExtOpError err) =
+      throwError $ PP.docText $ I.prettyInterpreterError err
+    intOp (I.ExtOpTrace w v c) = do
+      when (scriptVerbose (envOpts env) > 0) $
+        liftIO . T.putStrLn . PP.docText $
+          PP.pretty w <> ":" PP.<+> PP.align v
+      c
+    intOp (I.ExtOpBreak _ _ _ c) = c
+    intOp (I.ExtOpFFI sm c) =
+      either (throwError . PP.docText . I.prettyInterpreterError) c
+        =<< liftIO (runFFI (Just (envServer env)) sm)
+
+-- | Type check and evaluate an expression, returning its type (which is useful
+-- for error messages) and the value in full.
+evalExp :: Env -> UncheckedExp -> LiterateM (F.StructType, I.Value)
+evalExp env e = do
+  fexp <- case T.checkExp [] (envSrc env) (envTypeEnv env) e of
+    (_, Left terr) -> throwError $ PP.docText $ T.prettyTypeError terr
+    (_, Right ([], fexp)) -> pure fexp
+    (_, Right (_, fexp)) ->
+      throwError $ "Ambiguous type of expression: " <> prettyText (typeOf fexp)
+  (typeOf fexp,) <$> runInterpreter env (I.interpretExp (envCtx env) fexp)
+
+-- | As 'evalExp', but also fetch any parts of the value that reside on
+-- the server.
+evalExpForced :: Env -> UncheckedExp -> LiterateM (F.StructType, I.Value)
+evalExpForced env e = do
+  (t, v) <- evalExp env e
+  (t,) <$> force env v
+
+-- | Fetch a value that resides on the server. Anything we do with a
+-- value, except passing it back to the server, needs it in full.
+force :: Env -> I.Value -> LiterateM I.Value
+force env v = do
+  v' <- liftIO $ forceValue (Just (envServer env)) v
+  either (throwError . PP.docText . I.prettyInterpreterError) pure v'
+
+-- | As 'evalExp', but convert the value to the flat representation expected by
+-- the external programs we use. The description is used in the error message if
+-- the value has no such representation.
+evalExpToData :: Env -> T.Text -> UncheckedExp -> LiterateM Value
+evalExpToData env what e = do
+  (t, v) <- evalExp env e
+  let nope = "Cannot " <> what <> " value of type " <> prettyText t
+  maybe (throwError nope) pure =<< dataValue env v
+
+-- | As 'dataValue', but for a value that is already present in full. Only
+-- primitives and arrays of primitives have a flat representation, and not even
+-- all of those: the element type of an empty array cannot be recovered from the
+-- value alone.
+localDataValue :: I.Value -> Maybe Value
+localDataValue (IV.ValuePrim v) = primsToValue mempty [v]
+localDataValue v@IV.ValueArray {} =
+  primsToValue (SVec.fromList (map fromIntegral (dims (IV.valueShape v))))
+    =<< prims v
+  where
+    prims (IV.ValueArray _ arr) = concat <$> mapM prims (A.elems arr)
+    prims (IV.ValuePrim x) = Just [x]
+    prims _ = Nothing
+    dims (IV.ShapeDim n shape) = n : dims shape
+    dims _ = []
+localDataValue _ = Nothing
+
+-- | Convert an interpreter value to the flat representation of the Futhark data
+-- format, if it has one. A value that resides on the server is retrieved in its
+-- entirety, which is far faster than forcing it, as that fetches an array one
+-- element at a time.
+dataValue :: Env -> I.Value -> LiterateM (Maybe Value)
+dataValue env v@(IV.ValueLazyFFI _ vr []) = do
+  r <- liftIO $ FFI.runServerM (envServer env) $ FFI.getData vr
+  case r of
+    Right (Just v') -> pure $ Just v'
+    -- The value is opaque, or something went wrong; fall back to
+    -- fetching it piecemeal, which may still work.
+    _ -> dataValue env =<< force env v
+dataValue env v@IV.ValueLazyFFI {} =
+  -- A partially indexed array cannot be retrieved directly.
+  dataValue env =<< force env v
+dataValue _ v = pure $ localDataValue v
+
+-- | The elements must all be of the same type, which is that of the
+-- first one.
+primsToValue :: SVec.Vector Int -> [F.PrimValue] -> Maybe Value
+primsToValue shape vs =
+  case vs of
+    [] -> Nothing
+    F.SignedValue (P.Int8Value _) : _ -> I8Value shape <$> vec asI8
+    F.SignedValue (P.Int16Value _) : _ -> I16Value shape <$> vec asI16
+    F.SignedValue (P.Int32Value _) : _ -> I32Value shape <$> vec asI32
+    F.SignedValue (P.Int64Value _) : _ -> I64Value shape <$> vec asI64
+    F.UnsignedValue (P.Int8Value _) : _ -> U8Value shape <$> vec (fmap fromIntegral . asI8)
+    F.UnsignedValue (P.Int16Value _) : _ -> U16Value shape <$> vec (fmap fromIntegral . asI16)
+    F.UnsignedValue (P.Int32Value _) : _ -> U32Value shape <$> vec (fmap fromIntegral . asI32)
+    F.UnsignedValue (P.Int64Value _) : _ -> U64Value shape <$> vec (fmap fromIntegral . asI64)
+    F.FloatValue (P.Float16Value _) : _ -> F16Value shape <$> vec asF16
+    F.FloatValue (P.Float32Value _) : _ -> F32Value shape <$> vec asF32
+    F.FloatValue (P.Float64Value _) : _ -> F64Value shape <$> vec asF64
+    F.BoolValue _ : _ -> BoolValue shape <$> vec asBool
+  where
+    vec :: (SVec.Storable a) => (F.PrimValue -> Maybe a) -> Maybe (SVec.Vector a)
+    vec f = SVec.fromList <$> mapM f vs
+    asI8 (F.SignedValue (P.Int8Value x)) = Just x
+    asI8 (F.UnsignedValue (P.Int8Value x)) = Just x
+    asI8 _ = Nothing
+    asI16 (F.SignedValue (P.Int16Value x)) = Just x
+    asI16 (F.UnsignedValue (P.Int16Value x)) = Just x
+    asI16 _ = Nothing
+    asI32 (F.SignedValue (P.Int32Value x)) = Just x
+    asI32 (F.UnsignedValue (P.Int32Value x)) = Just x
+    asI32 _ = Nothing
+    asI64 (F.SignedValue (P.Int64Value x)) = Just x
+    asI64 (F.UnsignedValue (P.Int64Value x)) = Just x
+    asI64 _ = Nothing
+    asF16 (F.FloatValue (P.Float16Value x)) = Just x
+    asF16 _ = Nothing
+    asF32 (F.FloatValue (P.Float32Value x)) = Just x
+    asF32 _ = Nothing
+    asF64 (F.FloatValue (P.Float64Value x)) = Just x
+    asF64 _ = Nothing
+    asBool (F.BoolValue x) = Just x
+    asBool _ = Nothing
+
+newFile :: Env -> (Maybe FilePath, FilePath) -> (FilePath -> LiterateM ()) -> LiterateM FilePath
 newFile env (fname_desired, template) m = do
   let fname_base = fromMaybe (T.unpack (envHash env) <> "-" <> template) fname_desired
       fname = envImgDir env </> fname_base
@@ -723,11 +836,11 @@ newFile env (fname_desired, template) m = do
   modify $ \s -> s {stateFiles = S.insert fname $ stateFiles s}
   pure fname
 
-newFileContents :: Env -> (Maybe FilePath, FilePath) -> (FilePath -> ScriptM ()) -> ScriptM T.Text
+newFileContents :: Env -> (Maybe FilePath, FilePath) -> (FilePath -> LiterateM ()) -> LiterateM T.Text
 newFileContents env f m =
   liftIO . T.readFile =<< newFile env f m
 
-processDirective :: Env -> Directive -> ScriptM T.Text
+processDirective :: Env -> Directive -> LiterateM T.Text
 processDirective env (DirectiveBrief d) =
   processDirective env d
 processDirective env (DirectiveCovert d) =
@@ -735,51 +848,37 @@ processDirective env (DirectiveCovert d) =
 processDirective env (DirectiveRes e) = do
   result <-
     newFileContents env (Nothing, "eval.txt") $ \resultf -> do
-      v <- either nope pure =<< evalExpToGround literateBuiltin (envServer env) e
-      liftIO $ T.writeFile resultf $ prettyText v
+      v <- snd <$> evalExpForced env e
+      liftIO $ T.writeFile resultf $ PP.docText $ I.prettyValue v
   pure $ T.unlines ["```", result, "```"]
-  where
-    nope t =
-      throwError $ "Cannot show value of type " <> prettyText t
 --
 processDirective env (DirectiveImg e params) = do
   fmap imgBlock . newFile env (imgFile params, "img.png") $ \pngfile -> do
-    maybe_v <- evalExpToGround literateBuiltin (envServer env) e
-    case maybe_v of
-      Right (ValueAtom v)
-        | Just bmp <- valueToBMP v -> do
-            withTempDir $ \dir -> do
-              let bmpfile = dir </> "img.bmp"
-              liftIO $ LBS.writeFile bmpfile bmp
-              void $ system "convert" [bmpfile, pngfile] mempty
-      Right v ->
-        nope $ fmap valueType v
-      Left t ->
-        nope t
-  where
-    nope t =
-      throwError $
-        "Cannot create image from value of type " <> prettyText t
+    (t, v) <- evalExp env e
+    bmp <- (valueToBMP =<<) <$> dataValue env v
+    case bmp of
+      Just bmp' ->
+        withTempDir $ \dir -> do
+          let bmpfile = dir </> "img.bmp"
+          liftIO $ LBS.writeFile bmpfile bmp'
+          void $ system "convert" [bmpfile, pngfile] mempty
+      Nothing ->
+        throwError $
+          "Cannot create image from value of type " <> prettyText t
 --
 processDirective env (DirectivePlot e size) = do
   fmap imgBlock . newFile env (Nothing, "plot.png") $ \pngfile -> do
-    maybe_v <- evalExpToGround literateBuiltin (envServer env) e
-    case maybe_v of
-      Right v
-        | Just vs <- plottable2d v ->
-            plotWith [(Nothing, vs)] pngfile
-      Right (ValueRecord m)
-        | Just m' <- traverse plottable2d m -> do
-            plotWith (map (first Just) $ M.toList m') pngfile
-      Right v ->
-        throwError $ "Cannot plot value of type " <> prettyText (fmap valueType v)
-      Left t ->
-        throwError $ "Cannot plot opaque value of type " <> prettyText t
+    (t, v) <- evalExp env e
+    one <- plottable2d env v
+    fields <- plottableFields (plottable2d env) v
+    case (one, fields) of
+      (Just vs, _) ->
+        plotWith [(Nothing, vs)] pngfile
+      (_, Just fs) ->
+        plotWith (map (first Just) fs) pngfile
+      _ ->
+        throwError $ "Cannot plot value of type " <> prettyText t
   where
-    plottable2d v = do
-      [x, y] <- plottable v
-      Just [x, y]
-
     tag (Nothing, xys) j = ("data" <> showText (j :: Int), xys)
     tag (Just f, xys) _ = (f, xys)
 
@@ -807,15 +906,13 @@ processDirective env (DirectivePlot e size) = do
 --
 processDirective env (DirectiveGnuplot e script) = do
   fmap imgBlock . newFile env (Nothing, "plot.png") $ \pngfile -> do
-    maybe_v <- evalExpToGround literateBuiltin (envServer env) e
-    case maybe_v of
-      Right (ValueRecord m)
-        | Just m' <- traverse plottable m ->
-            plotWith (M.toList m') pngfile
-      Right v ->
-        throwError $ "Cannot plot value of type " <> prettyText (fmap valueType v)
-      Left t ->
-        throwError $ "Cannot plot opaque value of type " <> prettyText t
+    (t, v) <- evalExp env e
+    fields <- plottableFields (plottable env) v
+    case fields of
+      Just fs ->
+        plotWith fs pngfile
+      Nothing ->
+        throwError $ "Cannot plot value of type " <> prettyText t
   where
     plotWith xys pngfile = withGnuplotData [] xys $ \_ sets -> do
       let script' =
@@ -834,31 +931,25 @@ processDirective env (DirectiveVideo e params) = do
 
   let file = (videoFile params, "video" <.> T.unpack format)
   fmap (videoBlock params) . newFile env file $ \videofile -> do
-    v <- evalExp literateBuiltin (envServer env) e
+    (t, v) <- evalExp env e
     let nope =
           throwError $
-            "Cannot produce video from value of type " <> prettyText (fmap scriptValueType v)
+            "Cannot produce video from value of type " <> prettyText t
     case v of
-      ValueAtom SValue {} -> do
-        ValueAtom arr <- getExpValue (envServer env) v
-        case valueToBMPs arr of
+      IV.ValueRecord fs
+        | Just [stepfun@IV.ValueFun {}, initial, num_frames] <- areTupleFields fs,
+          IV.ValuePrim (F.SignedValue (P.Int64Value num_frames')) <- num_frames ->
+            withTempDir $ \dir -> do
+              renderFrames dir stepfun initial $ fromIntegral num_frames'
+              onWebM videofile =<< bmpsToVideo dir
+      _ -> do
+        bmps <- (valueToBMPs =<<) <$> dataValue env v
+        case bmps of
+          Just bmps' ->
+            withTempDir $ \dir -> do
+              zipWithM_ (writeBMPFile dir) [0 ..] bmps'
+              onWebM videofile =<< bmpsToVideo dir
           Nothing -> nope
-          Just bmps ->
-            withTempDir $ \dir -> do
-              zipWithM_ (writeBMPFile dir) [0 ..] bmps
-              onWebM videofile =<< bmpsToVideo dir
-      ValueTuple [stepfun, initial, num_frames]
-        | ValueAtom (SFun stepfun' _ stepret closure) <- stepfun,
-          Just [_, _] <- isScriptTuple (envServer env) stepret,
-          ValueAtom (SValue "i64" _) <- num_frames -> do
-            Just (ValueAtom num_frames') <-
-              mapM getValue <$> getExpValue (envServer env) num_frames
-            withTempDir $ \dir -> do
-              let num_frames_int = fromIntegral (num_frames' :: Int64)
-              renderFrames dir (stepfun', map ValueAtom closure) initial num_frames_int
-              onWebM videofile =<< bmpsToVideo dir
-      _ ->
-        nope
   where
     framerate = fromMaybe 30 $ videoFPS params
     format = fromMaybe "webm" $ videoFormat params
@@ -883,36 +974,26 @@ processDirective env (DirectiveVideo e params) = do
       | otherwise =
           (\_ _ -> pure (), pure ())
 
-    renderFrames dir (stepfun, closure) initial num_frames = do
+    -- Only the image of each frame is fetched from the server; the
+    -- state is passed straight back to the step function, so all the
+    -- frames need not exist at once.
+    renderFrames dir stepfun initial num_frames = do
       foldM_ frame initial [0 .. num_frames - 1]
       progressDone
       where
         frame old_state j = do
           progressStep j num_frames
-          v <-
-            evalExp literateBuiltin (envServer env)
-              . Call (FuncFut stepfun)
-              . map valueToExp
-              $ closure ++ [old_state]
-          freeValue (envServer env) old_state
-
-          let nope =
-                throwError $
-                  "Cannot handle step function return type: "
-                    <> prettyText (fmap scriptValueType v)
-
-          arr <- project (envServer env) v "0"
-          new_state <- project (envServer env) v "1"
-
-          ValueAtom arr' <- getExpValue (envServer env) arr
-          freeValue (envServer env) arr
-          freeValue (envServer env) v
-
-          case valueToBMP arr' of
-            Nothing -> nope
-            Just bmp -> do
-              writeBMPFile dir j bmp
-              pure new_state
+          v <- runInterpreter env $ I.interpretApply (envCtx env) stepfun old_state
+          case v of
+            IV.ValueRecord fs
+              | Just [arr, new_state] <- areTupleFields fs -> do
+                  bmp <-
+                    maybe badFrame pure . (valueToBMP =<<) =<< dataValue env arr
+                  writeBMPFile dir j bmp
+                  pure new_state
+            _ -> badFrame
+        badFrame =
+          throwError "Cannot handle step function return value."
 
     writeBMPFile dir j bmp =
       liftIO $ LBS.writeFile (bmpfile dir j) bmp
@@ -948,8 +1029,8 @@ processDirective env (DirectiveAudio e params) = do
   fmap imgBlock . newFile env (Nothing, "output." <> T.unpack output_format) $
     \audiofile -> do
       withTempDir $ \dir -> do
-        maybe_v <- evalExpToGround literateBuiltin (envServer env) e
-        maybe_raw_files <- toRawFiles dir maybe_v
+        v <- evalExpToData env "create audio from" e
+        maybe_raw_files <- toRawFiles dir v
         case maybe_raw_files of
           (input_format, raw_files) -> do
             void $
@@ -987,7 +1068,7 @@ processDirective env (DirectiveAudio e params) = do
       let Just bytes = toBytes v
       liftIO $ LBS.writeFile rawfile $ LBS.fromStrict bytes
 
-    toRawFiles dir (Right (ValueAtom v))
+    toRawFiles dir v
       | length (valueShape v) == 1,
         Just input_format <- toFfmpegFormat v = do
           writeRaw dir "raw.pcm" v
@@ -1003,7 +1084,7 @@ processDirective env (DirectiveAudio e params) = do
               )
               (valueElems v)
               [0 :: Int ..]
-    toRawFiles _ v = nope $ fmap (fmap valueType) v
+    toRawFiles _ v = nope $ valueTypeText $ valueType v
 
     toFfmpegFormat I8Value {} = Just "s8"
     toFfmpegFormat U8Value {} = Just "u8"
@@ -1027,7 +1108,7 @@ processDirective env (DirectiveAudio e params) = do
 
     output_format = fromMaybe "wav" $ audioCodec params
     sampling_frequency = fromMaybe 44100 $ audioSamplingFrequency params
-    nope _ = throwError "Cannot create audio from value"
+    nope t = throwError $ "Cannot create audio from value of type " <> t
 
 -- Did this script block succeed or fail?
 data Failure = Failure | Success
@@ -1050,7 +1131,7 @@ processBlock env (BlockDirective directive text) = do
         _ ->
           "```\n" <> text <> "```\n"
       env' = env {envHash = hashText (envHash env <> prettyText directive)}
-  (r, files) <- runScriptM $ processDirective env' directive
+  (r, files) <- runLiterateM $ processDirective env' directive
   case r of
     Left err -> failed prompt err files
     Right t -> pure (Success, prompt <> "\n" <> t, files)
@@ -1089,7 +1170,6 @@ processScript env script = do
     (envImgDir env </> "CACHEDIR.TAG") `S.insert` mconcat files
   pure (L.foldl' min Success failures, T.intercalate "\n" outputs)
 
--- | Common command line options that transform 'Options'.
 scriptCommandLineOptions :: [FunOptDescr Options]
 scriptCommandLineOptions =
   [ Option
@@ -1107,7 +1187,7 @@ scriptCommandLineOptions =
           (\prog -> Right $ \config -> config {scriptFuthark = Just prog})
           "PROGRAM"
       )
-      "The binary used for operations (defaults to same binary as 'futhark script').",
+      "The binary used for operations (defaults to same binary as 'futhark literate').",
     Option
       "p"
       ["pass-option"]
@@ -1157,10 +1237,10 @@ commandLineOptions =
            "Stop and do not produce output file if any directive fails."
        ]
 
--- | Start up (and eventually shut down) a Futhark server
--- corresponding to the provided program. If the program has a @.fut@
--- extension, it will be compiled automatically.
-prepareServer :: FilePath -> Options -> (ScriptServer -> IO a) -> IO a
+-- Start up (and eventually shut down) a Futhark server corresponding
+-- to the provided program. If the program has a @.fut@ extension, it
+-- will be compiled automatically.
+prepareServer :: FilePath -> Options -> (Server -> IO a) -> IO a
 prepareServer prog opts f = do
   futhark <- maybe getExecutablePath pure $ scriptFuthark opts
 
@@ -1197,7 +1277,7 @@ prepareServer prog opts f = do
                 else const . const $ pure ()
           }
 
-  withScriptServer cfg f
+  withServer cfg f
 
 -- | Run @futhark literate@.
 main :: String -> [String] -> IO ()
@@ -1208,26 +1288,43 @@ main = mainWithOptions initialOptions commandLineOptions "program" $ \args opts 
       let onError err = do
             T.hPutStrLn stderr err
             exitFailure
+          onDocError err = do
+            PP.hPutDocLn stderr err
+            exitFailure
       proghash <-
         either onError pure <=< runExceptT $
           system futhark ["hash", prog] mempty
       script <- parseProgFile prog
 
       orig_dir <- getCurrentDirectory
-      let entryOpt v = "--entry-point=" ++ T.unpack v
-          opts' =
-            opts
-              { scriptCompilerOptions =
-                  map entryOpt (S.toList (varsInScripts script))
-                    <> scriptCompilerOptions opts
-              }
-      prepareServer prog opts' $ \server -> do
+      -- Every directive is interpreted, and may call any entry point of
+      -- the program, so we cannot compile just a subset of them.
+      prepareServer prog opts $ \server -> do
+        -- The interpreter uses the server for entry point calls, and
+        -- does not shut it down.
+        ffi_server <- FFI.newServer server
+        (_, imports, src) <-
+          either (onDocError . prettyCompilerError) pure
+            =<< runExceptT (readProgramFilesExceptKnown [] mempty [prog])
+        let eval_cfg =
+              evalConfig
+                { evalPrintWarnings = False,
+                  evalFile = Just prog,
+                  evalBackend = Just $ scriptBackend opts
+                }
+        (_, tenv, ictx) <-
+          either onDocError pure
+            =<< initialiseInterpreter eval_cfg (Just prog) (Just ffi_server) imports
+
         let mdfile = fromMaybe (prog `replaceExtension` "md") $ scriptOutput opts
             prog_dir = takeDirectory prog
             imgdir = dropExtension (takeFileName mdfile) <> "-img"
             env =
               Env
-                { envServer = server,
+                { envServer = ffi_server,
+                  envSrc = src,
+                  envTypeEnv = tenv,
+                  envCtx = ictx,
                   envOpts = opts,
                   envHash = proghash,
                   envImgDir = imgdir
