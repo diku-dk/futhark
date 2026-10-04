@@ -1,5 +1,22 @@
--- | Check that a value definition does not violate any consumption
--- constraints.
+-- | Check that a value definition does not violate any consumption constraints,
+-- via alias analysis.
+--
+-- This is a very subtle part of the language. The basic idea is "the result of
+-- an expression aliases everything that goes into it", but this is in practice
+-- too restrictive when we have functions (and polymorphic and higher-order
+-- functions!) as well. However, we also do not want to make the user-facing
+-- type system too complicated.
+--
+-- Our solution is to infer more precise function types, that directly talk
+-- about alias information, via parametricity. These never escape into the
+-- user-facing language.
+--
+-- Our overall philosophy is that soundness is (of course) non-negotiable, but
+-- simplicity is better than flexibility. Futhark is not a language for very
+-- fine-grained reasoning about aliasing.
+--
+-- As an example of the compromise, @x |> copy@ works and produces a fresh
+-- result, whilst @id >-> copy@ loses freshness information.
 module Language.Futhark.TypeChecker.Consumption
   ( checkValDef,
 
@@ -150,28 +167,26 @@ addAliases = flip second
 aliases :: TypeAliases -> Aliases
 aliases = bifoldMap (const mempty) id
 
-selfAliasType :: VName -> TypeBase Size o -> TypeAliases
-selfAliasType v = insertSelfAliases v . unknownAliases
-
--- | @insertSelfAliases v t@ adds an alias of @v@ to every component of @t@,
--- noting the path at which the component sits.
-insertSelfAliases :: VName -> TypeAliases -> TypeAliases
-insertSelfAliases v = mapLeaves $ aliasLeaf . AliasBound . (v,)
-
--- | Add an alias to a leaf of a type.
+-- | Add an alias to a leaf of a type. That means we assume the type passed in
+-- here is not a compound type.
 aliasLeaf :: Alias -> TypeAliases -> TypeAliases
 aliasLeaf a (Array als shape et) = Array (S.insert a als) shape et
 aliasLeaf a (Scalar (TypeVar als tn args)) = Scalar $ TypeVar (S.insert a als) tn args
 aliasLeaf a (Scalar (Arrow als mn d ps rt)) = Scalar $ Arrow (S.insert a als) mn d ps rt
 aliasLeaf _ t = t
 
+-- | @insertSelfAliases v t@ adds an alias of @v@ to every component of @t@,
+-- noting the path at which the component sits.
+insertSelfAliases :: VName -> TypeAliases -> TypeAliases
+insertSelfAliases v = mapLeaves $ aliasLeaf . AliasBound . (v,)
+
 -- | The aliases of a use of the global @v@, given its declared type and type
--- parameters and the type it is used at.  A use of a global aliases that
--- global, except where parametricity rules it out: a component that is not a
--- function and whose declared type mentions one of the type parameters cannot
--- be (part of) a global, and a function can only yield a value aliasing a
--- global if some nonfresh component of its result is not of that kind.  See
--- Note [Parametric results].
+-- parameters and the type it is used at. A use of a global name aliases that
+-- name, except where parametricity rules it out. In particular, a non-function
+-- component whose declared type mentions one of the type parameters cannot be
+-- (part of) a global, and a function can only yield a value aliasing a global
+-- if some nonfresh component of its result is not of that kind. See Note
+-- [Parametric results].
 globalAliases :: VName -> [TypeParam] -> StructType -> StructType -> TypeAliases
 globalAliases v tparams decl = mapLeaves onLeaf . second (const mempty)
   where
@@ -847,6 +862,9 @@ notedAliases tparams decl
   | manufacturesAbstract tparams decl = noteSelfAliases
   | otherwise = id
 
+selfAliasType :: VName -> TypeBase Size o -> TypeAliases
+selfAliasType v = insertSelfAliases v . unknownAliases
+
 -- | The aliases to assume for a value whose provenance we know nothing about:
 -- none at all, except what its own type says it may manufacture.  This is
 -- 'notedAliases' with no type parameters to exploit.  See Note [Parametric
@@ -1030,7 +1048,11 @@ checkLoop loop_loc (param, arg, form, body) = do
 -- parametricity tells us about the freshness of the result recorded in it.
 -- Only an application that supplies every parameter of the type is refined.
 -- See Note [Parametric results].
-parametricFreshness :: QualName VName -> StructType -> [StructType] -> CheckM StructType
+parametricFreshness ::
+  QualName VName ->
+  StructType ->
+  [StructType] ->
+  CheckM StructType
 parametricFreshness qn ftype argtypes = do
   globals <- asks envGlobal
   pure $ fromMaybe ftype $ do
@@ -1464,24 +1486,28 @@ checkValDef globals (fname, tparams, params, body, RetType ext ret, retdecl, loc
 
 -- Note [Parametric results]
 --
--- Parametricity tells us three things about the result of applying a global,
--- all read from its *declared* type, which 'envGlobal' looks up: whether the
--- application may have manufactured a value with internal aliasing, whether
--- the result must be fresh because it is the result of an argument that
--- constructs its results freshly, and whether the result may alias a global.
+-- Parametricity tells us three things about the result of applying a global
+-- function, all read from its *declared* type scheme, which 'envGlobal' looks
+-- up: whether the application may have manufactured a value with internal
+-- aliasing, whether the result must be fresh because it is the result of an
+-- argument that constructs its results freshly, and whether the result may
+-- alias a global.
 --
 -- ## Internal aliasing
 --
--- The type system cannot talk about a value that aliases *itself*: a value
--- that is, behind an abstraction boundary, a pair of arrays that are really the
--- same array.  Such a value can never be consumed, nor given a fresh type.
--- 'AliasSelf' stands for that possibility.  It is not an alias of any variable
--- ('aliasVar' is 'Nothing' for it), so it must never be mistaken for one; ask
--- "might these two values share memory?" through 'overlaps' rather than by
--- comparing alias sets directly.
+-- The type system cannot talk about a value that aliases *itself*. For example,
+-- a value that is, behind an abstraction boundary, a pair of arrays that are
+-- really the same array. Such a value can never be consumed, nor given a fresh
+-- type. 'AliasSelf' stands for that possibility. It is not an alias of any
+-- variable ('aliasVar' is 'Nothing' for it), so it must never be mistaken for
+-- one; ask "might these two values share memory?" through 'overlaps' rather
+-- than by comparing alias sets directly. We can think that when 'AliasSelf' is
+-- part of an aliasing set then we have "imprecise aliases", and otherwise we
+-- have "precise aliaseS" (but do not take these terms literally; aliasing is
+-- almost always an over-approximation).
 --
 -- Parametricity is what tells us whether such a value can have been
--- manufactured here at all.
+-- manufactured by a given function application.
 --
 -- The crude answer - a value has internal aliasing whenever it is produced by
 -- applying a function whose result type is a nonfresh abstract type - is
@@ -1491,16 +1517,16 @@ checkValDef globals (fname, tparams, params, body, RetType ext ret, retdecl, loc
 --     def f (x: *M.t) : *M.t = id x
 --   }
 --
--- because @id@ is instantiated at @M.t -> M.t@.  But @id@ manufactures
--- nothing: its declared type @a -> a@ means, by parametricity, that what it
--- returns *is* its argument, whose aliases we already track.
+-- because @id@ is instantiated at @M.t -> M.t@. But @id@ manufactures nothing:
+-- its declared type @a -> a@ means, by parametricity, that what it returns *is*
+-- its argument, whose aliases we know precisely.
 --
--- So the property is about the *declared* type: a function can only manufacture
+-- So we perform a more sophisticated reasonong: a function can only manufacture
 -- an abstract value if its result mentions an abstract type that is not one of
--- its own type parameters ('manufacturesAbstract').  This is not the same as
+-- its own type parameters ('manufacturesAbstract'). This is not the same as
 -- "the abstract type also occurs in a parameter": a monomorphic @f: M.t -> M.t@
 -- inside a module might well be @\_ -> M.mk 5@, so its type tells us nothing
--- (tests/uniqueness/uniqueness-error75.fut).  Only genuine polymorphism does.
+-- (tests/uniqueness/uniqueness-error75.fut). Only genuine polymorphism does.
 --
 -- Consumption checking sees only instantiated types, so the declared type is
 -- looked up when a name is mentioned ('envGlobal', consulted by 'observeVar')
@@ -1515,32 +1541,35 @@ checkValDef globals (fname, tparams, params, body, RetType ext ret, retdecl, loc
 -- aliasing".  'returnType' moves between the two readings for free as the
 -- result stops being an arrow.
 --
--- Because the note is a "may", anything whose provenance we cannot see must
--- carry it, or we would promise something we have not checked.  Hence
--- 'unknownAliases', used for parameters ('selfAliasType') and for any type we
--- build out of thin air, and hence 'closureAliases' keeping the note that a
--- function defined here picked up from its own body.  Alias sets are combined
--- by union, and a union of "may" is again a "may"; the conditional join of Note
--- [Locations and frames] drops aliases, but never 'AliasSelf'.  So the lattice
--- works out.
+-- This is a conservative over-approximation we use whenever we have no better
+-- ifnormation available. Hence 'unknownAliases', used for parameters
+-- ('selfAliasType') and for any type we build out of thin air, and hence
+-- 'closureAliases' keeping the note that a function defined here picked up from
+-- its own body. Alias sets are combined by union, and a union of "may" is again
+-- a "may"; the conditional join of Note [Locations and frames] drops aliases,
+-- but never 'AliasSelf'. In in some sense, 'AliasSelf' behaves a bit like the
+-- top element of a lattice.
 --
 -- ## Freshness
 --
--- Consider
+-- Futhark does not have "freshness polymorphism", but we can infer it in some
+-- cases by parametricity. Consider
 --
 --   def (|>) 'a '^b (x: a) (f: a -> b) : b = f x
 --
 -- The result of @|>@ is a type parameter that occurs in exactly one of the
 -- parameters, and there only as the result of a function. The only way to
--- obtain a value of an unknown type is to be handed one, and no parameter but
+-- obtain a value of a type parameter is to be handed one, and no parameter but
 -- @f@ holds any, so the result of @|>@ is necessarily the result of applying
 -- @f@ ('resultFromParam'). When @f@ in addition constructs its result freshly -
 -- as @copy: t -> *t@ does - so does the application.
 --
 -- This is a property of the application, not of @|>@ or of its instantiation:
 -- @xs |> copy@ is fresh and @xs |> id@ is not, at the very same instantiation.
--- We record it in the *instantiated* type of @|>@ at the application
--- ('parametricFreshness'), which becomes
+-- Recall that the instantiation from Terms.hs does not have freshness
+-- propagated, so the result in the type is nonfresh, as specified in the type
+-- scheme. However, we here update the _instantiated_ type of @|>@ at the
+-- application ('parametricFreshness'), which becomes
 --
 --   (x: []i32) -> (f: []i32 -> *[]i32) -> *[]i32
 --
@@ -1552,10 +1581,10 @@ checkValDef globals (fname, tparams, params, body, RetType ext ret, retdecl, loc
 -- just the result: that definition has body @f x@, which would not justify a
 -- fresh result if @f@ were still declared to return a nonfresh one.
 --
--- Only an application that supplies every parameter of the function's *type*
--- is refined, as in the F formalisation. A partial application may already
--- have evaluated part of the function's body, and the closure it produces may
--- then hold what that part computed. Consider
+-- A core restriction is that only an application that supplies every parameter
+-- of the function's *type* is refined. A partial application may already have
+-- evaluated part of the function's body, and the closure it produces may then
+-- hold what that part computed. Consider
 --
 --   def trap 'a 'b 'c (f: a -> b) (x: a) : c -> b =
 --     let r = f x in \(_: c) -> r
@@ -1577,43 +1606,41 @@ checkValDef globals (fname, tparams, params, body, RetType ext ret, retdecl, loc
 --
 -- - and the refinement is lost by anything that obscures the head, including
 -- parentheses and @let@. This is never *wrong*, only conservative: a spelling
--- we do not recognise yields the plain reading. Do not add tests pinning the
--- conservative answers; they are not intended behaviour.
+-- we do not recognise yields the plain reading.
 --
 -- ## Globals
 --
--- A use of a global aliases that global, which cannot be consumed.  This is
--- the plain reading of the F formalisation, in which the result of applying a
--- function aliases the function itself.  A function may therefore return a
--- global, and its result is then simply not consumable.
+-- A use of a global aliases that global, and globals cannot be consumed. When
+-- applying a global function returning a nonfresh result, the result thereby
+-- aliases the global, and hence cannot be consumed.
 --
 -- Parametricity keeps polymorphic functions such as @transpose@ precise
--- ('globalAliases').  A global has no type parameters of its own, so a value
--- whose type mentions one of the type parameters of the global it came from
--- cannot be a global - provided that a polymorphic *value* is not a single
--- shared object.  The monomorphiser ensures that by compiling a polymorphic
--- value as a function of @()@, so that each use computes it anew, just as a
--- size-polymorphic value is a function of its sizes.  Hence:
+-- ('globalAliases'). An edge case is polymorphic "values", which arise solely
+-- (I think) for arrays, as an empty array literal can have any element type. To
+-- address this, our semantics for polymorphic values is that they are
+-- implicitly functions; re-computed on every access to the global. The
+-- monomorphiser ensures that by compiling a polymorphic value as a function of
+-- @()@, so that each use computes it anew, just as a size-polymorphic value is
+-- a function of its sizes. Hence:
 --
--- - A component that is not a function, and whose declared type mentions one
---   of the global's type parameters, does not alias the global.  So
---   @empty 'a : []a@ aliases nothing, while the first component of
---   @pv 'a : ([]i32, []a)@ aliases @pv@.
+-- - A component that is not a function, and whose declared type mentions one of
+--   the global's type parameters, does not alias the global. So @empty 'a :
+--   []a@ aliases nothing, while the first component of @pv 'a : ([]i32, []a)@
+--   aliases @pv@.
 --
 -- - A function aliases the global exactly when some nonfresh component of its
---   (curried) result is not of that kind.  So @transpose@, @reverse@ and @|>@
+--   (curried) result is not of that kind. So @transpose@, @reverse@ and @|>@
 --   alias nothing, and their results alias only their arguments, while the
---   results of @tail : []i32 -> []i32@ alias @tail@ and cannot be consumed.
---   A function has a single alias set, so in a result such as @([]i32, a)@
---   the second component is also taken to alias the function.
+--   results of @tail : []i32 -> []i32@ alias @tail@ and cannot be consumed. A
+--   function has a single alias set, so in a result such as @([]i32, a)@ the
+--   second component is also taken to alias the function.
 --
 -- Size parameters do not count: as far as types can tell, @zeros [n] : [n]i32@
 -- might be (a slice of) a global, so it aliases @zeros@.
 --
 -- This reasoning needs the type parameters, which monomorphisation removes.
--- That does no harm, because nothing analyses the program between type
--- checking and the core language, and the core language does not track the
--- aliasing of globals at all.
+-- Hence, monomorphising a Futhark program results in a program that may no
+-- longer be correct as far as (this) alias analysis is concerned.
 
 -- Note [Locations and frames]
 --
