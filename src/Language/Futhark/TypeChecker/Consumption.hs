@@ -107,22 +107,13 @@ prettyAlias v fs = prettyName v <> mconcat (map (("." <>) . prettyName) fs)
 instance Pretty (S.Set Alias) where
   pretty = braces . commasep . map pretty . S.toList
 
--- | The set of in-scope variables that are being aliased.  This is not the
--- way to ask whether two values may share memory; see 'overlaps'.
-boundAliases :: Aliases -> S.Set VName
-boundAliases = boundAliasesWith True
-
--- | As 'boundAliases', but ignoring 'AliasClosure'. Use this when deciding
--- whether to report an aliasing error to the user, but not when deciding what
--- the compiler must conservatively assume.
+-- | The in-scope variables aliased here, ignoring those aliased only through a
+-- closure ('AliasClosure').  Use this when deciding whether to report an
+-- aliasing error to the user, but not when deciding what the compiler must
+-- conservatively assume.  This is not the way to ask whether two values may
+-- share memory; see 'overlaps'.
 sourceBoundAliases :: Aliases -> S.Set VName
-sourceBoundAliases = boundAliasesWith False
-
--- | The in-scope variables aliased here, counting those aliased only through a
--- closure if asked.  'AliasFree' has left scope and 'AliasSelf' is no variable
--- at all, so neither is ever included.
-boundAliasesWith :: Bool -> Aliases -> S.Set VName
-boundAliasesWith closures = aliasVars . S.filter (isBoundAlias closures)
+sourceBoundAliases = aliasVars . S.filter (isBoundAlias False)
 
 -- | Does this alias refer to an in-scope variable, counting one aliased only
 -- through a closure if asked?
@@ -955,9 +946,8 @@ boundFreeInExp e = do
     M.mapMaybe (fmap entryAliases) . M.fromSet (`M.lookup` vtable) $
       fvVars (freeInExp e)
 
--- Loops are tricky because we want to infer the freshness of their
--- parameters.  This is pretty unusual: we do not do this for ordinary
--- functions.
+-- Loops are tricky because we want to infer the diets of their parameters.
+-- This is pretty unusual: we do not do this for ordinary functions.
 type Loop = (Pat ParamType, LoopInitBase Info VName, LoopFormBase Info VName, Exp)
 
 -- | Mark bindings of consumed names as Consume, except those under a
@@ -988,72 +978,41 @@ updateParamDiet cons = recurse
     recurse (PatConstr n t ps ploc) =
       PatConstr n t (map recurse ps) ploc
 
+-- | Infer which loop parameters are consumed, and check what the body returns
+-- for them.  A parameter is consumed if the body consumes it, or if the value
+-- returned for a consumed parameter aliases it, as that value is consumed in
+-- the next iteration.  See Note [Locations and frames].
 convergeLoopParam :: Loc -> Pat ParamType -> Names -> TypeAliases -> CheckM (Pat ParamType)
-convergeLoopParam loop_loc param body_cons body_als = do
-  let -- Make the pattern Consume where needed.
-      param' = updateParamDiet (`S.member` S.filter (`elem` patNames param) body_cons) param
+convergeLoopParam loop_loc param body_cons body_als
+  | body_cons' /= body_cons = convergeLoopParam loop_loc param body_cons' body_als
+  | otherwise = do
+      checkLoopResult loop_loc param' body_als
+      pure param'
+  where
+    param' = updateParamDiet (`S.member` body_cons) param
+    returned = toList $ matchPat param' body_als
+    cons_als = foldMap (aliases . snd . snd) $ filter ((== Consume) . diet . fst . snd) returned
+    body_cons' = body_cons <> S.filter (`elem` patNames param) (aliasVars cons_als)
 
-  -- Check that the new values of consumed merge parameters do not
-  -- alias something bound outside the loop, AND that anything
-  -- returned for a consumed merge parameter does not alias anything
-  -- else returned.
-  let checkMergeReturn (Id pat_v (Info pat_v_t) patloc) t = do
-        let free_als = S.filter (`notElem` patNames param) $ boundAliases (aliases t)
-        when (diet pat_v_t == Consume) $ forM_ free_als $ \v ->
-          lift
-            . addError loop_loc mempty
-            . withIndexLink "consuming-loop-param-aliases"
-            $ "Return value for consuming loop parameter"
-              <+> dquotes (prettyName pat_v)
-              <+> "aliases"
-              <+> dquotes (prettyName v)
-              <> "."
-        (cons, obs) <- get
-        when (aliases t `overlaps` cons)
-          $ lift
-            . addError loop_loc mempty
-            . withIndexLink "loop-parameter-aliases-other"
-          $ "Return value for loop parameter"
-            <+> dquotes (prettyName pat_v)
-            <+> "aliases other consumed loop parameter."
-        when
-          (diet pat_v_t == Consume && aliases t `overlaps` (cons <> obs))
-          $ lift . addError loop_loc mempty
-          $ withIndexLink "aliases-previously-returned"
-          $ "Return value for consuming loop parameter"
-            <+> dquotes (prettyName pat_v)
-            <+> "aliases previously returned value."
-        if diet pat_v_t == Consume
-          then put (cons <> aliases t, obs)
-          else put (cons, obs <> aliases t)
-
-        pure $ Id pat_v (Info pat_v_t) patloc
-      checkMergeReturn (Wildcard (Info pat_v_t) patloc) _ =
-        pure $ Wildcard (Info pat_v_t) patloc
-      checkMergeReturn (PatParens p _) t =
-        checkMergeReturn p t
-      checkMergeReturn (PatAscription p _ _) t =
-        checkMergeReturn p t
-      checkMergeReturn (RecordPat pfs patloc) (Scalar (Record tfs)) =
-        RecordPat . map unshuffle . M.toList <$> sequence pfs' <*> pure patloc
-        where
-          pfs' = M.intersectionWith check (M.fromList (map shuffle pfs)) tfs
-          check (loc, x) y = (loc,) <$> checkMergeReturn x y
-          shuffle (L loc v, t) = (v, (loc, t))
-          unshuffle (v, (loc, t)) = (L loc v, t)
-      checkMergeReturn (TuplePat pats patloc) t
-        | Just ts <- isTupleRecord t =
-            TuplePat <$> zipWithM checkMergeReturn pats ts <*> pure patloc
-      checkMergeReturn p _ =
-        pure p
-
-  (param'', (param_cons, _)) <-
-    runStateT (checkMergeReturn param' body_als) (mempty, mempty)
-
-  let body_cons' = body_cons <> aliasVars param_cons
-  if body_cons' == body_cons && patternType param'' == patternType param
-    then pure param'
-    else convergeLoopParam loop_loc param'' body_cons' body_als
+-- | Check the values a loop body returns for its consumed parameters, as the
+-- arguments of a call that consumes them: each must be fresh, as the result of
+-- a function with the loop parameters as its parameters would have to be.
+checkLoopResult :: Loc -> Pat ParamType -> TypeAliases -> CheckM ()
+checkLoopResult loop_loc param body_als =
+  forM_ (matchPat param body_als) $ \(v, (t, als)) ->
+    when (diet t == Consume) . mapM_ (report v) $ unfreshness [param] shared als
+  where
+    shared = sharedLocations body_als
+    what v = "Return value for consuming loop parameter" <+> dquotes (prettyName v)
+    report v (UnfreshAliases w) =
+      addError loop_loc mempty . withIndexLink "consuming-loop-param-aliases" $
+        what v <+> "aliases" <+> dquotes (prettyName w) <> "."
+    report v UnfreshShared =
+      addError loop_loc mempty . withIndexLink "aliases-previously-returned" $
+        what v <+> "aliases another returned value."
+    report v UnfreshSelf =
+      addError loop_loc mempty $
+        what v <+> "may have internal aliases."
 
 checkLoop :: Loc -> Loop -> CheckM (Loop, TypeAliases)
 checkLoop loop_loc (param, arg, form, body) = do
@@ -1818,6 +1777,14 @@ checkValDef globals (_fname, params, body, RetType ext ret, retdecl, loc) = runC
 -- A consumed argument must have separate components ('noSelfAliases'), must not
 -- alias anything consumed, and must not overlap the function being applied or
 -- any argument evaluated before it ('checkArg').
+--
+-- A loop is checked as a recursive call whose arguments are what its body
+-- returns ('checkLoopResult').  The value returned for a consumed loop
+-- parameter is consumed in the next iteration, so it must be fresh in exactly
+-- the sense below, with the loop parameters as the parameters.  The diets of
+-- the loop parameters are inferred first: a parameter is consumed if the body
+-- consumes it or the value returned for a consumed parameter aliases it
+-- ('convergeLoopParam').
 --
 -- A component of a function's result may be fresh exactly when every in-scope
 -- location it aliases lies within a consumed part of a parameter, none of its

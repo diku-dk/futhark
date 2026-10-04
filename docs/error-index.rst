@@ -318,35 +318,21 @@ problematic type.  It can be fixed using the techniques above.
 
 This occurs for expressions like the following::
 
-    loop (xs: []i32, ys: *[]i32) = (replicate n 0, replicate n 0)
-    for i < 10 do
-      (xs, xs)
+    loop xs for i < 10 do
+      -- Consume xs...
+      let xs[i] = 0
+      in ys
 
+This is not allowed, as the loop parameter ``xs`` is consumed, in this case
+implicitly due to the in-place update, but the loop body returns something that
+is not consumable, in this case ``ys``, which is bound outside the loop.
 
-This is not allowed, as creates aliasing between a consumeable parameter
-(``ys``) and non-consumable parameter (``xs``) in the next iteration of the
-loop, during which consumption ``ys`` would also affect ``xs``. You can solve
-this by copying one of the return values of the loop.
-
-.. _loop-parameter-aliases-other:
-
-"Return value for loop parameter *x* aliases other consumed loop parameter"
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-This occurs for expressions like the following::
-
-    loop (xs: *[]i32, ys: *[]i32) = (replicate n 0, replicate n 0)
-    for i < 10 do
-      (xs, xs)
-
-This is not allowed for the same reason that we are not allowed to consume an
-array multiple times. You can solve this by copying one of the return values of
-the loop.
+You can solve this by copying one of the return values of the loop.
 
 .. _aliases-previously-returned:
 
-"Return value for consuming loop parameter *x* aliases previously returned value"
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+"Return value for consuming loop parameter *x* aliases another returned value"
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This error occurs when you have a loop with multiple loop parameters,
 at least one of which is consuming, and the values returned by the
