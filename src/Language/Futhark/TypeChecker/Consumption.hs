@@ -42,9 +42,6 @@ type Names = S.Set VName
 data Alias
   = AliasBound VName [Name]
   | AliasFree VName [Name]
-  | -- | Like 'AliasBound', but the alias arises from the closure of a function
-    -- with a fresh return type. See Note [Spurious closure aliases].
-    AliasClosure VName [Name]
   | -- | Used to represent unknowable internal aliasing, which may
     -- occur for a function that returns a nonfresh abstract type.
     -- (It may internally be a pair of arrays that alias each other.)
@@ -54,7 +51,6 @@ data Alias
 instance Pretty Alias where
   pretty (AliasBound v fs) = prettyAlias v fs
   pretty (AliasFree v fs) = "~" <> prettyAlias v fs
-  pretty (AliasClosure v fs) = "^" <> prettyAlias v fs
   pretty AliasSelf = "self"
 
 -- | The variable an alias refers to.  'AliasSelf' does not refer to any
@@ -62,7 +58,6 @@ instance Pretty Alias where
 aliasVar :: Alias -> Maybe VName
 aliasVar (AliasBound v _) = Just v
 aliasVar (AliasFree v _) = Just v
-aliasVar (AliasClosure v _) = Just v
 aliasVar AliasSelf = Nothing
 
 -- | A variable together with a path: the component of that variable at that
@@ -98,7 +93,6 @@ leaves = getConst . traverseLeaves (\p t -> Const [(p, t)])
 aliasLoc :: Alias -> Maybe Location
 aliasLoc (AliasBound v fs) = Just (v, fs)
 aliasLoc (AliasFree v fs) = Just (v, fs)
-aliasLoc (AliasClosure v fs) = Just (v, fs)
 aliasLoc AliasSelf = Nothing
 
 -- | The locations these aliases refer to.
@@ -132,21 +126,12 @@ prettyAlias v fs = prettyName v <> mconcat (map (("." <>) . prettyName) fs)
 instance Pretty (S.Set Alias) where
   pretty = braces . commasep . map pretty . S.toList
 
--- | The in-scope variables aliased here, ignoring those aliased only through a
--- closure ('AliasClosure').  Use this when deciding whether to report an
--- aliasing error to the user, but not when deciding what the compiler must
--- conservatively assume.  This is not the way to ask whether two values may
--- share memory; see 'overlaps'.
-sourceBoundAliases :: Aliases -> S.Set VName
-sourceBoundAliases = aliasVars . S.filter (isBoundAlias False)
-
--- | Does this alias refer to an in-scope variable, counting one aliased only
--- through a closure if asked?
-isBoundAlias :: Bool -> Alias -> Bool
-isBoundAlias _ AliasBound {} = True
-isBoundAlias closures AliasClosure {} = closures
-isBoundAlias _ AliasFree {} = False
-isBoundAlias _ AliasSelf = False
+-- | Does this alias refer to an in-scope variable?  'AliasFree' has left
+-- scope and 'AliasSelf' is no variable at all.  This is not the way to ask
+-- whether two values may share memory; see 'overlaps'.
+isBoundAlias :: Alias -> Bool
+isBoundAlias AliasBound {} = True
+isBoundAlias _ = False
 
 -- | What a value may share memory with.
 type Aliases = S.Set Alias
@@ -166,37 +151,50 @@ addAliases ::
   TypeBase dim o2
 addAliases = flip second
 
--- See also 'derivedAliases', which is what a /value/ obtained from this type
--- may alias.  The two differ only at function types, and choosing the wrong one
--- is silent, so consider which you want.
 aliases :: TypeAliases -> Aliases
 aliases = bifoldMap (const mempty) id
 
 selfAliasType :: VName -> TypeBase Size o -> TypeAliases
-selfAliasType v = insertSelfAliases AliasFuns v . unknownAliases
+selfAliasType v = insertSelfAliases v . unknownAliases
 
--- | Should 'insertSelfAliases' also alias the function-typed components?
-data AliasFuns
-  = -- | Yes: the binding is local, so a function it holds may close over
-    -- something we could consume.
-    AliasFuns
-  | -- | No: the binding is global, and we do not track the aliases of
-    -- functions bound outside the definition being checked, as they cannot
-    -- alias anything we could consume.
-    NoAliasFuns
-  deriving (Eq)
+-- | @insertSelfAliases v t@ adds an alias of @v@ to every component of @t@,
+-- noting the path at which the component sits.
+insertSelfAliases :: VName -> TypeAliases -> TypeAliases
+insertSelfAliases v = mapLeaves $ aliasLeaf . AliasBound v
 
--- | @insertSelfAliases funs v t@ adds an alias of @v@ to every component of
--- @t@, noting the path at which the component sits.
-insertSelfAliases :: AliasFuns -> VName -> TypeAliases -> TypeAliases
-insertSelfAliases funs v = mapLeaves onLeaf
+-- | Add an alias to a leaf of a type.
+aliasLeaf :: Alias -> TypeAliases -> TypeAliases
+aliasLeaf a (Array als shape et) = Array (S.insert a als) shape et
+aliasLeaf a (Scalar (TypeVar als tn args)) = Scalar $ TypeVar (S.insert a als) tn args
+aliasLeaf a (Scalar (Arrow als mn d ps rt)) = Scalar $ Arrow (S.insert a als) mn d ps rt
+aliasLeaf _ t = t
+
+-- | The aliases of a use of the global @v@, given its declared type and type
+-- parameters and the type it is used at.  A use of a global aliases that
+-- global, except where parametricity rules it out: a component that is not a
+-- function and whose declared type mentions one of the type parameters cannot
+-- be (part of) a global, and a function can only yield a value aliasing a
+-- global if some nonfresh component of its result is not of that kind.  See
+-- Note [Parametric results].
+globalAliases :: VName -> [TypeParam] -> StructType -> StructType -> TypeAliases
+globalAliases v tparams decl = mapLeaves onLeaf . second (const mempty)
   where
-    onLeaf fs (Array als shape et) = Array (S.insert (AliasBound v fs) als) shape et
-    onLeaf fs (Scalar (TypeVar als tn args)) =
-      Scalar $ TypeVar (S.insert (AliasBound v fs) als) tn args
-    onLeaf fs (Scalar (Arrow als mn d ps rt))
-      | funs == AliasFuns = Scalar $ Arrow (S.insert (AliasBound v fs) als) mn d ps rt
-    onLeaf _ t = t
+    tparams' = S.fromList [p | TypeParamType _ p _ <- tparams]
+    parametric :: TypeBase Size u -> Bool
+    parametric = not . S.disjoint tparams' . typeVars
+    decl_leaves = leaves decl
+
+    onLeaf p t =
+      case listToMaybe [d | (dp, d) <- decl_leaves, dp `L.isPrefixOf` p] of
+        Just d@(Scalar Arrow {})
+          | anyResultComponent maybeGlobal (toRes Nonfresh d) -> aliasLeaf (AliasBound v p) t
+          | otherwise -> t
+        Just d | parametric d -> t
+        _ -> aliasLeaf (AliasBound v p) t
+
+    maybeGlobal t@(Array Nonfresh _ _) = not $ parametric t
+    maybeGlobal t@(Scalar (TypeVar Nonfresh _ _)) = not $ parametric t
+    maybeGlobal _ = False
 
 updateAliases :: TypeAliases -> [UpdateStep Info VName] -> TypeAliases -> TypeAliases
 updateAliases _ [] ve_als =
@@ -308,6 +306,16 @@ runCheckM globals loc (CheckM m) =
 describeVar :: VName -> CheckM (Doc a)
 describeVar v = describeLoc (v, [])
 
+-- | Like 'describeVar', but naming a variable written by the programmer
+-- without calling it one.
+describeName :: VName -> CheckM (Doc a)
+describeName v = do
+  loc <- asks envLoc
+  gets $
+    maybe (dquotes (prettyName v)) (nameReason (srclocOf loc))
+      . M.lookup v
+      . stateNames
+
 -- | Describe a location for the user.  A path into a sum payload is not
 -- something the user can write, so the path is cut off at the first sum.
 describeLoc :: Location -> CheckM (Doc a)
@@ -379,7 +387,6 @@ unscope :: [VName] -> Aliases -> Aliases
 unscope bound = S.map f
   where
     f (AliasBound v fs) = if v `elem` bound then AliasFree v fs else AliasBound v fs
-    f (AliasClosure v fs) = if v `elem` bound then AliasFree v fs else AliasClosure v fs
     f a = a
 
 -- | Figure out the aliases of each bound name in a pattern.
@@ -417,7 +424,7 @@ bindingPat p t = fmap (second (second (unscope (patNames p)))) . local bind
             foldr (uncurry M.insert . f) (envVtable env) (matchPat p t)
         }
       where
-        f (v, (_, als)) = (v, Consumable $ insertSelfAliases AliasFuns v als)
+        f (v, (_, als)) = (v, Consumable $ insertSelfAliases v als)
 
 bindingParam :: Pat ParamType -> CheckM (a, TypeAliases) -> CheckM (a, TypeAliases)
 bindingParam p m = do
@@ -487,8 +494,6 @@ consumeAliases loc als = do
           Just (Nonconsumable {}) -> True
           Just _ -> False
           Nothing -> True
-      -- Note that 'AliasClosure' is treated exactly like 'AliasBound'
-      -- here; see Note [Spurious closure aliases].
       checkIfConsumable AliasFree {} = pure ()
       checkIfConsumable AliasSelf =
         addError
@@ -498,11 +503,13 @@ consumeAliases loc als = do
       checkIfConsumable a
         | Just v <- aliasVar a,
           isBad v = do
-            v' <- describeVar v
+            v' <- describeName v
             addError loc mempty . withIndexLink "not-consumable" $
               "Consuming" <+> v' <> ", which is not consumable."
       checkIfConsumable _ = pure ()
-  mapM_ checkIfConsumable $ S.toList als
+      -- Mention local variables before globals.
+      global = maybe False (`M.notMember` vtable) . aliasVar
+  mapM_ checkIfConsumable $ L.sortOn global $ S.toList als
   checkIfConsumed loc als
   consumed als'
   where
@@ -513,37 +520,22 @@ observeVar :: Loc -> QualName VName -> StructType -> CheckM TypeAliases
 observeVar loc qv t = do
   als <-
     asks $ \env ->
-      maybe (isGlobal env) isLocal $
+      maybe (isGlobal env) entryAliases $
         M.lookup v (envVtable env)
   checkIfConsumed loc (aliases als)
   pure als
   where
     v = qualLeaf qv
 
-    isLocal = entryAliases
-
-    -- Handling globals is tricky.  For arrays and such, we do want to
-    -- track their aliases.  We do not want to track the aliases of
-    -- functions.  However, array bindings that are *polymorphic*
-    -- should be treated like functions.  However, we do not have
-    -- access to the original binding information here.  To avoid
-    -- having to plumb that all the way here, we infer that an array
-    -- binding is a polymorphic instantiation if its size contains any
-    -- locally bound names.
+    -- The declared type of a global is what makes parametricity visible; if
+    -- we cannot find it, fall back to the instantiated type, which amounts to
+    -- assuming no parametricity at all.  An intrinsic aliases nothing.  See
+    -- Note [Parametric results].
     isGlobal env
-      | isInstantiation (envVtable env) t = noted env bare
-      | otherwise = noted env $ insertSelfAliases NoAliasFuns v bare
-      where
-        bare = second (const mempty) t
-
-    isInstantiation vtable =
-      any (`M.member` vtable) . fvVars . freeInType
-
-    -- Note where applying this global may produce a value with internal
-    -- aliasing.  Its declared type is what makes parametricity visible; if we
-    -- cannot find it, fall back to the instantiated type, which amounts to
-    -- assuming no parametricity at all.  See Note [Parametric results].
-    noted env = uncurry notedAliases $ fromMaybe ([], t) $ envGlobal env qv
+      | isIntrinsic v = second (const mempty) t
+      | otherwise =
+          let (tparams, decl) = fromMaybe ([], t) $ envGlobal env qv
+           in notedAliases tparams decl $ globalAliases v tparams decl t
 
 -- Capture any newly consumed locations that occur during the provided action.
 contain :: CheckM a -> CheckM (a, Consumed)
@@ -623,7 +615,11 @@ unfreshness params shared t_als =
     <> [UnfreshSelf | selfAliased (aliases t_als)]
     <> map (UnfreshAliases . fst) (filter (not . consumedParamLoc params) in_scope)
   where
-    in_scope = nubOrd $ aliasLocs $ S.filter (isBoundAlias True) $ arrayAliases t_als
+    -- Mention the parameters before other variables.
+    in_scope =
+      L.sortOn ((`notElem` foldMap patNames params) . fst) . nubOrd . aliasLocs $
+        S.filter isBoundAlias $
+          arrayAliases t_als
 
 arrayAliases :: TypeAliases -> Aliases
 arrayAliases (Array als _ _) = als
@@ -634,20 +630,8 @@ arrayAliases (Scalar Arrow {}) = mempty
 arrayAliases (Scalar (Sum fs)) =
   mconcat $ concatMap (map arrayAliases) $ M.elems fs
 
--- | The aliases of any function-typed components: the part of 'aliases' that
--- 'arrayAliases' ignores.  Note that this goes through 'derivedAliases', so a
--- closure alias of a function with a fresh return type comes back weakened to
--- 'AliasClosure' - it is 'sourceBoundAliases' that later drops it.  See Note
--- [Spurious closure aliases].
-arrowAliases :: TypeAliases -> Aliases
-arrowAliases t@(Scalar Arrow {}) = derivedAliases t
-arrowAliases (Scalar (Record fs)) = foldMap arrowAliases fs
-arrowAliases (Scalar (Sum fs)) =
-  mconcat $ concatMap (map arrowAliases) $ M.elems fs
-arrowAliases _ = mempty
-
 -- | The aliases of the free local variables captured by a closure, plus any
--- globals that its result aliases. See Note [Global aliases and lambdas].
+-- globals that its result aliases, which it may return.
 closureAliases :: Exp -> TypeAliases -> CheckM Aliases
 closureAliases e body_als = do
   vtable <- asks envVtable
@@ -819,17 +803,6 @@ checkArg f_als prev p_t e = do
         ([], l : _) -> describeLoc l
         ([], []) -> pure mempty
 
--- | Can a value produced by fully applying a function with this return type
--- alias the closure of that function? This is not the case if every part of the
--- (curried) return type is fresh or primitive, as such a result is guaranteed
--- to be freshly constructed.
-resultCanAlias :: ResType -> Bool
-resultCanAlias = anyResultComponent canAlias
-  where
-    canAlias (Scalar (TypeVar u _ _)) = u == Nonfresh
-    canAlias (Array u _ _) = u == Nonfresh
-    canAlias _ = False
-
 -- | Does any component of the value that this type ultimately produces satisfy
 -- the predicate?  Function types are followed to their (curried) result, as the
 -- only way to obtain a value from a function is to apply it.
@@ -838,30 +811,6 @@ anyResultComponent p (Scalar (Arrow _ _ _ _ (RetType _ t))) = anyResultComponent
 anyResultComponent p (Scalar (Record fs)) = any (anyResultComponent p) fs
 anyResultComponent p (Scalar (Sum cs)) = any (any (anyResultComponent p)) cs
 anyResultComponent p t = p t
-
--- | The aliases that may show up in a *value* derived from a value of the given
--- type. For most types this is simply the aliases of the type itself, but
--- functions are special: the only way to obtain a value from a function is to
--- apply it, so when a function returns a Fresh value ('resultCanAlias'), that
--- does not alias the closure.
---
--- Such aliases are weakened to 'AliasClosure' rather than dropped outright; see
--- Note [Spurious closure aliases].
---
--- Note that this refinement is only valid for deriving *values*; a function
--- derived from a function (say, by partial application) must still carry the
--- full closure aliases, as it may later be applied in a way that does produce
--- an aliasing value.
-derivedAliases :: TypeAliases -> Aliases
-derivedAliases (Scalar (Arrow als _ _ _ (RetType _ rt)))
-  | resultCanAlias rt = als
-  | otherwise = S.map weaken als
-  where
-    weaken (AliasBound v fs) = AliasClosure v fs
-    weaken a = a
-derivedAliases (Scalar (Record fs)) = foldMap derivedAliases fs
-derivedAliases (Scalar (Sum cs)) = foldMap (foldMap derivedAliases) cs
-derivedAliases t = aliases t
 
 -- | Can a value of this declared type produce, when its function components
 -- are applied, a value whose internal aliasing we cannot see?  That is so
@@ -914,13 +863,13 @@ returnType _ (Array Fresh et shape) _ _ =
 returnType appres (Array Nonfresh et shape) Consume _ =
   Array appres et shape
 returnType appres (Array Nonfresh et shape) Observe arg =
-  Array (appres <> derivedAliases arg) et shape
+  Array (appres <> aliases arg) et shape
 returnType _ (Scalar (TypeVar Fresh t targs)) _ _ =
   Scalar $ TypeVar mempty t targs
 returnType appres (Scalar (TypeVar Nonfresh t targs)) Consume _ =
   Scalar $ TypeVar appres t targs
 returnType appres (Scalar (TypeVar Nonfresh t targs)) Observe arg =
-  Scalar $ TypeVar (appres <> derivedAliases arg) t targs
+  Scalar $ TypeVar (appres <> aliases arg) t targs
 returnType appres (Scalar (Record fs)) d arg =
   Scalar $ Record $ fmap (\et -> returnType appres et d arg) fs
 returnType _ (Scalar (Prim t)) _ _ =
@@ -928,7 +877,7 @@ returnType _ (Scalar (Prim t)) _ _ =
 returnType appres (Scalar (Arrow _ v pd t1 (RetType dims t2))) Consume _ =
   Scalar $ Arrow appres v pd t1 $ RetType dims t2
 returnType appres (Scalar (Arrow _ v pd t1 (RetType dims t2))) Observe arg =
-  Scalar $ Arrow (appres <> derivedAliases arg) v pd t1 $ RetType dims t2
+  Scalar $ Arrow (appres <> aliases arg) v pd t1 $ RetType dims t2
 returnType appres (Scalar (Sum cs)) d arg =
   Scalar $ Sum $ (fmap . fmap) (\et -> returnType appres et d arg) cs
 
@@ -1293,7 +1242,6 @@ checkExp' (AppExp (LetFun fname (typarams, params, retdecl, Info (RetType ext re
     -- anyway.
     ((funbody', funbody_als), _body_cons) <- contain $ checkExp funbody
     checkReturnAlias loc params ret funbody_als
-    -- See Note [Global aliases and lambdas].
     als <- closureAliases funbody funbody_als
     let ret' = maybe (inferReturnFreshness params ret funbody_als) (const ret) retdecl
         ftype = funType params (RetType ext ret') `setAliases` als
@@ -1324,7 +1272,6 @@ checkExp' e@(Lambda params body te (Info (RetType ext ret)) loc) =
     -- anyway.
     ((body', body_als), _body_cons) <- contain $ checkExp body
     checkReturnAlias loc params ret body_als
-    -- See Note [Global aliases and lambdas].
     als <- closureAliases e body_als
     let ret' = maybe (inferReturnFreshness params ret body_als) (const ret) te
         ftype = funType params (RetType ext ret') `setAliases` als
@@ -1476,38 +1423,18 @@ checkExp' e@Negate {} = noAliases e
 checkExp' e@Not {} = noAliases e
 checkExp' e@Hole {} = noAliases e
 
-checkGlobalAliases :: SrcLoc -> [Pat ParamType] -> TypeAliases -> CheckM ()
-checkGlobalAliases loc params body_t = do
-  vtable <- asks envVtable
-  let global = flip M.notMember vtable
-      -- A definition with no parameters is a constant that may alias other
-      -- globals, but a *function-typed* definition may not have aliases in its
-      -- closure. See Note [Global aliases and lambdas].
-      als
-        | null params = arrowAliases body_t
-        | otherwise = arrayAliases body_t <> arrowAliases body_t
-  forM_ (sourceBoundAliases als) $ \v ->
-    when (global v) . addError loc mempty . withIndexLink "alias-free-variable" $
-      "Function result aliases the free variable "
-        <> dquotes (prettyName v)
-        <> "."
-          </> "Use"
-          <+> dquotes "copy"
-          <+> "to break the aliasing."
-
 -- | Type-check a value definition.  This also infers a new return
 -- type that may be fresher than previously.
 checkValDef ::
   -- | The declared type of any global, along with the type parameters it is
   -- polymorphic in.  See Note [Parametric results].
   (QualName VName -> Maybe ([TypeParam], StructType)) ->
-  (VName, [Pat ParamType], Exp, ResRetType, Maybe (TypeExp Exp VName), SrcLoc) ->
+  (VName, [TypeParam], [Pat ParamType], Exp, ResRetType, Maybe (TypeExp Exp VName), SrcLoc) ->
   ((Exp, ResRetType), [TypeError])
-checkValDef globals (_fname, params, body, RetType ext ret, retdecl, loc) = runCheckM globals (locOf loc) $ do
+checkValDef globals (fname, tparams, params, body, RetType ext ret, retdecl, loc) = runCheckM globals' (locOf loc) $ do
   fmap fst . bindingParams params $ do
     (body', body_als) <- checkExp body
     checkReturnAlias loc params ret body_als
-    checkGlobalAliases loc params body_als
     -- If the user did not provide an annotation (meaning the return
     -- type is fully inferred), we infer the freshness.  Otherwise,
     -- we go with whatever they wanted.  This lets the user define
@@ -1527,96 +1454,21 @@ checkValDef globals (_fname, params, body, RetType ext ret, retdecl, loc) = runC
       ( (body', ret'),
         body_als -- Don't matter.
       )
+  where
+    -- Recursion is monomorphic, so a recursive call is at the type parameters
+    -- of the definition itself.
+    globals' qn
+      | qualLeaf qn == fname = Just (tparams, funType params (RetType ext ret))
+      | otherwise = globals qn
 {-# NOINLINE checkValDef #-}
-
--- Note [Global aliases and lambdas]
---
--- A *named* function must never return a value aliasing a global, as the alias
--- propagation rules for function application states that the result of a
--- function application aliases only the parameters (and the closure aliases,
--- which top level functions do not have). This is what 'checkGlobalAliases'
--- enforces.
---
--- Lambdas and local functions do not have this restriction. Consider
---
---   def f n = tabulate n (\i -> x)
---
--- The lambda does return the global @x@, but it does not escape: it is used by
--- 'tabulate', whose return type is @*[n]a@, so the array that @f@ actually
--- returns is freshly constructed and aliases nothing.
---
--- Instead, we let the alias propagate and check it where it matters.
--- The global aliases of a lambda's body are added to the closure aliases
--- of its function type ('closureAliases'), so that:
---
---   * If the lambda is applied, the ordinary application rules decide
---     whether the alias reaches the result.
---
---   * If the lambda is returned by the enclosing named function, then the
---     enclosing function's result is function-typed and carries the closure
---     aliases with it. 'checkGlobalAliases' therefore looks through arrows via
---     'arrowAliases', and catches the escape there.
-
--- Note [Spurious closure aliases]
---
--- When a function has a fresh return type, applying it yields a freshly
--- constructed value, so the result cannot alias whatever the function closed
--- over. 'derivedAliases' uses this to avoid reporting spurious aliasing errors
--- for pipelines such as
---
---   def sum (xs: []M.t) = xs |> reduce M.op M.ne
---
--- where the partial application @reduce M.op M.ne@ closes over the top-level
--- @M.ne@, but has return type @*M.t@.
---
--- We cannot simply *drop* the alias, though. Not because a lifted function may
--- understate the freshness of its result - that is harmless, in the source
--- language and in the IR alike - but because the reasoning above is a precision
--- the *core* does not have. Dropping the alias lets 'inferReturnFreshness'
--- turn that extra precision into a fresh return type on the caller, which the
--- core then cannot verify and rejects.
---
--- So we keep the alias, marked as 'AliasClosure', and treat it exactly like
--- 'AliasBound' everywhere that affects what the compiler assumes (freshness
--- inference, consumption checking). The marking is used only to suppress the
--- user-visible error in 'checkGlobalAliases'.
---
--- What the weakening is needed *for* is narrow. A lifted @|>@ gets the
--- freshness of its instantiation settled at the application (see Note
--- [Parametric results]), so that is not it. Dropping the weakening costs exactly two tests: tests/issue995.fut and
--- tests/ad/issue1564.fut.
---
--- What remains is that a lifted function *inherits its declared return type*.
--- In tests/issue995.fut,
---
---   def render (color_fun: i64 -> i32) (h: i64) (w: i64) : []i32 =
---     tabulate h (\i -> color_fun i)
---
--- is declared nonfresh by the programmer, so the lifted @defunc_0_render@ is
--- too, although its body returns the @*[n]i32@ of a lifted @tabulate@. The core
--- language therefore assumes the result aliases the closure - which holds the
--- array that @color_fun@ closed over - while consumption checking, having
--- dropped the alias, infers a fresh return type for the caller.
---
--- Removing the marking entirely therefore requires the core to be able to prove
--- what consumption checking concluded, which means the lifted return types must
--- be *inferred from their bodies* rather than inherited. Note that this has to
--- hold along the whole chain: making @defunc_0_render@ alone as fresh as its
--- body is not enough, because the freshness it would report comes in turn from
--- @defunc_0_tabulate@, and so on (doing it for one link only is enough for
--- tests/ad/issue1564.fut, but not for tests/issue995.fut).
---
--- Defunctionalisation is source-to-source, so a lifted body is ordinary source
--- AST and 'checkValDef' would infer its return type directly; the obstacle is
--- the recursive case, which needs a return type before the body exists.
 
 -- Note [Parametric results]
 --
--- Parametricity tells us two things about the result of applying a global,
--- both read from its *declared* type, which 'envGlobal' looks up: whether the
--- application may have manufactured a value with internal aliasing, and
--- whether the result must be fresh because it is the result of an argument
--- that constructs its results freshly.
+-- Parametricity tells us three things about the result of applying a global,
+-- all read from its *declared* type, which 'envGlobal' looks up: whether the
+-- application may have manufactured a value with internal aliasing, whether
+-- the result must be fresh because it is the result of an argument that
+-- constructs its results freshly, and whether the result may alias a global.
 --
 -- ## Internal aliasing
 --
@@ -1655,12 +1507,13 @@ checkValDef globals (_fname, params, body, RetType ext ret, retdecl, loc) = runC
 -- and the answer recorded in the type as an 'AliasSelf' on each function
 -- component ('noteSelfAliases').  From there ordinary alias propagation carries
 -- it: through binding, so @let my_mk = M.mk in my_mk n@ still manufactures;
--- through 'returnType', so partial application does not lose it; and through
--- 'derivedAliases', so @n |> M.mk@ manufactures even though @|>@ itself does
--- not.  No arity bookkeeping is needed, because the note means the same thing
--- at every arity: on a function, "applying this may yield an internally-aliased
--- value", and on a value, "this may have internal aliasing".  'returnType'
--- moves between the two readings for free as the result stops being an arrow.
+-- through 'returnType', so partial application does not lose it, and neither
+-- does passing the function as an argument, so @n |> M.mk@ manufactures even
+-- though @|>@ itself does not.  No arity bookkeeping is needed, because the
+-- note means the same thing at every arity: on a function, "applying this may
+-- yield an internally-aliased value", and on a value, "this may have internal
+-- aliasing".  'returnType' moves between the two readings for free as the
+-- result stops being an arrow.
 --
 -- Because the note is a "may", anything whose provenance we cannot see must
 -- carry it, or we would promise something we have not checked.  Hence
@@ -1726,6 +1579,41 @@ checkValDef globals (_fname, params, body, RetType ext ret, retdecl, loc) = runC
 -- parentheses and @let@. This is never *wrong*, only conservative: a spelling
 -- we do not recognise yields the plain reading. Do not add tests pinning the
 -- conservative answers; they are not intended behaviour.
+--
+-- ## Globals
+--
+-- A use of a global aliases that global, which cannot be consumed.  This is
+-- the plain reading of the F formalisation, in which the result of applying a
+-- function aliases the function itself.  A function may therefore return a
+-- global, and its result is then simply not consumable.
+--
+-- Parametricity keeps polymorphic functions such as @transpose@ precise
+-- ('globalAliases').  A global has no type parameters of its own, so a value
+-- whose type mentions one of the type parameters of the global it came from
+-- cannot be a global - provided that a polymorphic *value* is not a single
+-- shared object.  The monomorphiser ensures that by compiling a polymorphic
+-- value as a function of @()@, so that each use computes it anew, just as a
+-- size-polymorphic value is a function of its sizes.  Hence:
+--
+-- - A component that is not a function, and whose declared type mentions one
+--   of the global's type parameters, does not alias the global.  So
+--   @empty 'a : []a@ aliases nothing, while the first component of
+--   @pv 'a : ([]i32, []a)@ aliases @pv@.
+--
+-- - A function aliases the global exactly when some nonfresh component of its
+--   (curried) result is not of that kind.  So @transpose@, @reverse@ and @|>@
+--   alias nothing, and their results alias only their arguments, while the
+--   results of @tail : []i32 -> []i32@ alias @tail@ and cannot be consumed.
+--   A function has a single alias set, so in a result such as @([]i32, a)@
+--   the second component is also taken to alias the function.
+--
+-- Size parameters do not count: as far as types can tell, @zeros [n] : [n]i32@
+-- might be (a slice of) a global, so it aliases @zeros@.
+--
+-- This reasoning needs the type parameters, which monomorphisation removes.
+-- That does no harm, because nothing analyses the program between type
+-- checking and the core language, and the core language does not track the
+-- aliasing of globals at all.
 
 -- Note [Locations and frames]
 --
@@ -1795,6 +1683,6 @@ checkValDef globals (_fname, params, body, RetType ext ret, retdecl, loc) = runC
 --
 -- A component of a function's result may be fresh exactly when every in-scope
 -- location it aliases lies within a consumed part of a parameter, none of its
--- locations occurs in another component, and it is not 'selfAliased'.  The one predicate
--- ('unfreshness') both infers fresh return types and checks declared ones, so
--- declared freshness never exceeds what would be inferred.
+-- locations occurs in another component, and it is not 'selfAliased'.  The one
+-- predicate ('unfreshness') both infers fresh return types and checks declared
+-- ones, so declared freshness never exceeds what would be inferred.

@@ -3,9 +3,9 @@
 -- ==
 -- error: consumed
 
-type t [n] = #foo ([n]i32) ([n]i32) | #bar
+type t 'a = #foo a a | #bar
 
-def f [n] (xs: *[n]i32) = #foo xs xs : t [n]
+def f 'a (x: a) = #foo x x : t a
 
 def main [n] (xs: *[n]i32) : [n]i32 =
   match f xs

@@ -210,27 +210,6 @@ function:
 
   def apply 'a 'b (f: *a -> b) (x: *a) = f x
 
-.. _alias-free-variable:
-
-"Function result aliases the free variable *x*"
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Caused by definitions such as the following:
-
-.. code-block:: futhark
-
-  def x = [1,2,3]
-
-  def f () = x
-
-To simplify the tracking of aliases, the Futhark type system requires
-that the result of a function may only alias the function parameters,
-not any free variables.  Use ``copy`` to fix this:
-
-.. code-block:: futhark
-
-  def f () = copy x
-
 .. _size-expression-bind:
 
 "Size expression with binding is replaced by unknown size."

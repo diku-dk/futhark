@@ -1,9 +1,10 @@
--- A lambda that returns a global variable must still be rejected if it
--- escapes the enclosing named function, as the closure aliases travel
--- with the returned function value.
+-- A function may return a lambda that returns a global array, but then
+-- what applying the lambda returns cannot be consumed.
 -- ==
--- error: aliases the free variable "global"
+-- error: "f", which is not consumable
 
 def global : []i64 = [1, 2, 3]
 
-def main (_: i64) = \(_: i64) -> global
+def f (_: i64) = \(_: i64) -> global
+
+def main (n: i64) = f n n with [0] = 0

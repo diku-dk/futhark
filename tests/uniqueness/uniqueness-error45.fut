@@ -1,9 +1,12 @@
--- A local function must not return a global array.
+-- A local function may return a global array, but then the result of
+-- applying it cannot be consumed.
 -- ==
--- error: aliases the free variable "global"
+-- error: "f", which is not consumable
 
 def global : []i32 = [1, 2, 3]
 
-def main =
-  let f (b: bool) = if b then global else []
-  in f
+def f =
+  let g (b: bool) = if b then global else []
+  in g
+
+def main (b: bool) = f b with [0] = 0

@@ -2008,6 +2008,7 @@ checkFunDef (fname, retdecl, tparams, params, body, loc) =
                   Consumption.checkValDef
                     globals
                     ( fname,
+                      tparams',
                       params''',
                       body''',
                       RetType dims rettype'',

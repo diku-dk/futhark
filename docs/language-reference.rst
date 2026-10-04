@@ -317,10 +317,6 @@ definition::
 
 The application ``pair [1] [2,3]`` is ill-typed.
 
-To simplify the handling of in-place updates (see
-:ref:`in-place-updates`), the value returned by a function may not
-alias any global variables.
-
 User-Defined Operators
 ~~~~~~~~~~~~~~~~~~~~~~
 

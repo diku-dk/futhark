@@ -1,8 +1,8 @@
--- As uniqueness-error70.fut, but the lambda is applied by a function
--- whose return type is not unique, so the global really is returned.
+-- The result of applying a lambda that returns a global array cannot be
+-- consumed.
 -- ==
--- error: aliases the free variable "global"
+-- error: "global", which is not consumable
 
 def global : []i64 = [1, 2, 3]
 
-def main (n: i64) = (\(_: i64) -> global) n
+def main (n: i64) = (\(_: i64) -> global) n with [0] = 0
