@@ -1093,28 +1093,8 @@ removeEntryPoint :: PolyBinding -> PolyBinding
 removeEntryPoint (PolyBinding (_, name, tparams, params, rettype, body, attrs, loc)) =
   PolyBinding (Nothing, name, tparams, params, rettype, body, attrs, loc)
 
--- | Consumption checking may refine the instantiated type of a polymorphic
--- binding to say that a type parameter in result position is *fresh*, which the
--- declared type cannot express. The instantiation can, so take it from there -
--- for the return type and for the function-typed parameters alike, since the
--- body would otherwise not justify a fresh result. The declared types must
--- already have the type substitution applied: a type parameter has a single
--- mode, so where it is instantiated at a record or sum, freshness can only be
--- copied component by component once the parameter has been replaced. See Note
--- [Parametric results] in Language.Futhark.TypeChecker.Consumption.
-freshenFromInst ::
-  TypeBase d Freshness ->
-  [Pat ParamType] ->
-  ResRetType ->
-  ([Pat ParamType], ResRetType)
-freshenFromInst (Scalar (Arrow _ _ _ ia (RetType _ ir))) (p : ps) rt =
-  let (ps', rt') = freshenFromInst ir ps rt
-   in (fmap (freshenAsType (second (const Nonfresh) ia)) p : ps', rt')
-freshenFromInst it [] (RetType ext t) = ([], RetType ext (freshenAs it t))
-freshenFromInst _ ps rt = (ps, rt)
-
 -- | Copy freshness from the instantiated type into the return slots of the
--- declared one.
+-- declared one. See 'freshenFromInst'.
 freshenAsType :: TypeBase d Freshness -> TypeBase Size u -> TypeBase Size u
 freshenAsType
   (Scalar (Arrow _ _ _ ia (RetType _ ir)))
@@ -1141,6 +1121,26 @@ freshenAs it t
     compound (Scalar Record {}) = True
     compound (Scalar Sum {}) = True
     compound _ = False
+
+-- | Consumption checking may refine the instantiated type of a polymorphic name
+-- to say that a type parameter in result position is *fresh*, which the
+-- declared type cannot express. The instantiation can, so take it from there -
+-- for the return type and for the function-typed parameters alike, since the
+-- body would otherwise not justify a fresh result. The declared types must
+-- already have the type substitution applied: a type parameter has a single
+-- mode, so where it is instantiated at a record or sum, freshness can only be
+-- copied component by component once the parameter has been replaced. See Note
+-- [Parametric results] in Language.Futhark.TypeChecker.Consumption.
+freshenFromInst ::
+  TypeBase d Freshness ->
+  [Pat ParamType] ->
+  ResRetType ->
+  ([Pat ParamType], ResRetType)
+freshenFromInst (Scalar (Arrow _ _ _ ia (RetType _ ir))) (p : ps) rt =
+  let (ps', rt') = freshenFromInst ir ps rt
+   in (fmap (freshenAsType (second (const Nonfresh) ia)) p : ps', rt')
+freshenFromInst it [] (RetType ext t) = ([], RetType ext (freshenAs it t))
+freshenFromInst _ ps rt = (ps, rt)
 
 -- Monomorphises the body of the function as well. Returns the fresh name of the
 -- generated monomorphic function as well a function for constructing additional
