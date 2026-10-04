@@ -144,10 +144,7 @@ setAliases t = addAliases t . const
 
 -- | @t \`addAliases\` f@ returns @t@, but with any already present
 -- aliases replaced by @f@ applied to that aliases.
-addAliases ::
-  TypeBase dim o1 ->
-  (o1 -> o2) ->
-  TypeBase dim o2
+addAliases :: TypeBase dim o1 -> (o1 -> o2) -> TypeBase dim o2
 addAliases = flip second
 
 aliases :: TypeAliases -> Aliases
