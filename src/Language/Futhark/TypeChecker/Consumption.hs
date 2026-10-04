@@ -18,6 +18,8 @@ import Data.Bifoldable
 import Data.Bifunctor
 import Data.DList qualified as DL
 import Data.Foldable
+import Data.Functor.Const
+import Data.Functor.Identity
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
@@ -64,10 +66,33 @@ aliasVar (AliasClosure v _) = Just v
 aliasVar AliasSelf = Nothing
 
 -- | A variable together with a path: the component of that variable at that
--- path.  A path step is a record field name, or a constructor name followed by
--- the tuple field name of a position in its payload.  See Note [Locations and
--- frames].
+-- path, as defined by 'traverseLeaves'.  See Note [Locations and frames].
 type Location = (VName, [Name])
+
+-- | Apply a function to every leaf of a type - every component that is neither
+-- a record nor a sum - along with its path.  A path step is a record field
+-- name, or a constructor name followed by the tuple field name of a position
+-- in its payload.  This is the one definition of the paths in a 'Location'.
+traverseLeaves ::
+  (Applicative f) =>
+  ([Name] -> TypeBase dim u -> f (TypeBase dim v)) ->
+  TypeBase dim u ->
+  f (TypeBase dim v)
+traverseLeaves f = go []
+  where
+    go p (Scalar (Record ts)) =
+      Scalar . Record <$> M.traverseWithKey (\k -> go (p ++ [k])) ts
+    go p (Scalar (Sum cs)) =
+      Scalar . Sum <$> M.traverseWithKey (\c -> zipWithM (\i -> go (p ++ [c, i])) tupleFieldNames) cs
+    go p t = f p t
+
+-- | Apply a function to every leaf of a type along with its path.
+mapLeaves :: ([Name] -> TypeBase dim u -> TypeBase dim v) -> TypeBase dim u -> TypeBase dim v
+mapLeaves f = runIdentity . traverseLeaves (\p -> Identity . f p)
+
+-- | The leaves of a type along with their paths.
+leaves :: TypeBase dim u -> [([Name], TypeBase dim u)]
+leaves = getConst . traverseLeaves (\p t -> Const [(p, t)])
 
 -- | The location an alias refers to.  'AliasSelf' refers to none.
 aliasLoc :: Alias -> Maybe Location
@@ -164,18 +189,14 @@ data AliasFuns
 -- | @insertSelfAliases funs v t@ adds an alias of @v@ to every component of
 -- @t@, noting the path at which the component sits.
 insertSelfAliases :: AliasFuns -> VName -> TypeAliases -> TypeAliases
-insertSelfAliases funs v = onPath []
+insertSelfAliases funs v = mapLeaves onLeaf
   where
-    onPath fs (Array als shape et) = Array (S.insert (AliasBound v fs) als) shape et
-    onPath fs (Scalar st) = Scalar $ onPath' fs st
-    onPath' fs (TypeVar als tn args) = TypeVar (S.insert (AliasBound v fs) als) tn args
-    onPath' fs (Record ts) = Record $ M.mapWithKey (\f -> onPath (fs ++ [f])) ts
-    onPath' fs (Sum cs) =
-      Sum $ M.mapWithKey (\c -> zipWith (\i -> onPath (fs ++ [c, i])) tupleFieldNames) cs
-    onPath' fs (Arrow als mn d ps rt)
-      | funs == AliasFuns = Arrow (S.insert (AliasBound v fs) als) mn d ps rt
-      | otherwise = Arrow als mn d ps rt
-    onPath' _ et@Prim {} = et
+    onLeaf fs (Array als shape et) = Array (S.insert (AliasBound v fs) als) shape et
+    onLeaf fs (Scalar (TypeVar als tn args)) =
+      Scalar $ TypeVar (S.insert (AliasBound v fs) als) tn args
+    onLeaf fs (Scalar (Arrow als mn d ps rt))
+      | funs == AliasFuns = Scalar $ Arrow (S.insert (AliasBound v fs) als) mn d ps rt
+    onLeaf _ t = t
 
 updateAliases :: TypeAliases -> [UpdateStep Info VName] -> TypeAliases -> TypeAliases
 updateAliases _ [] ve_als =
@@ -572,17 +593,15 @@ sharedLocations =
 -- | Is this location entirely within a part of a parameter that is consumed?
 consumedParamLoc :: [Pat ParamType] -> Location -> Bool
 consumedParamLoc params (v, fs) =
-  maybe False consumable $ follow fs =<< lookup v (foldMap patternMap params)
+  case maybe [] (filter ((fs `L.isPrefixOf`) . fst) . leaves) $
+    lookup v (foldMap patternMap params) of
+    [] -> False
+    within -> all (consumable . snd) within
   where
-    follow [] t = Just t
-    follow fs' t = uncurry follow =<< pathStep fs' t
-
     consumable (Array d _ _) = d == Consume
-    consumable (Scalar Prim {}) = True
     consumable (Scalar (TypeVar d _ _)) = d == Consume
-    consumable (Scalar (Record ts)) = all consumable ts
-    consumable (Scalar (Sum cs)) = all (all consumable) cs
     consumable (Scalar Arrow {}) = False
+    consumable _ = True
 
 -- | A reason why a component of a function result cannot be fresh.
 data Unfresh
@@ -698,10 +717,9 @@ noAliases e = do
   e' <- checkSubExps e
   pure (e', unknownAliases (typeOf e))
 
+-- | The aliases of each leaf of a value.
 aliasParts :: TypeAliases -> [Aliases]
-aliasParts (Scalar (Record ts)) = foldMap aliasParts $ M.elems ts
-aliasParts (Scalar (Sum cs)) = foldMap (foldMap aliasParts) $ M.elems cs
-aliasParts t = [aliases t]
+aliasParts = map (aliases . snd) . leaves
 
 -- | Are the components of this value pairwise disjoint?
 separated :: TypeAliases -> Bool
@@ -716,20 +734,9 @@ noSelfAliases loc t =
     addError loc mempty . withIndexLink "self-aliasing-arg" $
       "Argument passed for consuming parameter is self-aliased."
 
--- | The component at the given path, if that path ends on a leaf.
+-- | The leaf at the given path, if there is one.
 componentAt :: [Name] -> TypeAliases -> Maybe TypeAliases
-componentAt [] (Scalar Record {}) = Nothing
-componentAt [] (Scalar Sum {}) = Nothing
-componentAt [] t = Just t
-componentAt fs t = uncurry componentAt =<< pathStep fs t
-
--- | Take one step along a path into a record or sum, giving the rest of the
--- path and the component reached.
-pathStep :: [Name] -> TypeBase dim u -> Maybe ([Name], TypeBase dim u)
-pathStep (f : fs) (Scalar (Record ts)) = (fs,) <$> M.lookup f ts
-pathStep (c : i : fs) (Scalar (Sum cs)) =
-  (fs,) <$> (lookup i . zip tupleFieldNames =<< M.lookup c cs)
-pathStep _ _ = Nothing
+componentAt fs = lookup fs . leaves
 
 -- | The locations in the alias set of a location: those of the leaf at that
 -- path of the variable's entry in the vtable.  Empty for a location that is
