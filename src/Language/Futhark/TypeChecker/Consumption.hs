@@ -32,46 +32,54 @@ import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Monad (Notes, TypeError (..), withIndexLink)
 import Prelude hiding (mod)
 
+-- | A set of names.
 type Names = S.Set VName
 
--- | Something a value may share memory with.  Every constructor but
--- 'AliasSelf' denotes a 'Location'.  Its variable may be in scope, or be free:
--- either it has gone out of scope, or it is an internal name standing for an
--- intermediate value.  A free alias behaves more like an equivalence class.
--- See uniqueness-error18.fut for an example of why this is necessary.
+-- | A position within a compound type. A path step is a record field name, or a
+-- constructor name followed by the tuple field name of a position in its
+-- payload.
+type Path = [Name]
+
+-- | A variable together with a path: the component of that variable at that
+-- path, as defined by 'traverseLeaves'.  See Note [Locations and frames].
+type Location = (VName, Path)
+
+-- | Something a value may share memory with. Every constructor but 'AliasSelf'
+-- denotes a 'Location'. Its variable may be in scope, or be free: either it has
+-- gone out of scope, or it is an internal name standing for an intermediate
+-- value. A free alias behaves more like an equivalence class. See
+-- uniqueness-error18.fut for an example of why this is necessary.
 data Alias
-  = AliasBound VName [Name]
-  | AliasFree VName [Name]
-  | -- | Used to represent unknowable internal aliasing, which may
-    -- occur for a function that returns a nonfresh abstract type.
-    -- (It may internally be a pair of arrays that alias each other.)
+  = AliasBound Location
+  | AliasFree Location
+  | -- | Used to represent unknowable internal aliasing, which for example may
+    -- occur for a function that returns a nonfresh abstract type. (That
+    -- abstract type may internally be a pair of arrays that alias each other.)
     AliasSelf
   deriving (Eq, Ord, Show)
 
 instance Pretty Alias where
-  pretty (AliasBound v fs) = prettyAlias v fs
-  pretty (AliasFree v fs) = "~" <> prettyAlias v fs
+  pretty (AliasBound (v, fs)) = prettyAlias v fs
+  pretty (AliasFree (v, fs)) = "~" <> prettyAlias v fs
   pretty AliasSelf = "self"
+
+-- | The location an alias refers to.  'AliasSelf' refers to none.
+aliasLoc :: Alias -> Maybe Location
+aliasLoc (AliasBound l) = Just l
+aliasLoc (AliasFree l) = Just l
+aliasLoc AliasSelf = Nothing
 
 -- | The variable an alias refers to.  'AliasSelf' does not refer to any
 -- variable, as it denotes aliasing internal to a value.
 aliasVar :: Alias -> Maybe VName
-aliasVar (AliasBound v _) = Just v
-aliasVar (AliasFree v _) = Just v
-aliasVar AliasSelf = Nothing
+aliasVar = fmap fst . aliasLoc
 
--- | A variable together with a path: the component of that variable at that
--- path, as defined by 'traverseLeaves'.  See Note [Locations and frames].
-type Location = (VName, [Name])
-
--- | Apply a function to every leaf of a type - every component that is neither
--- a record nor a sum - along with its path.  A path step is a record field
--- name, or a constructor name followed by the tuple field name of a position
--- in its payload.  This is the one definition of the paths in a 'Location'.
+-- | Apply a function to every leaf of a type (every component that is neither a
+-- record nor a sum) along with its path.
 traverseLeaves ::
   (Applicative f) =>
-  ([Name] -> TypeBase dim u -> f (TypeBase dim v)) ->
-  TypeBase dim u ->
+  (Path -> TypeBase dim o -> f (TypeBase dim v)) ->
+  TypeBase dim o ->
   f (TypeBase dim v)
 traverseLeaves f = go []
   where
@@ -82,18 +90,12 @@ traverseLeaves f = go []
     go p t = f p t
 
 -- | Apply a function to every leaf of a type along with its path.
-mapLeaves :: ([Name] -> TypeBase dim u -> TypeBase dim v) -> TypeBase dim u -> TypeBase dim v
+mapLeaves :: (Path -> TypeBase dim o -> TypeBase dim v) -> TypeBase dim o -> TypeBase dim v
 mapLeaves f = runIdentity . traverseLeaves (\p -> Identity . f p)
 
 -- | The leaves of a type along with their paths.
-leaves :: TypeBase dim u -> [([Name], TypeBase dim u)]
+leaves :: TypeBase dim o -> [(Path, TypeBase dim o)]
 leaves = getConst . traverseLeaves (\p t -> Const [(p, t)])
-
--- | The location an alias refers to.  'AliasSelf' refers to none.
-aliasLoc :: Alias -> Maybe Location
-aliasLoc (AliasBound v fs) = Just (v, fs)
-aliasLoc (AliasFree v fs) = Just (v, fs)
-aliasLoc AliasSelf = Nothing
 
 -- | The locations these aliases refer to.
 aliasLocs :: Aliases -> [Location]
@@ -109,12 +111,12 @@ aliasVars = S.fromList . mapMaybe aliasVar . S.toList
 selfAliased :: Aliases -> Bool
 selfAliased = S.member AliasSelf
 
--- | Might two values with these aliases share memory?  This is not the same
+-- | Might two values with these aliases share memory? This is not the same
 -- question as whether the sets intersect: 'AliasSelf' denotes a property of a
 -- single value rather than a shared referent ('aliasVar' is 'Nothing' for it),
 -- so two values that both have internal aliasing are not thereby aliases of
--- each other.  Ask this question through here rather than by comparing alias
--- sets directly.
+-- each other. Avoid comparing alias sets in any other way than through this
+-- function.
 overlaps :: Aliases -> Aliases -> Bool
 overlaps x y = not $ S.disjoint (referents x) (referents y)
   where
@@ -160,7 +162,7 @@ selfAliasType v = insertSelfAliases v . unknownAliases
 -- | @insertSelfAliases v t@ adds an alias of @v@ to every component of @t@,
 -- noting the path at which the component sits.
 insertSelfAliases :: VName -> TypeAliases -> TypeAliases
-insertSelfAliases v = mapLeaves $ aliasLeaf . AliasBound v
+insertSelfAliases v = mapLeaves $ aliasLeaf . AliasBound . (v,)
 
 -- | Add an alias to a leaf of a type.
 aliasLeaf :: Alias -> TypeAliases -> TypeAliases
@@ -187,10 +189,11 @@ globalAliases v tparams decl = mapLeaves onLeaf . second (const mempty)
     onLeaf p t =
       case listToMaybe [d | (dp, d) <- decl_leaves, dp `L.isPrefixOf` p] of
         Just d@(Scalar Arrow {})
-          | anyResultComponent maybeGlobal (toRes Nonfresh d) -> aliasLeaf (AliasBound v p) t
+          | anyResultComponent maybeGlobal (toRes Nonfresh d) ->
+              aliasLeaf (AliasBound (v, p)) t
           | otherwise -> t
         Just d | parametric d -> t
-        _ -> aliasLeaf (AliasBound v p) t
+        _ -> aliasLeaf (AliasBound (v, p)) t
 
     maybeGlobal t@(Array Nonfresh _ _) = not $ parametric t
     maybeGlobal t@(Scalar (TypeVar Nonfresh _ _)) = not $ parametric t
@@ -328,7 +331,7 @@ describeLoc (v, fs) = do
       . stateNames
 
 -- | The part of a path that steps only into records.
-recordPath :: [Name] -> TypeBase dim u -> [Name]
+recordPath :: Path -> TypeBase dim o -> Path
 recordPath (f : fs) (Scalar (Record ts))
   | Just t <- M.lookup f ts = f : recordPath fs t
 recordPath _ _ = []
@@ -386,7 +389,10 @@ checkReturnAlias loc params rettp ret_als =
 unscope :: [VName] -> Aliases -> Aliases
 unscope bound = S.map f
   where
-    f (AliasBound v fs) = if v `elem` bound then AliasFree v fs else AliasBound v fs
+    f (AliasBound (v, fs)) =
+      if v `elem` bound
+        then AliasFree (v, fs)
+        else AliasBound (v, fs)
     f a = a
 
 -- | Figure out the aliases of each bound name in a pattern.
@@ -719,7 +725,7 @@ noSelfAliases loc t =
       "Argument passed for consuming parameter is self-aliased."
 
 -- | The leaf at the given path, if there is one.
-componentAt :: [Name] -> TypeAliases -> Maybe TypeAliases
+componentAt :: Path -> TypeAliases -> Maybe TypeAliases
 componentAt fs = lookup fs . leaves
 
 -- | The locations in the alias set of a location: those of the leaf at that
@@ -751,7 +757,7 @@ frameIfShared loc t
         else do
           v <- VName "internal_frame" <$> incCounter
           modify $ \s -> s {stateNames = M.insert v (NameFrame (srclocOf loc)) $ stateNames s}
-          pure $ second (S.insert (AliasFree v [])) t
+          pure $ second (S.insert (AliasFree (v, []))) t
 
 -- | The aliases of the components of an argument that a parameter of this type
 -- consumes.
@@ -1017,7 +1023,7 @@ checkLoop loop_loc (param, arg, form, body) = do
 
   let loop_als =
         applyLoopArg
-          (S.singleton (AliasFree v []))
+          (S.singleton (AliasFree (v, [])))
           param_t
           arg_als
           (paramToRes param_t)
@@ -1123,7 +1129,7 @@ checkFuncall ::
 checkFuncall loc fname f_als arg_als = do
   v <- VName "internal_app_result" <$> incCounter
   modify $ \s -> s {stateNames = M.insert v (NameAppRes fname loc) $ stateNames s}
-  pure $ foldl applyArg (second (S.insert (AliasFree v [])) f_als) arg_als
+  pure $ foldl applyArg (second (S.insert (AliasFree (v, []))) f_als) arg_als
 
 -- | Join the results of the branches of a conditional, given everything
 -- consumed by any of them.  An alias survives if it is a frame marker, or if it
