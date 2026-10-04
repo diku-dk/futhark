@@ -596,10 +596,9 @@ lookupVar loc qn@(QualName qs name) inst_t = do
     Just RecursiveV ->
       replaceTyVars loc inst_t
 
--- | A pure function for looking up the declared type of a global, along with
--- the type parameters it is polymorphic in.  Used by consumption checking to
--- exploit parametricity; see Note [Parametric results] in
--- "Language.Futhark.TypeChecker.Consumption".
+-- | A pure function for looking up the type scheme of a global name. Used by
+-- consumption checking to exploit parametricity; see Note [Parametric results]
+-- in "Language.Futhark.TypeChecker.Consumption".
 declaredTypes :: TermTypeM (QualName VName -> Maybe ([TypeParam], StructType))
 declaredTypes = do
   scope <- asks termScope
