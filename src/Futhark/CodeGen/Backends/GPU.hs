@@ -213,11 +213,13 @@ copygpu2host sync t shape dst (dstoffset, dststride) src (srcoffset, srcstride) 
       dststride_inits = [[C.cinit|$exp:e|] | Count e <- dststride]
       srcstride_inits = [[C.cinit|$exp:e|] | Count e <- srcstride]
       shape_inits = [[C.cinit|$exp:e|] | Count e <- shape]
+  provenance <- GC.provenanceExp
   GC.stm
     [C.cstm|
          if ((err =
                 lmad_copy_gpu2host
-                         (ctx, $int:(primByteSize t::Int), $exp:sync', $int:r,
+                         (ctx, $exp:provenance,
+                          $int:(primByteSize t::Int), $exp:sync', $int:r,
                           $exp:dst, $exp:(unCount dstoffset),
                           (typename int64_t[]){ $inits:dststride_inits },
                           $exp:src, $exp:(unCount srcoffset),

@@ -18,11 +18,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * `futhark bench`: JSON files now contain metadata about the configuration and
   execution environment (#2381). Work by Yifan Chen.
 
+* New attribute: `cpu_function`.
+
 ### Removed
 
 ### Changed
 
 ### Fixed
+
+* Python input reading no longer hangs on an unsuffixed `0`, an unsuffixed
+  hexadecimal integer, or a line comment at EOF.
 
 * File names are now always encoded as UTF-8. Non-UTF-8 locales are not
   supported.

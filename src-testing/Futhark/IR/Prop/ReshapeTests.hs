@@ -65,7 +65,12 @@ flipReshapeRearrangeTests =
       )
       $ flipReshapeRearrange v0_shape v1_shape perm @?= res
   | (v0_shape :: [String], v1_shape, perm, res) <-
-      [ ( ["A", "B", "C"],
+      [ ( ["M", "A", "B"],
+          ["M", "C", "D"],
+          [0, 2, 1],
+          Nothing
+        ),
+        ( ["A", "B", "C"],
           ["A", "BC"],
           [1, 0],
           Just [1, 2, 0]
@@ -128,7 +133,12 @@ simplifyTests :: TestTree
 simplifyTests =
   testGroup
     "simplifyNewShape"
-    [ testCase "Inverse flatten and unflatten - simple case" $
+    [ testCase "Partial inverse must preserve extra dimension" $
+        lhs
+          ["A", "B", "C"]
+          [dimSplice 0 2 ["AB", "1"], dimUnflatten 0 ["A", "B"]]
+          @?= Nothing,
+      testCase "Inverse flatten and unflatten - simple case" $
         lhs
           ["A", "B"]
           [dimFlatten 0 2 "AB", dimUnflatten 0 ["A", "B"]]

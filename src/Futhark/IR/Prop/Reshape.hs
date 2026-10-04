@@ -207,7 +207,9 @@ flipReshapeRearrange v0_shape v1_shape perm = do
       num_b_dims_expanded = length v0_shape - num_map_dims - num_a_dims
       num_a_dims_expanded = length v0_shape - num_map_dims - num_b_dims
       caseA = do
-        guard $ take num_a_dims v0_shape == take num_b_dims v1_shape
+        guard $
+          take num_a_dims (drop num_map_dims v0_shape)
+            == take num_b_dims (drop num_map_dims v1_shape)
         let perm' =
               [0 .. num_map_dims - 1]
                 ++ map (+ num_map_dims) ([1 .. num_b_dims_expanded] ++ [0])
@@ -334,8 +336,9 @@ move (_, DimSplice i1 1 (Shape [_])) (DimSplice i2 n2 s2 : ss)
       Just $ DimSplice i2 n2 s2 : ss
 --
 -- A flatten with an inverse unflatten turns into nothing.
-move (shape_bef, DimSplice i1 n1 _s1) (DimSplice i2 _n2 s2 : ss)
+move (shape_bef, DimSplice i1 n1 s1) (DimSplice i2 n2 s2 : ss)
   | i1 == i2,
+    length s1 == n2,
     dimSpan i1 n1 shape_bef == s2 =
       Just ss
 --

@@ -317,8 +317,8 @@ compileBuiltinFun (fname, func@(Function _ outputs inputs _ _))
     compileOutputsUniform (MemParam name space) = do
       ty <- GC.memToCType name space
       p_name <- newVName $ baseName name <> "_p"
-      let params = [C.cparam|$tyqual:uniform $ty:ty $id:p_name|]
-          args = [C.cexp|&$id:p_name|]
+      let params = [C.cparam|$tyqual:uniform $ty:ty *$tyqual:uniform $id:p_name|]
+          args = [C.cexp|$id:p_name|]
       pure (params, args)
 
     compileInputsVarying (ScalarParam name bt) = do
@@ -352,13 +352,15 @@ compileBuiltinFun (fname, func@(Function _ outputs inputs _ _))
       pure (params, args, pre_body, post_body)
     compileOutputsVarying (MemParam name space) = do
       typ <- GC.memToCType name space
+      p_name <- newVName $ baseName name <> "_p"
       newvn <- newVName $ "aos_" <> baseName name
-      let params = [C.cparam|$ty:typ $id:name|]
+      let params = [C.cparam|$tyqual:varying $ty:typ * $tyqual:uniform $id:p_name|]
           args = [C.cexp|&$id:(newvn)[i]|]
           pre_body =
             [C.citems|$tyqual:uniform $ty:typ $id:(newvn)[programCount];
-                       $id:(newvn)[programIndex] = $id:name;|]
-      pure (params, args, pre_body, [])
+                       $id:(newvn)[programIndex] = *$id:p_name;|]
+          post_body = [C.citems|*$id:p_name = $id:(newvn)[programIndex];|]
+      pure (params, args, pre_body, post_body)
 
 -- | Handle logging an error message in ISPC.
 handleError :: ErrorMsg Exp -> String -> ISPCCompilerM ()
