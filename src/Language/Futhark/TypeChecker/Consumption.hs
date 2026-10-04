@@ -32,9 +32,6 @@ import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Monad (Notes, TypeError (..), withIndexLink)
 import Prelude hiding (mod)
 
--- | A set of names.
-type Names = S.Set VName
-
 -- | A position within a compound type. A path step is a record field name, or a
 -- constructor name followed by the tuple field name of a position in its
 -- payload.
@@ -944,7 +941,7 @@ updateParamDiet cons = recurse
 -- for them.  A parameter is consumed if the body consumes it, or if the value
 -- returned for a consumed parameter aliases it, as that value is consumed in
 -- the next iteration.  See Note [Locations and frames].
-convergeLoopParam :: Loc -> Pat ParamType -> Names -> TypeAliases -> CheckM (Pat ParamType)
+convergeLoopParam :: Loc -> Pat ParamType -> S.Set VName -> TypeAliases -> CheckM (Pat ParamType)
 convergeLoopParam loop_loc param body_cons body_als
   | body_cons' /= body_cons = convergeLoopParam loop_loc param body_cons' body_als
   | otherwise = do
