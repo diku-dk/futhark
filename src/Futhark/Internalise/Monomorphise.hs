@@ -1096,8 +1096,11 @@ removeEntryPoint (PolyBinding (_, name, tparams, params, rettype, body, attrs, l
 -- *fresh* type, which the declared type of the polymorphic binding cannot
 -- express.  The instantiation can, so take it from there - for the return type
 -- and for the function-typed parameters alike, since the body would otherwise
--- not justify a fresh result.  See Note [Parametric results] in
--- Language.Futhark.TypeChecker.Consumption.
+-- not justify a fresh result.  The declared types must already have the type
+-- substitution applied: a type parameter has a single mode, so where it is
+-- instantiated at a record or sum, freshness can only be copied component by
+-- component once the parameter has been replaced.  See Note [Parametric
+-- results] in Language.Futhark.TypeChecker.Consumption.
 freshenFromInst ::
   TypeBase d Freshness ->
   [Pat ParamType] ->
@@ -1146,25 +1149,28 @@ monomorphiseBinding ::
   MonoType ->
   MonoM (VName, InferSizeArgs)
 monomorphiseBinding (PolyBinding (entry, name, tparams, params0, rettype0, body, attrs, loc)) inst_t = isolateNormalisation $ do
-  let (params, rettype) = freshenFromInst (second (const Nonfresh) inst_t) params0 rettype0
-      bind_t = funType params rettype
+  let bind_t = funType params0 rettype0
   (substs, t_shape_params) <-
     typeSubstsM loc bind_t $ noNamedParams inst_t
   let shape_names = S.fromList $ map typeParamName $ shape_params ++ t_shape_params
       substs' = M.map (Subst []) substs
       substStructType =
         substTypesAny (fmap (fmap (second (const mempty))) . (`M.lookup` substs'))
-      params' = map (substPat substStructType) params
+      (params', rettype) =
+        freshenFromInst
+          (second (const Nonfresh) inst_t)
+          (map (substPat substStructType) params0)
+          (applySubst (`M.lookup` substs') rettype0)
   params'' <- withArgs shape_names $ mapM transformPat params'
   exp_naming <- getExpReplacements <* putExpReplacements mempty
 
-  let args = S.fromList $ foldMap patNames params
+  let args = S.fromList $ foldMap patNames params0
       arg_params = map snd exp_naming
 
   rettype' <-
     withParams exp_naming $
       withArgs (args <> shape_names) $
-        hardTransformRetType (applySubst (`M.lookup` substs') rettype)
+        hardTransformRetType rettype
   extNaming <- getExpReplacements <* putExpReplacements mempty
   scope <- S.union shape_names <$> askScope'
   let (rettype'', new_params) = arrowArg scope args arg_params rettype'
