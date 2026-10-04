@@ -1644,15 +1644,18 @@ checkValDef globals (fname, tparams, params, body, RetType ext ret, retdecl, loc
 
 -- Note [Locations and frames]
 --
--- The design follows the F formalisation of aliasing in the futhark-papers
--- repository.
+-- Compound types (records and sums) do not have identity. Instead, we track
+-- aliasing and consumption at the level of their components ("leaves"). A
+-- "path" is a reference to the component of a compound type, and we use the
+-- nomenclature "frame" for the part of compound type that surrounds its
+-- components.
 --
--- A location is a variable together with a path ('Location'); every
--- 'Alias' except 'AliasSelf' denotes one.  The consumed set holds locations,
--- and a location is dead if a location on the same variable has been consumed
--- whose path is a prefix of its own, or of which its own is a prefix
--- ('deadIn').  Consuming @p.a@ kills @p.a@, everything under it, and @p@
--- itself; consuming @p@ kills all of @p@.
+-- A location is a variable together with a path ('Location'); every 'Alias'
+-- except 'AliasSelf' denotes one. The consumed set holds locations, and a
+-- location is dead if a location on the same variable has been consumed whose
+-- path is a prefix of its own, or of which its own is a prefix ('deadIn').
+-- Consuming @p.a@ kills @p.a@, everything under it, and @p@ itself; consuming
+-- @p@ kills all of @p@.
 --
 -- The payload of a constructor is treated exactly as a tuple, nested under the
 -- constructor name: the payload of @#foo xs ys@ has the paths @[foo, 0]@ and
