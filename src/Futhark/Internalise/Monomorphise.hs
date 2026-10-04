@@ -1092,15 +1092,15 @@ removeEntryPoint (PolyBinding (_, name, tparams, params, rettype, body, attrs, l
 
 -- Monomorphise a polymorphic function at the types given in the instance list.
 
--- | The type checker may instantiate a type parameter in result position at a
--- *fresh* type, which the declared type of the polymorphic binding cannot
--- express.  The instantiation can, so take it from there - for the return type
--- and for the function-typed parameters alike, since the body would otherwise
--- not justify a fresh result.  The declared types must already have the type
--- substitution applied: a type parameter has a single mode, so where it is
--- instantiated at a record or sum, freshness can only be copied component by
--- component once the parameter has been replaced.  See Note [Parametric
--- results] in Language.Futhark.TypeChecker.Consumption.
+-- | Consumption checking may refine the instantiated type of a polymorphic
+-- binding to say that a type parameter in result position is *fresh*, which the
+-- declared type cannot express.  The instantiation can, so take it from there -
+-- for the return type and for the function-typed parameters alike, since the
+-- body would otherwise not justify a fresh result.  The declared types must
+-- already have the type substitution applied: a type parameter has a single
+-- mode, so where it is instantiated at a record or sum, freshness can only be
+-- copied component by component once the parameter has been replaced.  See
+-- Note [Parametric results] in Language.Futhark.TypeChecker.Consumption.
 freshenFromInst ::
   TypeBase d Freshness ->
   [Pat ParamType] ->

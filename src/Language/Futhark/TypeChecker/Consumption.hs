@@ -1111,6 +1111,93 @@ checkLoop loop_loc (param, arg, form, body) = do
       loop_als `combineAliases` body_als
     )
 
+-- | The type of a global applied to arguments of the given types, with what
+-- parametricity tells us about the freshness of the result recorded in it.
+-- Only an application that supplies every parameter of the type is refined.
+-- See Note [Parametric results].
+parametricFreshness :: QualName VName -> StructType -> [StructType] -> CheckM StructType
+parametricFreshness qn ftype argtypes = do
+  globals <- asks envGlobal
+  pure $ fromMaybe ftype $ do
+    (tparams, decl) <- globals qn
+    (param_ts, res) <- funParts decl
+    guard $ length argtypes == length param_ts
+    i <- resultFromParam tparams param_ts res
+    x <- case res of
+      Scalar (TypeVar _ v _) -> Just $ qualLeaf v
+      _ -> Nothing
+    guard $ constructsFresh $ argtypes !! i
+    Just $ freshenOccurrences x decl ftype
+
+-- | Peel the parameters off a function type, returning their types (in order)
+-- and the type of the final result.  'Nothing' for a non-function type.  This
+-- is 'unfoldFunType' except that it preserves the freshness of the result,
+-- which is exactly what we are asking about here.
+funParts :: TypeBase Size u -> Maybe ([StructType], ResType)
+funParts (Scalar (Arrow _ _ _ pt (RetType _ t))) = Just $ go [pt] t
+  where
+    go ps (Scalar (Arrow _ _ _ pt' (RetType _ t'))) = go (pt' : ps) t'
+    go ps t' = (reverse ps, t')
+funParts _ = Nothing
+
+-- | If the result of a function with this declared type can only be the result
+-- of applying one of its own parameters, the position of that parameter.  That
+-- is the case when the result is a type parameter which occurs in exactly one
+-- of the parameters, and there only as the result of a function: the only way
+-- to obtain a value of an unknown type is to be handed one, and no parameter
+-- but that one holds any.
+resultFromParam :: [TypeParam] -> [StructType] -> ResType -> Maybe Int
+resultFromParam tparams params res
+  | Scalar (TypeVar Nonfresh v _) <- res,
+    qualLeaf v `elem` [pv | TypeParamType _ pv _ <- tparams],
+    [(i, pt)] <- filter (S.member (qualLeaf v) . typeVars . snd) $ zip [0 ..] params,
+    isFunResult (qualLeaf v) pt =
+      Just i
+  | otherwise = Nothing
+  where
+    isFunResult v (Scalar (Arrow _ _ _ _ (RetType _ t))) = isResult v t
+    isFunResult _ _ = False
+    isResult v (Scalar (Arrow _ _ _ _ (RetType _ t))) = isResult v t
+    isResult v (Scalar (TypeVar _ t _)) = qualLeaf t == v
+    isResult _ _ = False
+
+-- | Does applying this function construct its result freshly?  That is so when
+-- every part of its (curried) result is fresh or primitive.  Requiring the
+-- result to be order zero keeps us from claiming that a closure over the other
+-- arguments aliases nothing.
+constructsFresh :: TypeBase Size u -> Bool
+constructsFresh t
+  | Just (_, rt) <- funParts t = orderZero rt && allFresh rt
+  | otherwise = False
+  where
+    allFresh (Scalar (Record fs)) = all allFresh fs
+    allFresh (Scalar (Sum cs)) = all (all allFresh) cs
+    allFresh (Scalar Prim {}) = True
+    allFresh (Scalar (TypeVar u _ _)) = u == Fresh
+    allFresh (Array u _ _) = u == Fresh
+    allFresh (Scalar Arrow {}) = False
+
+-- | Mark as fresh every return-type slot that the declared type fills with the
+-- given type parameter.  Both the result of the function and the result of the
+-- parameter it came from must say so, or the instantiation would not be
+-- well-typed.
+freshenOccurrences :: VName -> StructType -> StructType -> StructType
+freshenOccurrences x = onStruct
+  where
+    onStruct
+      (Scalar (Arrow _ _ _ sa (RetType _ sr)))
+      (Scalar (Arrow u pn d ta (RetType ext tr))) =
+        Scalar $ Arrow u pn d (onStruct sa ta) $ RetType ext (onRes sr tr)
+    onStruct _ t = t
+
+    onRes (Scalar (TypeVar _ v _)) tr
+      | qualLeaf v == x = tr `setMode` Fresh
+    onRes
+      (Scalar (Arrow _ _ _ sa (RetType _ sr)))
+      (Scalar (Arrow u pn d ta (RetType ext tr))) =
+        Scalar $ Arrow u pn d (onStruct sa ta) $ RetType ext (onRes sr tr)
+    onRes _ tr = tr
+
 checkFuncall ::
   (Foldable f) =>
   SrcLoc ->
@@ -1152,7 +1239,12 @@ checkExp' :: Exp -> CheckM (Exp, TypeAliases)
 
 --
 checkExp' (AppExp (Apply f args loc) appres) = do
-  (f', f_als) <- checkExp f
+  f_fresh <- case f of
+    Var qn (Info t) floc -> do
+      t' <- parametricFreshness qn t $ map (typeOf . snd) $ NE.toList args
+      pure $ Var qn (Info t') floc
+    _ -> pure f
+  (f', f_als) <- checkExp f_fresh
   (args', args_als) <- NE.unzip <$> checkArgs (aliases f_als) (diets $ toRes Nonfresh f_als) args
   res_als <- checkFuncall loc (fname f) f_als args_als
   pure (AppExp (Apply f' args' loc) appres, res_als)
@@ -1247,14 +1339,15 @@ checkExp' (AppExp (LetFun fname (typarams, params, retdecl, Info (RetType ext re
     )
 
 --
-checkExp' (AppExp (BinOp (op, oploc) opt (x, xp) (y, yp) loc) appres) = do
-  op_als <- observeVar (locOf oploc) op (unInfo opt)
+checkExp' (AppExp (BinOp (op, oploc) (Info op_t) (x, xp) (y, yp) loc) appres) = do
+  op_t' <- parametricFreshness op op_t [typeOf x, typeOf y]
+  op_als <- observeVar (locOf oploc) op op_t'
   let (_, at1) : (_, at2) : _ = fst $ unfoldFunType op_als
   (x', x_als) <- checkArg (aliases op_als) [] at1 x
   (y', y_als) <- checkArg (aliases op_als) [(x', x_als)] at2 y
   res_als <- checkFuncall loc (Just op) op_als [x_als, y_als]
   pure
-    ( AppExp (BinOp (op, oploc) opt (x', xp) (y', yp) loc) appres,
+    ( AppExp (BinOp (op, oploc) (Info op_t') (x', xp) (y', yp) loc) appres,
       res_als
     )
 
@@ -1523,9 +1616,8 @@ checkValDef globals (_fname, params, body, RetType ext ret, retdecl, loc) = runC
 -- user-visible error in 'checkGlobalAliases'.
 --
 -- What the weakening is needed *for* is narrow. A lifted @|>@ gets the
--- freshness of its instantiation settled during type inference (see Note
--- [Parametric freshness] in Language.Futhark.TypeChecker.Terms), so that is not
--- it. Dropping the weakening costs exactly two tests: tests/issue995.fut and
+-- freshness of its instantiation settled at the application (see Note
+-- [Parametric results]), so that is not it. Dropping the weakening costs exactly two tests: tests/issue995.fut and
 -- tests/ad/issue1564.fut.
 --
 -- What remains is that a lifted function *inherits its declared return type*.
@@ -1554,6 +1646,14 @@ checkValDef globals (_fname, params, body, RetType ext ret, retdecl, loc) = runC
 
 -- Note [Parametric results]
 --
+-- Parametricity tells us two things about the result of applying a global,
+-- both read from its *declared* type, which 'envGlobal' looks up: whether the
+-- application may have manufactured a value with internal aliasing, and
+-- whether the result must be fresh because it is the result of an argument
+-- that constructs its results freshly.
+--
+-- ## Internal aliasing
+--
 -- The type system cannot talk about a value that aliases *itself*: a value
 -- that is, behind an abstraction boundary, a pair of arrays that are really the
 -- same array.  Such a value can never be consumed, nor given a fresh type.
@@ -1564,11 +1664,6 @@ checkValDef globals (_fname, params, body, RetType ext ret, retdecl, loc) = runC
 --
 -- Parametricity is what tells us whether such a value can have been
 -- manufactured here at all.
---
--- (Parametricity says a second thing, about where a result must have *come
--- from*, which gives freshness for @xs |> copy@.  That one is decided during
--- type inference rather than here - see Note [Parametric freshness] in
--- Language.Futhark.TypeChecker.Terms.)
 --
 -- The crude answer - a value has internal aliasing whenever it is produced by
 -- applying a function whose result type is a nonfresh abstract type - is
@@ -1609,6 +1704,62 @@ checkValDef globals (_fname, params, body, RetType ext ret, retdecl, loc) = runC
 -- by union, and a union of "may" is again a "may"; the conditional join of Note
 -- [Locations and frames] drops aliases, but never 'AliasSelf'.  So the lattice
 -- works out.
+--
+-- ## Freshness
+--
+-- Consider
+--
+--   def (|>) 'a '^b (x: a) (f: a -> b) : b = f x
+--
+-- The result of @|>@ is a type parameter that occurs in exactly one of the
+-- parameters, and there only as the result of a function. The only way to
+-- obtain a value of an unknown type is to be handed one, and no parameter but
+-- @f@ holds any, so the result of @|>@ is necessarily the result of applying
+-- @f@ ('resultFromParam'). When @f@ in addition constructs its result freshly -
+-- as @copy: t -> *t@ does - so does the application.
+--
+-- This is a property of the application, not of @|>@ or of its instantiation:
+-- @xs |> copy@ is fresh and @xs |> id@ is not, at the very same instantiation.
+-- We record it in the *instantiated* type of @|>@ at the application
+-- ('parametricFreshness'), which becomes
+--
+--   (x: []i32) -> (f: []i32 -> *[]i32) -> *[]i32
+--
+-- From there the ordinary rule for applying a function with a fresh return
+-- type does the rest, and later passes get it for free: the monomorphiser keys
+-- instances on the type, so @xs |> copy@ and @xs |> id@ become distinct
+-- instances, and 'freshenFromInst' in Futhark.Internalise.Monomorphise carries
+-- the freshness into the generated definition. Both slots must be marked, not
+-- just the result: that definition has body @f x@, which would not justify a
+-- fresh result if @f@ were still declared to return a nonfresh one.
+--
+-- Only an application that supplies every parameter of the function's *type*
+-- is refined, as in the F formalisation. A partial application may already
+-- have evaluated part of the function's body, and the closure it produces may
+-- then hold what that part computed. Consider
+--
+--   def trap 'a 'b 'c (f: a -> b) (x: a) : c -> b =
+--     let r = f x in \(_: c) -> r
+--
+-- Each call @trap mk_new x u@ computes its own @r@, so its result is fresh. But
+-- @k = trap mk_new x@ computes @r@ once, and every call of @k@ returns that
+-- same @r@ (tests/higher-order-functions/trap.fut). Read plainly, the result
+-- of calling @k@ aliases @k@, which is what makes consuming it safe. The type
+-- does not say how much of it a partial application evaluates, so no partial
+-- application is refined - an operator section included.
+--
+-- Which parameter a type variable came from is a fact about the declared type,
+-- which the instantiated type does not record, so the applied expression must
+-- be a direct mention of a named global. Semantically equal programs are
+-- therefore treated differently -
+--
+--   xs |> copy      -- fresh
+--   (|>) xs copy    -- not fresh
+--
+-- - and the refinement is lost by anything that obscures the head, including
+-- parentheses and @let@. This is never *wrong*, only conservative: a spelling
+-- we do not recognise yields the plain reading. Do not add tests pinning the
+-- conservative answers; they are not intended behaviour.
 
 -- Note [Locations and frames]
 --
