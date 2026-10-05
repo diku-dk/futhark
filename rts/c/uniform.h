@@ -1287,12 +1287,10 @@ static inline uniform double futrts_lgamma64(uniform double x) {
   return lgamma(x);
 }
 
-extern "C" unmasked uniform double erf(uniform double);
 static inline uniform double futrts_erf64(uniform double x) {
   return erf(x);
 }
 
-extern "C" unmasked uniform double erfc(uniform double);
 static inline uniform double futrts_erfc64(uniform double x) {
   return erfc(x);
 }

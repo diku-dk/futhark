@@ -1457,7 +1457,6 @@ SCALAR_FUN_ATTR double futrts_lgamma64(double x) {
   return res;
 }
 
-extern "C" unmasked uniform double erf(uniform double x);
 SCALAR_FUN_ATTR double futrts_erf64(double x) {
   double res;
   foreach_active (i) {
@@ -1467,7 +1466,6 @@ SCALAR_FUN_ATTR double futrts_erf64(double x) {
   return res;
 }
 
-extern "C" unmasked uniform double erfc(uniform double x);
 SCALAR_FUN_ATTR double futrts_erfc64(double x) {
   double res;
   foreach_active (i) {
