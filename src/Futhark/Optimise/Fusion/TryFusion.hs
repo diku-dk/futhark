@@ -304,27 +304,27 @@ fuseSOACwithKer mode unfus_set outVars soac_p0 ker = do
       SOAC.Hist _ _ ops_p _,
       Horizontal
       ) -> do
-        let p_num_buckets = length ops_p
-            c_num_buckets = length ops_c
+        let p_num_is = sum $ map (shapeRank . histShape) ops_p
+            c_num_is = sum $ map (shapeRank . histShape) ops_c
             (body_p, body_c) = (lambdaBody lam_p, lambdaBody lam_c)
             body' =
               Body
                 { bodyDec = bodyDec body_p, -- body_p and body_c have the same decorations
                   bodyStms = bodyStms body_p <> bodyStms body_c,
                   bodyResult =
-                    take c_num_buckets (bodyResult body_c)
-                      ++ take p_num_buckets (bodyResult body_p)
-                      ++ drop c_num_buckets (bodyResult body_c)
-                      ++ drop p_num_buckets (bodyResult body_p)
+                    take c_num_is (bodyResult body_c)
+                      ++ take p_num_is (bodyResult body_p)
+                      ++ drop c_num_is (bodyResult body_c)
+                      ++ drop p_num_is (bodyResult body_p)
                 }
             lam' =
               Lambda
                 { lambdaParams = lambdaParams lam_c ++ lambdaParams lam_p,
                   lambdaBody = body',
                   lambdaReturnType =
-                    replicate (c_num_buckets + p_num_buckets) (Prim int64)
-                      ++ drop c_num_buckets (lambdaReturnType lam_c)
-                      ++ drop p_num_buckets (lambdaReturnType lam_p)
+                    replicate (c_num_is + p_num_is) (Prim int64)
+                      ++ drop c_num_is (lambdaReturnType lam_c)
+                      ++ drop p_num_is (lambdaReturnType lam_p)
                 }
         success (fsOutNames ker ++ returned_outvars) $
           SOAC.Hist w (inp_c_arr <> inp_p_arr) (ops_c <> ops_p) lam'
