@@ -91,6 +91,7 @@ struct futhark_context_config {
   int preferred_device_num;
 
   int unified_memory;
+  int use_primary_context;
 
   char* dump_ptx_to;
   char* load_ptx_from;
@@ -112,6 +113,7 @@ static void backend_context_config_setup(struct futhark_context_config *cfg) {
   cfg->load_ptx_from = NULL;
 
   cfg->unified_memory = 2;
+  cfg->use_primary_context = 0;
 
   cfg->gpu = gpu_config_initial;
   cfg->gpu.default_block_size = 256;
@@ -176,6 +178,10 @@ void futhark_context_config_load_ptx_from(struct futhark_context_config *cfg, co
 
 void futhark_context_config_set_unified_memory(struct futhark_context_config* cfg, int flag) {
   cfg->unified_memory = flag;
+}
+
+void futhark_context_config_set_use_primary_context(struct futhark_context_config* cfg, int flag) {
+  cfg->use_primary_context = flag;
 }
 
 // A record of something that happened.
@@ -768,12 +774,20 @@ int backend_context_setup(struct futhark_context* ctx) {
   if (cuda_device_setup(ctx) != 0) {
     futhark_panic(-1, "No suitable CUDA device found.\n");
   }
-  // cuCtxCreate grew a new parameter in CUDA 13.
+  if (ctx->cfg->use_primary_context) {
+    // Retain the device's primary context instead of creating a new
+    // one.  This makes raw device pointers alias with other libraries
+    // (e.g. XLA) that also use the primary context.
+    CUDA_SUCCEED_FATAL(cuDevicePrimaryCtxRetain(&ctx->cu_ctx, ctx->dev));
+    CUDA_SUCCEED_FATAL(cuCtxSetCurrent(ctx->cu_ctx));
+  } else {
+    // cuCtxCreate grew a new parameter in CUDA 13.
 #if (CUDART_VERSION >= 13000)
-  CUDA_SUCCEED_FATAL(cuCtxCreate(&ctx->cu_ctx, NULL, 0, ctx->dev));
+    CUDA_SUCCEED_FATAL(cuCtxCreate(&ctx->cu_ctx, NULL, 0, ctx->dev));
 #else
-  CUDA_SUCCEED_FATAL(cuCtxCreate(&ctx->cu_ctx, 0, ctx->dev));
+    CUDA_SUCCEED_FATAL(cuCtxCreate(&ctx->cu_ctx, 0, ctx->dev));
 #endif
+  }
 
   free_list_init(&ctx->gpu_free_list);
 
@@ -855,7 +869,11 @@ void backend_context_teardown(struct futhark_context* ctx) {
     CUDA_SUCCEED_FATAL(gpu_free_all(ctx));
     CUDA_SUCCEED_FATAL(cuStreamDestroy(ctx->stream));
     CUDA_SUCCEED_FATAL(cuModuleUnload(ctx->module));
-    CUDA_SUCCEED_FATAL(cuCtxDestroy(ctx->cu_ctx));
+    if (ctx->cfg->use_primary_context) {
+      CUDA_SUCCEED_FATAL(cuDevicePrimaryCtxRelease(ctx->dev));
+    } else {
+      CUDA_SUCCEED_FATAL(cuCtxDestroy(ctx->cu_ctx));
+    }
   }
   free_list_destroy(&ctx->gpu_free_list);
 }

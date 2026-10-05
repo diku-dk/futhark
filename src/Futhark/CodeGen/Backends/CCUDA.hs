@@ -49,11 +49,19 @@ mkBoilerplate cuda_program macros kernels types failures = do
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_program(struct futhark_context_config *cfg, const char* s);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_dump_ptx_to(struct futhark_context_config *cfg, const char* s);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_load_ptx_from(struct futhark_context_config *cfg, const char* s);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_use_primary_context(struct futhark_context_config *cfg, int flag);|]
 
 cliOptions :: [Option]
 cliOptions =
   gpuOptions
     ++ [ Option
+           { optionLongName = "use-primary-context",
+             optionShortName = Nothing,
+             optionArgument = RequiredArgument "INT",
+             optionDescription = "Whether to use the device's primary context instead of creating a new one (for sharing device pointers with other libraries such as XLA).",
+             optionAction = [C.cstm|futhark_context_config_set_use_primary_context(cfg, atoi(optarg));|]
+           },
+         Option
            { optionLongName = "dump-cuda",
              optionShortName = Nothing,
              optionArgument = RequiredArgument "FILE",
