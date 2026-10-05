@@ -359,6 +359,14 @@ incCounter :: CheckM Int
 incCounter =
   state $ \s -> (stateCounter s, s {stateCounter = stateCounter s + 1})
 
+-- | An alias of a new internal name standing for an intermediate value, with
+-- the reason it exists recorded for error messages.
+internalAlias :: Name -> NameReason -> CheckM Alias
+internalAlias desc reason = do
+  v <- VName desc <$> incCounter
+  modify $ \s -> s {stateNames = M.insert v reason $ stateNames s}
+  pure $ AliasFree (v, [])
+
 returnAliased :: Name -> SrcLoc -> CheckM ()
 returnAliased name loc =
   addError loc mempty . withIndexLink "return-aliased" $
@@ -723,10 +731,7 @@ aliasParts = map (aliases . snd) . leaves
 
 -- | Are the components of this value pairwise disjoint?
 separated :: TypeAliases -> Bool
-separated = go mempty . aliasParts
-  where
-    go _ [] = True
-    go seen (als : rest) = not (als `overlaps` seen) && go (als <> seen) rest
+separated = S.null . sharedLocations
 
 noSelfAliases :: Loc -> TypeAliases -> CheckM ()
 noSelfAliases loc t =
@@ -1007,12 +1012,11 @@ checkLoop loop_loc (param, arg, form, body) = do
     While cond -> checkFree "Loop condition" cond
     _ -> pure ()
 
-  v <- VName "internal_loop_result" <$> incCounter
-  modify $ \s -> s {stateNames = M.insert v (NameLoopRes (srclocOf loop_loc)) $ stateNames s}
+  loop_al <- internalAlias "internal_loop_result" $ NameLoopRes $ srclocOf loop_loc
 
   let loop_als =
         applyLoopArg
-          (S.singleton (AliasFree (v, [])))
+          (S.singleton loop_al)
           param_t
           arg_als
           (paramToRes param_t)
@@ -1120,9 +1124,8 @@ checkFuncall ::
   f TypeAliases ->
   CheckM TypeAliases
 checkFuncall loc fname f_als arg_als = do
-  v <- VName "internal_app_result" <$> incCounter
-  modify $ \s -> s {stateNames = M.insert v (NameAppRes fname loc) $ stateNames s}
-  pure $ foldl applyArg (second (S.insert (AliasFree (v, []))) f_als) arg_als
+  app_al <- internalAlias "internal_app_result" $ NameAppRes fname loc
+  pure $ foldl applyArg (second (S.insert app_al) f_als) arg_als
 
 -- | Join the results of the branches of a branching expression (described by
 -- the string), given everything consumed by any of them.  An alias survives if it and everything it aliases
@@ -1142,10 +1145,7 @@ joinBranches what loc all_cons branches = do
   tie <-
     if all separated branches
       then pure id
-      else do
-        v <- VName "internal_branch_result" <$> incCounter
-        modify $ \s -> s {stateNames = M.insert v (NameBranchRes what (srclocOf loc)) $ stateNames s}
-        pure $ S.insert $ AliasFree (v, [])
+      else S.insert <$> internalAlias "internal_branch_result" (NameBranchRes what (srclocOf loc))
   pure $ second (tie . S.filter keep) t
 
 checkExp :: Exp -> CheckM (Exp, TypeAliases)
