@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * New attribute: `cpu_function`.
 
+* Support for ISPC 1.31 (and that is now also the minimum version). (#2557)
+
 ### Removed
 
 ### Changed
@@ -51,6 +53,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Conversion of floating-point numbers to integers would trigger UB whenever the
   number was too large to fit in the integer. (#2543)
+
+* Horizontal fusion of multi-dimensional histograms. (#2555)
+
+* Internalisation of reduce_by_index_3d with array-valued elements. (#2554)
 
 ## [0.27.1]
 
