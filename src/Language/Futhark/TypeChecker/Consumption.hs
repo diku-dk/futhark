@@ -42,6 +42,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
+import Data.Text qualified as T
 import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
@@ -55,7 +56,7 @@ import Prelude hiding (mod)
 type Path = [Name]
 
 -- | A variable together with a path: the component of that variable at that
--- path, as defined by 'traverseLeaves'.  See Note [Locations and frames].
+-- path, as defined by 'traverseLeaves'.  See Note [Locations].
 type Location = (VName, Path)
 
 -- | Something a value may share memory with. Every constructor but 'AliasSelf'
@@ -245,9 +246,9 @@ data NameReason
   = -- | Name is the result of a function application.
     NameAppRes (Maybe (QualName VName)) SrcLoc
   | NameLoopRes SrcLoc
-  | -- | Name stands for a value with overlapping components; see Note
-    -- [Locations and frames].
-    NameFrame SrcLoc
+  | -- | Name ties together the components of the result of the given kind
+    -- of branching expression; see Note [Locations].
+    NameBranchRes T.Text SrcLoc
 
 nameReason :: SrcLoc -> NameReason -> Doc a
 nameReason loc (NameAppRes Nothing apploc) =
@@ -258,8 +259,8 @@ nameReason loc (NameAppRes fname apploc) =
     <+> parens ("at" <+> pretty (locStrRel loc apploc))
 nameReason loc (NameLoopRes apploc) =
   "result of loop at" <+> pretty (locStrRel loc apploc)
-nameReason loc (NameFrame eloc) =
-  "component of a value constructed at" <+> pretty (locStrRel loc eloc)
+nameReason loc (NameBranchRes what eloc) =
+  "result of" <+> pretty what <+> "at" <+> pretty (locStrRel loc eloc)
 
 -- | The locations consumed so far, each with where it was consumed.
 type Consumed = M.Map Location Loc
@@ -622,8 +623,8 @@ data Unfresh
 
 -- | Why a component of the result of a function with these parameters cannot
 -- be fresh, given the 'sharedLocations' of the whole result.  The component
--- may be fresh exactly when there is no reason.  See Note [Locations and
--- frames].
+-- may be fresh exactly when there is no reason.  See Note
+-- [Locations].
 unfreshness :: [Pat ParamType] -> S.Set Location -> TypeAliases -> [Unfresh]
 unfreshness params shared t_als =
   [UnfreshShared | any (`S.member` shared) (aliasLocs (aliases t_als))]
@@ -743,30 +744,6 @@ componentAt fs = lookup fs . leaves
 aliasOf :: M.Map VName (Entry TypeAliases) -> Location -> [Location]
 aliasOf vtable (v, fs) =
   maybe [] (aliasLocs . aliases) $ componentAt fs . entryAliases =<< M.lookup v vtable
-
--- | The frame markers of a value: aliases whose location has no alias set of
--- its own, and which occur in at least two of its components.  See Note
--- [Locations and frames].
-frameMarkers :: M.Map VName (Entry TypeAliases) -> TypeAliases -> Aliases
-frameMarkers vtable t =
-  M.keysSet . M.filterWithKey marker . M.fromListWith (+) $
-    map (,1 :: Int) (foldMap S.toList (aliasParts t))
-  where
-    marker a n = n > 1 && maybe False (null . aliasOf vtable) (aliasLoc a)
-
--- | Ensure that a value whose components overlap carries a frame marker.  See
--- Note [Locations and frames].
-frameIfShared :: Loc -> TypeAliases -> CheckM TypeAliases
-frameIfShared loc t
-  | length (aliasParts t) < 2 || separated t = pure t
-  | otherwise = do
-      vtable <- asks envVtable
-      if not $ S.null $ frameMarkers vtable t
-        then pure t
-        else do
-          v <- VName "internal_frame" <$> incCounter
-          modify $ \s -> s {stateNames = M.insert v (NameFrame (srclocOf loc)) $ stateNames s}
-          pure $ second (S.insert (AliasFree (v, []))) t
 
 -- | The aliases of the components of an argument that a parameter of this type
 -- consumes.
@@ -955,7 +932,7 @@ updateParamDiet cons = recurse
 -- | Infer which loop parameters are consumed, and check what the body returns
 -- for them.  A parameter is consumed if the body consumes it, or if the value
 -- returned for a consumed parameter aliases it, as that value is consumed in
--- the next iteration.  See Note [Locations and frames].
+-- the next iteration.  See Note [Locations].
 convergeLoopParam :: Loc -> Pat ParamType -> S.Set VName -> TypeAliases -> CheckM (Pat ParamType)
 convergeLoopParam loop_loc param body_cons body_als
   | body_cons' /= body_cons = convergeLoopParam loop_loc param body_cons' body_als
@@ -1147,35 +1124,35 @@ checkFuncall loc fname f_als arg_als = do
   modify $ \s -> s {stateNames = M.insert v (NameAppRes fname loc) $ stateNames s}
   pure $ foldl applyArg (second (S.insert (AliasFree (v, []))) f_als) arg_als
 
--- | Join the results of the branches of a conditional, given everything
--- consumed by any of them.  An alias survives if it is a frame marker, or if it
--- and everything it aliases is still alive; the rest are consumed.  See Note
--- [Locations and frames].
-joinBranches :: Loc -> Consumed -> TypeAliases -> CheckM TypeAliases
-joinBranches loc all_cons t = do
+-- | Join the results of the branches of a branching expression (described by
+-- the string), given everything consumed by any of them.  An alias survives if it and everything it aliases
+-- is still alive; the rest are consumed.  If the components of some branch's
+-- result overlap, the components of the joined result are tied together by a
+-- fresh name.  See Note [Locations].
+joinBranches :: T.Text -> Loc -> Consumed -> NE.NonEmpty TypeAliases -> CheckM TypeAliases
+joinBranches what loc all_cons branches = do
   vtable <- asks envVtable
-  let markers = frameMarkers vtable t
-      alive = isNothing . deadIn all_cons
+  let alive = isNothing . deadIn all_cons
       keep a = case aliasLoc a of
         Nothing -> True
-        Just l -> a `S.member` markers || (alive l && all alive (aliasOf vtable l))
+        Just l -> alive l && all alive (aliasOf vtable l)
+      t = foldl1 combineAliases branches
       dropped = S.filter (not . keep) $ aliases t
   consumed $ all_cons <> M.fromList (map (,loc) (aliasLocs dropped))
-  pure $ second (S.filter keep) t
+  tie <-
+    if all separated branches
+      then pure id
+      else do
+        v <- VName "internal_branch_result" <$> incCounter
+        modify $ \s -> s {stateNames = M.insert v (NameBranchRes what (srclocOf loc)) $ stateNames s}
+        pure $ S.insert $ AliasFree (v, [])
+  pure $ second (tie . S.filter keep) t
 
--- | Check an expression and compute its aliases, giving it a frame marker if
--- its components overlap.  See Note [Locations and frames].
 checkExp :: Exp -> CheckM (Exp, TypeAliases)
-checkExp e = do
-  (e', als) <- checkExp' e
-  als' <- frameIfShared (locOf e) als
-  pure (e', als')
-
-checkExp' :: Exp -> CheckM (Exp, TypeAliases)
 -- First we have the complicated cases.
 
 --
-checkExp' (AppExp (Apply f args loc) appres) = do
+checkExp (AppExp (Apply f args loc) appres) = do
   f_fresh <- case f of
     Var qn (Info t) floc -> do
       t' <- parametricFreshness qn t $ map (typeOf . snd) $ NE.toList args
@@ -1205,7 +1182,7 @@ checkExp' (AppExp (Apply f args loc) appres) = do
       pure $ (x', x_als) NE.:| args''
 
 --
-checkExp' (AppExp (Loop sparams pat loopinit form body loc) appres) = do
+checkExp (AppExp (Loop sparams pat loopinit form body loc) appres) = do
   ((pat', loopinit', form', body'), als) <-
     checkLoop (locOf loc) (pat, loopinit, form, body)
   pure
@@ -1214,7 +1191,7 @@ checkExp' (AppExp (Loop sparams pat loopinit form body loc) appres) = do
     )
 
 --
-checkExp' (AppExp (LetPat sizes p e body loc) appres) = do
+checkExp (AppExp (LetPat sizes p e body loc) appres) = do
   ((e', e_als), e_cons) <- contain $ checkExp e
   consumed e_cons
   let e_t = typeOf e'
@@ -1231,22 +1208,22 @@ checkExp' (AppExp (LetPat sizes p e body loc) appres) = do
       )
 
 --
-checkExp' (AppExp (If cond te fe loc) appres) = do
+checkExp (AppExp (If cond te fe loc) appres) = do
   (cond', _) <- checkExp cond
   ((te', te_als), te_cons) <- contain $ checkExp te
   ((fe', fe_als), fe_cons) <- contain $ checkExp fe
-  comb_als <- joinBranches (locOf loc) (te_cons <> fe_cons) $ te_als `combineAliases` fe_als
+  comb_als <- joinBranches "if-expression" (locOf loc) (te_cons <> fe_cons) $ te_als NE.:| [fe_als]
   pure
     ( AppExp (If cond' te' fe' loc) appres,
       appResType (unInfo appres) `setAliases` mempty `combineAliases` comb_als
     )
 
 --
-checkExp' (AppExp (Match cond cs loc) appres) = do
+checkExp (AppExp (Match cond cs loc) appres) = do
   (cond', cond_als) <- checkExp cond
   ((cs', cs_als), cs_cons) <-
     first NE.unzip . NE.unzip <$> mapM (checkCase cond_als) cs
-  comb_als <- joinBranches (locOf loc) (fold cs_cons) $ foldl1 combineAliases cs_als
+  comb_als <- joinBranches "match-expression" (locOf loc) (fold cs_cons) cs_als
   pure
     ( AppExp (Match cond' cs' loc) appres,
       appResType (unInfo appres) `setAliases` mempty `combineAliases` comb_als
@@ -1258,7 +1235,7 @@ checkExp' (AppExp (Match cond cs loc) appres) = do
         pure (CasePat p body' caseloc, body_als)
 
 --
-checkExp' (AppExp (LetFun fname (typarams, params, retdecl, Info (RetType ext ret), funbody) letbody loc) appres) = do
+checkExp (AppExp (LetFun fname (typarams, params, retdecl, Info (RetType ext ret), funbody) letbody loc) appres) = do
   ((ret', funbody'), ftype) <- bindingParams params $ do
     -- Throw away the consumption - it can refer only to the parameters
     -- anyway.
@@ -1275,7 +1252,7 @@ checkExp' (AppExp (LetFun fname (typarams, params, retdecl, Info (RetType ext re
     )
 
 --
-checkExp' (AppExp (BinOp (op, oploc) (Info op_t) (x, xp) (y, yp) loc) appres) = do
+checkExp (AppExp (BinOp (op, oploc) (Info op_t) (x, xp) (y, yp) loc) appres) = do
   op_t' <- parametricFreshness op op_t [typeOf x, typeOf y]
   op_als <- observeVar (locOf oploc) op op_t'
   let (_, at1) : (_, at2) : _ = fst $ unfoldFunType op_als
@@ -1288,7 +1265,7 @@ checkExp' (AppExp (BinOp (op, oploc) (Info op_t) (x, xp) (y, yp) loc) appres) = 
     )
 
 --
-checkExp' e@(Lambda params body te (Info (RetType ext ret)) loc) =
+checkExp e@(Lambda params body te (Info (RetType ext ret)) loc) =
   bindingParams params $ do
     -- Throw away the consumption - it can refer only to the parameters
     -- anyway.
@@ -1303,7 +1280,7 @@ checkExp' e@(Lambda params body te (Info (RetType ext ret)) loc) =
       )
 
 --
-checkExp' (AppExp (LetWith dst src steps ve body loc) appres) = do
+checkExp (AppExp (LetWith dst src steps ve body loc) appres) = do
   steps' <- mapM checkStep steps
   (ve', ve_als) <- checkExp ve
   src_als <- observeVar (locOf src) (qualName (identName src)) (unInfo $ identType src)
@@ -1322,7 +1299,7 @@ checkExp' (AppExp (LetWith dst src steps ve body loc) appres) = do
     checkStep (UpdateStepSlice slice) = UpdateStepSlice <$> checkSubExps slice
     checkStep (UpdateStepField f) = pure $ UpdateStepField f
 --
-checkExp' (Update src steps ve t loc) = do
+checkExp (Update src steps ve t loc) = do
   steps' <- mapM checkStep steps
   (ve', ve_als) <- checkExp ve
   (src', src_als) <- checkExp src
@@ -1342,15 +1319,15 @@ checkExp' (Update src steps ve t loc) = do
     checkStep (UpdateStepField f) = pure $ UpdateStepField f
 
 -- Cases that simply propagate aliases directly.
-checkExp' (Var v (Info t) loc) = do
+checkExp (Var v (Info t) loc) = do
   als <- observeVar (locOf loc) v t
   checkIfConsumed (locOf loc) (aliases als)
   pure (Var v (Info t) loc, als)
-checkExp' (OpSection v (Info t) loc) = do
+checkExp (OpSection v (Info t) loc) = do
   als <- observeVar (locOf loc) v t
   checkIfConsumed (locOf loc) (aliases als)
   pure (OpSection v (Info t) loc, als)
-checkExp' (OpSectionLeft op ftype arg arginfo retinfo loc) = do
+checkExp (OpSectionLeft op ftype arg arginfo retinfo loc) = do
   let (_, Info (pn, pt2)) = arginfo
       (Info ret, _) = retinfo
   als <- observeVar (locOf loc) op (unInfo ftype)
@@ -1359,7 +1336,7 @@ checkExp' (OpSectionLeft op ftype arg arginfo retinfo loc) = do
     ( OpSectionLeft op ftype arg' arginfo retinfo loc,
       Scalar $ Arrow (aliases arg_als <> aliases als) pn (diet pt2) (toStruct pt2) ret
     )
-checkExp' (OpSectionRight op ftype arg arginfo retinfo loc) = do
+checkExp (OpSectionRight op ftype arg arginfo retinfo loc) = do
   let (Info (pn, pt2), _) = arginfo
       Info ret = retinfo
   als <- observeVar (locOf loc) op (unInfo ftype)
@@ -1368,39 +1345,39 @@ checkExp' (OpSectionRight op ftype arg arginfo retinfo loc) = do
     ( OpSectionRight op ftype arg' arginfo retinfo loc,
       Scalar $ Arrow (aliases arg_als <> aliases als) pn (diet pt2) (toStruct pt2) ret
     )
-checkExp' (UpdateSection steps t loc) = do
+checkExp (UpdateSection steps t loc) = do
   steps' <- mapM checkStep steps
   pure (UpdateSection steps' t loc, unknownAliases (unInfo t))
   where
     checkStep (UpdateStepField f) = pure $ UpdateStepField f
     checkStep (UpdateStepSlice slice) = UpdateStepSlice <$> checkSubExps slice
-checkExp' (Coerce e te t loc) = do
+checkExp (Coerce e te t loc) = do
   (e', e_als) <- checkExp e
   pure (Coerce e' te t loc, e_als)
-checkExp' (Ascript e te loc) = do
+checkExp (Ascript e te loc) = do
   (e', e_als) <- checkExp e
   pure (Ascript e' te loc, e_als)
-checkExp' (AppExp (Index v slice loc) appres) = do
+checkExp (AppExp (Index v slice loc) appres) = do
   (v', v_als) <- checkExp v
   slice' <- checkSubExps slice
   pure
     ( AppExp (Index v' slice' loc) appres,
       appResType (unInfo appres) `setAliases` aliases v_als
     )
-checkExp' (Assert e1 e2 t loc) = do
+checkExp (Assert e1 e2 t loc) = do
   (e1', _) <- checkExp e1
   (e2', e2_als) <- checkExp e2
   pure (Assert e1' e2' t loc, e2_als)
-checkExp' (Parens e loc) = do
+checkExp (Parens e loc) = do
   (e', e_als) <- checkExp e
   pure (Parens e' loc, e_als)
-checkExp' (QualParens v e loc) = do
+checkExp (QualParens v e loc) = do
   (e', e_als) <- checkExp e
   pure (QualParens v e' loc, e_als)
-checkExp' (Attr attr e loc) = do
+checkExp (Attr attr e loc) = do
   (e', e_als) <- checkExp e
   pure (Attr attr e' loc, e_als)
-checkExp' (Project name e t loc) = do
+checkExp (Project name e t loc) = do
   (e', e_als) <- checkExp e
   pure
     ( Project name e' t loc,
@@ -1409,10 +1386,10 @@ checkExp' (Project name e t loc) = do
           | Just name_als <- M.lookup name fs -> name_als
         _ -> error $ "checkExp Project: bad type " <> prettyString e_als
     )
-checkExp' (TupLit es loc) = do
+checkExp (TupLit es loc) = do
   (es', es_als) <- mapAndUnzipM checkExp es
   pure (TupLit es' loc, Scalar $ tupleRecord es_als)
-checkExp' (Constr name es t loc) = do
+checkExp (Constr name es t loc) = do
   (es', es_als) <- mapAndUnzipM checkExp es
   pure
     ( Constr name es' t loc,
@@ -1422,7 +1399,7 @@ checkExp' (Constr name es t loc) = do
             M.map (map (`setAliases` mempty)) cs
         t' -> error $ "checkExp Constr: bad type " <> prettyString t'
     )
-checkExp' (RecordLit fs loc) = do
+checkExp (RecordLit fs loc) = do
   (fs', fs_als) <- mapAndUnzipM checkField fs
   pure (RecordLit fs' loc, Scalar $ Record $ M.fromList fs_als)
   where
@@ -1434,16 +1411,16 @@ checkExp' (RecordLit fs loc) = do
       pure (RecordFieldImplicit name t floc, (baseName (unLoc name), name_als))
 
 -- Cases that create alias-free values.
-checkExp' e@(AppExp Range {} _) = noAliases e
-checkExp' e@IntLit {} = noAliases e
-checkExp' e@FloatLit {} = noAliases e
-checkExp' e@Literal {} = noAliases e
-checkExp' e@StringLit {} = noAliases e
-checkExp' e@ArrayVal {} = noAliases e
-checkExp' e@ArrayLit {} = noAliases e
-checkExp' e@Negate {} = noAliases e
-checkExp' e@Not {} = noAliases e
-checkExp' e@Hole {} = noAliases e
+checkExp e@(AppExp Range {} _) = noAliases e
+checkExp e@IntLit {} = noAliases e
+checkExp e@FloatLit {} = noAliases e
+checkExp e@Literal {} = noAliases e
+checkExp e@StringLit {} = noAliases e
+checkExp e@ArrayVal {} = noAliases e
+checkExp e@ArrayLit {} = noAliases e
+checkExp e@Negate {} = noAliases e
+checkExp e@Not {} = noAliases e
+checkExp e@Hole {} = noAliases e
 
 -- | Type-check a value definition.  This also infers a new return
 -- type that may be fresher than previously.
@@ -1546,7 +1523,7 @@ checkValDef globals (fname, tparams, params, body, RetType ext ret, retdecl, loc
 -- ('selfAliasType') and for any type we build out of thin air, and hence
 -- 'closureAliases' keeping the note that a function defined here picked up from
 -- its own body. Alias sets are combined by union, and a union of "may" is again
--- a "may"; the conditional join of Note [Locations and frames] drops aliases,
+-- a "may"; the join of branches in Note [Locations] drops aliases,
 -- but never 'AliasSelf'. In in some sense, 'AliasSelf' behaves a bit like the
 -- top element of a lattice.
 --
@@ -1642,13 +1619,11 @@ checkValDef globals (fname, tparams, params, body, RetType ext ret, retdecl, loc
 -- Hence, monomorphising a Futhark program results in a program that may no
 -- longer be correct as far as (this) alias analysis is concerned.
 
--- Note [Locations and frames]
+-- Note [Locations]
 --
 -- Compound types (records and sums) do not have identity. Instead, we track
 -- aliasing and consumption at the level of their components ("leaves"). A
--- "path" is a reference to the component of a compound type, and we use the
--- nomenclature "frame" for the part of compound type that surrounds its
--- components.
+-- "path" is a reference to the component of a compound type.
 --
 -- A location is a variable together with a path ('Location'); every 'Alias'
 -- except 'AliasSelf' denotes one. The consumed set holds locations, and a
@@ -1671,33 +1646,31 @@ checkValDef globals (fname, tparams, params, body, RetType ext ret, retdecl, loc
 --   let (a, b) = p in let a[0] = 1 in b      -- accepted
 --   let a = p.0 in let a[0] = 1 in p.1       -- rejected: p.1 reads p
 --
--- A value whose components alias each other, such as @(u, u)@, must record
--- that fact in a way that survives losing @u@.  It does so with a frame
--- marker: an alias with no alias set of its own (its location is not a leaf of
--- a variable in scope) that occurs in two or more components of the value
--- ('frameMarkers').  An internal name or an out-of-scope variable occurring in
--- two components is one; a variable in scope never is, as its own alias set
--- contains itself.  Expressions are not in A-normal form, so a shared value may
--- never be bound to a name; 'checkExp' therefore mints an internal name and
--- adds it to every component whenever the components of an expression overlap
--- and no frame marker is present ('frameIfShared').  The marker is consumed
--- along with any component, which kills the others.
+-- Components that may coincide have overlapping alias sets, which is what
+-- 'separated' and 'unfreshness' look for.  Building a value preserves this, as
+-- each component aliases what it was built from, and so does applying a
+-- function or running a loop, as every nonfresh component of the result aliases
+-- the same internal name.  The exceptions are an observed parameter, whose
+-- components the caller may have made coincide, and a component with
+-- 'AliasSelf'.  Neither can be consumed, and the locations of an observed
+-- parameter never die.
 --
--- The conditional join ('joinBranches') keeps an alias of the combined branch
--- results if it is 'AliasSelf', if it is a frame marker, or if its location
--- and every location in its alias set ('aliasOf') are alive after the
--- branches; the other aliases are consumed.  Filtering by liveness in this way,
--- rather than subtracting the consumed set, is closed under aliasing: if an
--- alias survives, so does everything it aliases.  Frame markers are kept even
--- when dead because of programs like
+-- The join of the branches of an @if@ or @match@ ('joinBranches') keeps an alias of the combined branch
+-- results if it is 'AliasSelf', or if its location and every location in its
+-- alias set ('aliasOf') are alive after the branches; the other aliases are
+-- consumed.  Filtering by liveness in this way, rather than subtracting the
+-- consumed set, is closed under aliasing: if an alias survives, so does
+-- everything it aliases.  This is the only place where aliases are dropped, and
+-- it may drop the evidence that two components coincide.  Consider
 --
---   let p = (u, u)
---   let (r0, r1) = if c then p else (let z = p.0 with [0] = 5 in (a, b))
+--   let (r0, r1) = if c then (u, u) else (let z = u with [0] = 5 in (a, b))
 --
--- The else branch consumes @p.0@, @u@, and the frame marker of @(u, u)@.  The
--- liveness filter alone would leave the aliases @({a}, {b})@, claiming that the
--- components of the result are separate, which is false when @c@ holds.  With
--- the marker kept, consuming @r0@ is an error, as is using @r1@ afterwards.
+-- The else branch consumes @u@, so the filter alone would leave the aliases
+-- @({a}, {b})@, claiming that the components of the result are separate, which
+-- is false when @c@ holds.  So when the components of some branch's result
+-- overlap, the join adds an alias of a fresh name to every component of the
+-- combined result.  Being fresh, it is alive after the branches, and as it is
+-- consumed along with any component, consuming @r0@ kills @r1@.
 --
 -- A consumed argument must have separate components ('noSelfAliases'), must not
 -- alias anything consumed, and must not overlap the function being applied or
