@@ -36,7 +36,7 @@ def get_prefered_context(
     interactive=False, platform_pref=None, device_pref=None
 ):
     if device_pref != None:
-        (device_pref, device_num) = parse_preferred_device(device_pref)
+        device_pref, device_num = parse_preferred_device(device_pref)
     else:
         device_num = 0
 
@@ -521,7 +521,7 @@ def lmad_copy_gpu2gpu(
     else:
         tr = lmad_map_tr(dst_strides, src_strides, shape)
         if tr is not None:
-            (k, n, m) = tr
+            k, n, m = tr
             map_transpose_gpu2gpu(
                 self, elem_size, dst, dst_offset, src, src_offset, k, m, n
             )
