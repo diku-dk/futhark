@@ -40,7 +40,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `reduce` and `reduce_comm` now produce alias-free results.
 
-* AD is now supposed for scans with array operators (#2208). Work by Yifan Chen.
+* AD is now supported for scans with array operators (#2208). Work by Yifan Chen.
 
 * AD operators now return alias-free results.
 
