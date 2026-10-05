@@ -1391,7 +1391,7 @@ internaliseHist dim desc rf hist op ne buckets img = do
 
   -- reshape neutral element to have same size as the destination array
   ne_shp <- forM (zip ne' hist') $ \(n, h) -> do
-    rowtype <- I.stripArray 1 <$> lookupType h
+    rowtype <- I.stripArray dim <$> lookupType h
     ensureShape
       "Row shape of destination array does not match shape of neutral element"
       rowtype
