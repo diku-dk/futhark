@@ -252,9 +252,11 @@ createKernels kernels = forM_ kernels $ \name ->
 allocateGPU :: GC.Allocate op ()
 allocateGPU mem size tag "device" =
   GC.stm
-    [C.cstm|(void)gpu_alloc(ctx, ctx->log,
-                            (size_t)$exp:size, $exp:tag,
-                            &$exp:mem, (size_t*)&$exp:size);|]
+    [C.cstm|if ((ret = gpu_alloc(ctx, ctx->log,
+                                 (size_t)$exp:size, $exp:tag,
+                                 &$exp:mem, (size_t*)&$exp:size)) != FUTHARK_SUCCESS) {
+              return ret;
+            }|]
 allocateGPU _ _ _ space =
   error $ "Cannot allocate in '" ++ space ++ "' memory space."
 
