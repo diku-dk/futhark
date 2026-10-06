@@ -453,6 +453,21 @@ ensureArrayIn space (Var v) = do
   tell ([Var mem'], ctx)
   pure $ Var v'
 
+-- | Like 'ensureArrayIn', but for a directly laid out array, whose
+-- strides are already determined by its shape.  Such an array needs no
+-- existential context arguments: its row-major layout is canonical.
+ensureDirectArrayIn ::
+  (Allocable fromrep torep inner) =>
+  Space ->
+  SubExp ->
+  WriterT ([SubExp], [SubExp]) (AllocM fromrep torep) SubExp
+ensureDirectArrayIn _ (Constant v) =
+  error $ "ensureDirectArrayIn: " ++ prettyString v ++ " cannot be an array."
+ensureDirectArrayIn space (Var v) = do
+  (mem', v') <- lift $ ensureDirectArray (Just space) v
+  tell ([Var mem'], [])
+  pure $ Var v'
+
 allocInLoopParams ::
   (Allocable fromrep torep inner) =>
   [Maybe Space] ->
@@ -535,30 +550,57 @@ allocInLoopParams target_spaces merge m = do
                     )
             _ -> do
               (v_mem', v') <- lift $ ensureRowMajorArray target_space v
-              let lmad_ext =
-                    LMAD.existentialize 0 $ LMAD.iota 0 $ map pe64 $ shapeDims shape
+              (_, v_lmad') <- lift $ lookupArraySummary v'
 
               v_mem_space' <- lift $ lookupMemSpace v_mem'
 
-              ctx_params <-
-                replicateM (length (LMAD.existentialized lmad_ext)) $
-                  newParam "ctx_param_ext" (MemPrim int64)
-
-              param_lmad <-
-                instantiateLMAD $
-                  LMAD.substitute
-                    ( M.fromList . zip (fmap Ext [0 ..]) $
-                        map (le64 . Free . paramName) ctx_params
-                    )
-                    lmad_ext
-
               mem_param <- newParam "mem_param" $ MemMem v_mem_space'
-              tell ([mem_param], ctx_params)
-              pure
-                ( mergeparam {paramDec = MemArray pt shape o $ ArrayIn (paramName mem_param) param_lmad},
-                  Var v',
-                  ensureArrayIn v_mem_space'
-                )
+
+              -- A loop parameter whose value is already directly laid
+              -- out (row-major) keeps that canonical layout instead of
+              -- existentialising its strides.  Symbolic strides would be
+              -- bound outside the loop as separate context arguments,
+              -- and after simplification may no longer be syntactically
+              -- equal to the canonical row-major strides, which stops
+              -- 'globalResultAliases' from recognising an intra-block
+              -- result as directly laid out.  Non-direct layouts still
+              -- need context parameters, and are handled as before.
+              if LMAD.isDirect v_lmad'
+                then do
+                  tell ([mem_param], [])
+                  pure
+                    ( mergeparam
+                        { paramDec =
+                            MemArray pt shape o $
+                              ArrayIn
+                                (paramName mem_param)
+                                (LMAD.iota 0 $ map pe64 $ shapeDims shape)
+                        },
+                      Var v',
+                      ensureDirectArrayIn v_mem_space'
+                    )
+                else do
+                  let lmad_ext =
+                        LMAD.existentialize 0 $ LMAD.iota 0 $ map pe64 $ shapeDims shape
+
+                  ctx_params <-
+                    replicateM (length (LMAD.existentialized lmad_ext)) $
+                      newParam "ctx_param_ext" (MemPrim int64)
+
+                  param_lmad <-
+                    instantiateLMAD $
+                      LMAD.substitute
+                        ( M.fromList . zip (fmap Ext [0 ..]) $
+                            map (le64 . Free . paramName) ctx_params
+                        )
+                        lmad_ext
+
+                  tell ([mem_param], ctx_params)
+                  pure
+                    ( mergeparam {paramDec = MemArray pt shape o $ ArrayIn (paramName mem_param) param_lmad},
+                      Var v',
+                      ensureArrayIn v_mem_space'
+                    )
     allocInLoopParam _ (mergeparam, se) = doDefault mergeparam se =<< lift askDefaultSpace
 
     doDefault mergeparam se space = do
