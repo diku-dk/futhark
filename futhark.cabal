@@ -429,6 +429,7 @@ library
       Language.Futhark.Interpreter.FFI.AtomicList
       Language.Futhark.Interpreter.FFI.Push
       Language.Futhark.Interpreter.FFI.ServerM
+      Language.Futhark.Interpreter.IO
       Language.Futhark.Interpreter.Values
       Language.Futhark.FreeVars
       Language.Futhark.Parser

@@ -708,6 +708,9 @@ runInterpreter env m = runF m pure intOp
     intOp (I.ExtOpFFI sm c) =
       either (throwError . PP.docText . I.prettyInterpreterError) c
         =<< liftIO (runFFI (Just (envServer env)) sm)
+    intOp (I.ExtOpIO op c) =
+      either throwError c
+        =<< liftIO (I.doIOOp op)
 
 -- | Type check and evaluate an expression, returning its type (which is useful
 -- for error messages) and the value in full.

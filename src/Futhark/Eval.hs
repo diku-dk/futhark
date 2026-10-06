@@ -371,3 +371,5 @@ runInterpreterNoBreak s m = runF m (pure . Right) intOp
       trace $ pretty (locText w) <> ": ignoring breakpoint in top-level constant."
       c
     intOp (I.ExtOpFFI sm c) = either (pure . Left) c =<< liftIO (runFFI s sm)
+    intOp (I.ExtOpIO op c) =
+      either (pure . Left . I.InterpreterError) c =<< liftIO (I.doIOOp op)

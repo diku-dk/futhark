@@ -1039,6 +1039,40 @@ intrinsics =
               )
             ]
               ++
+              -- Interpreter-only IO builtins. It is somewhat ugly (and
+              -- non-extensible) that these have to baked-in here. The alternative
+              -- is a general "intrinsic" language construct.
+              [ ( "io_loadbytes",
+                  IntrinsicPolyFun
+                    [sp_k]
+                    [Array Observe (shape [k]) (Prim $ Unsigned Int8)]
+                    $ RetType [n]
+                    $ Array Fresh (shape [n]) (Prim $ Unsigned Int8)
+                ),
+                ( "io_loadimg",
+                  IntrinsicPolyFun
+                    [sp_k]
+                    [Array Observe (shape [k]) (Prim $ Unsigned Int8)]
+                    $ RetType [n, m]
+                    $ Array Fresh (shape [n, m]) (Prim $ Unsigned Int32)
+                ),
+                ( "io_loadaudio",
+                  IntrinsicPolyFun
+                    [sp_k]
+                    [Array Observe (shape [k]) (Prim $ Unsigned Int8)]
+                    $ RetType [n, m]
+                    $ Array Fresh (shape [n, m]) (Prim $ FloatType Float64)
+                ),
+                ( "io_loadvalue",
+                  IntrinsicPolyFun
+                    [sp_k, tp_a]
+                    [Array Observe (shape [k]) (Prim $ Unsigned Int8)]
+                    $ RetType []
+                    $ Scalar
+                    $ t_a Fresh
+                )
+              ]
+              ++
               -- Experimental LMAD ones.
               [ ( "flat_index_2d",
                   IntrinsicPolyFun

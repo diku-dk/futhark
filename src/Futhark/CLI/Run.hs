@@ -135,3 +135,5 @@ runInterpreter' m = runF m (pure . Right) intOp
       c
     intOp (I.ExtOpBreak _ _ _ c) = c
     intOp (I.ExtOpFFI {}) = error "External calls are not yet supported in Run."
+    intOp (I.ExtOpIO op c) =
+      either (pure . Left . I.InterpreterError) c =<< liftIO (I.doIOOp op)

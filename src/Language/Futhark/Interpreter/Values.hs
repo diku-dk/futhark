@@ -26,11 +26,13 @@ module Language.Futhark.Interpreter.Values
 
     -- * Conversion
     fromDataValue,
+    asByteString,
   )
 where
 
 import Control.Monad.Identity
 import Data.Array
+import Data.ByteString qualified as BS
 import Data.List (genericLength)
 import Data.Map qualified as M
 import Data.Maybe
@@ -332,3 +334,11 @@ fromDataValue (V.F64Value shape vector) =
   fromDataValueWith (FloatValue . Float64Value) shape vector
 fromDataValue (V.BoolValue shape vector) =
   fromDataValueWith BoolValue shape vector
+
+-- | If the value represents an array of type @[]i8@, then return those bytes.
+asByteString :: Value m -> Maybe BS.ByteString
+asByteString (ValueArray _ vals) = BS.pack <$> mapM asU8 (elems vals)
+  where
+    asU8 (ValuePrim (UnsignedValue (Int8Value x))) = Just $ fromIntegral x
+    asU8 _ = Nothing
+asByteString _ = Nothing

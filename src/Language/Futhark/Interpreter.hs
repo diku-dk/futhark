@@ -28,6 +28,11 @@ module Language.Futhark.Interpreter
     prettyEmptyArray,
     prettyValue,
     valueText,
+
+    -- * IO
+    IOOp,
+    determineIO,
+    doIOOp,
   )
 where
 
@@ -40,7 +45,6 @@ import Control.Monad.Trans.Maybe
 import Data.Array
 import Data.Bifunctor
 import Data.Bitraversable
-import Data.ByteString qualified as BS
 import Data.Functor (($>), (<&>))
 import Data.List
   ( find,
@@ -65,6 +69,7 @@ import Language.Futhark qualified as F
 import Language.Futhark.Interpreter.AD qualified as AD
 import Language.Futhark.Interpreter.FFI.Push qualified as FFI
 import Language.Futhark.Interpreter.FFI.ServerM qualified as FFI
+import Language.Futhark.Interpreter.IO
 import Language.Futhark.Interpreter.Values hiding (Value)
 import Language.Futhark.Interpreter.Values qualified
 import Language.Futhark.Primitive (floatValue, intValue)
@@ -93,12 +98,15 @@ data ExtOp a
   | ExtOpBreak Loc BreakReason (NE.NonEmpty StackFrame) a
   | ExtOpError InterpreterError
   | ExtOpFFI (FFI.ServerM Value) (Value -> a)
+  | -- | Perform an IO operation.
+    ExtOpIO IOOp (Value -> a)
 
 instance Functor ExtOp where
   fmap f (ExtOpTrace w s x) = ExtOpTrace w s $ f x
   fmap f (ExtOpBreak w why backtrace x) = ExtOpBreak w why backtrace $ f x
   fmap _ (ExtOpError err) = ExtOpError err
   fmap f (ExtOpFFI vr c) = ExtOpFFI vr $ f . c
+  fmap f (ExtOpIO v c) = ExtOpIO v $ f . c
 
 type Stack = [StackFrame]
 
@@ -306,14 +314,6 @@ checkShape _ shape2 =
 
 type Value = Language.Futhark.Interpreter.Values.Value EvalM
 
--- | If the value represents an array of type @[]i8@, then return those bytes.
-asByteString :: Value -> Maybe BS.ByteString
-asByteString (ValueArray _ vals) = BS.pack <$> mapM asU8 (elems vals)
-  where
-    asU8 (ValuePrim (UnsignedValue (Int8Value x))) = Just $ fromIntegral x
-    asU8 _ = Nothing
-asByteString _ = Nothing
-
 asInteger :: Value -> Integer
 asInteger (ValuePrim (SignedValue v)) = P.valueIntegral v
 asInteger (ValuePrim (UnsignedValue v)) =
@@ -457,6 +457,9 @@ trace w v = do
   -- Printing a value requires having it in full.
   v' <- force v
   liftF $ ExtOpTrace w (prettyValue v') ()
+
+doIO :: IOOp -> EvalM Value
+doIO io = liftF $ ExtOpIO io id
 
 typeCheckerEnv :: Env -> T.Env
 typeCheckerEnv env =
@@ -2431,7 +2434,11 @@ initialCtx =
       -- it more of a hassle to test them.
       apply noLoc mempty f arg
     def "acc" = Nothing
-    def s | nameFromText s `M.member` namesToPrimTypes = Nothing
+    def fname
+      | nameFromText fname `M.member` namesToPrimTypes = Nothing
+      | Just op <- determineIO fname =
+          Just $ TermPoly Nothing $ \t ->
+            pure $ ValueFun $ doIO <=< op (evalTypeFully t)
     def s = error $ "Missing intrinsic: " ++ T.unpack s
 
     tdef :: Name -> Maybe TypeBinding
