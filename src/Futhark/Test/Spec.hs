@@ -20,6 +20,7 @@ module Futhark.Test.Spec
     Values (..),
     GenValue (..),
     genValueType,
+    parseEmbeddedExp,
   )
 where
 
@@ -353,17 +354,17 @@ parseScriptValues sep =
   where
     nextWord = takeWhileP Nothing $ not . isSpace
 
--- | A script expression extends to the matching closing brace. We slice
--- out that text and hand it to the Futhark parser. Braces inside string
--- literals are not counted.
-parseScriptExp :: Parser UncheckedExp
-parseScriptExp = do
-  p <- getSourcePos
+-- | Parse a Futhark expression embedded in a comment block, consisting of the
+-- text consumed by the given parser. We slice out that text and hand it to the
+-- Futhark parser. This is somewhat clumsy because the Futhark parser is not
+-- written with parser combinators.
+parseEmbeddedExp :: Parser () -> Parser UncheckedExp
+parseEmbeddedExp extent = do
+  pos <- sourcePos
   s <- getInput
   bef <- getOffset
-  balanced
+  extent
   aft <- getOffset
-  let pos = Loc.Pos (sourceName p) (unPos (sourceLine p)) (unPos (sourceColumn p)) bef
   -- To get the right source positions, we replace comment prefixes with spaces.
   case parseExpAt pos $ blankCommentPrefix $ T.take (aft - bef) s of
     Left (SyntaxError loc msg) -> do
@@ -372,6 +373,17 @@ parseScriptExp = do
         Loc.NoLoc -> pure ()
       fail $ T.unpack $ T.strip msg
     Right e -> pure e
+
+-- | The current position, in the form used by the Futhark parser.
+sourcePos :: Parser Loc.Pos
+sourcePos = do
+  p <- getSourcePos
+  Loc.Pos (sourceName p) (unPos (sourceLine p)) (unPos (sourceColumn p)) <$> getOffset
+
+-- | A script expression extends to the matching closing brace. Braces inside
+-- string literals are not counted.
+parseScriptExp :: Parser UncheckedExp
+parseScriptExp = parseEmbeddedExp balanced
   where
     balanced =
       skipMany $

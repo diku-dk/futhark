@@ -36,10 +36,6 @@ module Language.Futhark.Interpreter.FFI.ServerM
     destruct,
     variant,
     -- Error handling convenience
-    throwServerLeft,
-    throwServerJust,
-    throwLeft,
-    throwJust,
     throwNothing,
   )
 where

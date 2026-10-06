@@ -32,7 +32,7 @@ import Control.Exception (catch)
 import Control.Exception.Base qualified as E
 import Control.Monad
 import Control.Monad.Except (ExceptT (..), MonadError (..), liftEither, runExceptT, withExceptT)
-import Control.Monad.Free.Church (F, runF)
+import Control.Monad.Free.Church (F)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Bifunctor (first)
 import Data.Binary qualified as Bin
@@ -47,7 +47,7 @@ import Data.Text.Encoding qualified as T
 import Data.Text.IO qualified as T
 import Futhark.Compiler (readProgramFilesExceptKnown)
 import Futhark.Error (prettyCompilerError)
-import Futhark.Eval (externaliseLast, interpretImports, runFFI)
+import Futhark.Eval (externaliseLast, interpretImports, runInterpreterWith)
 import Futhark.FreshNames (VNameSource)
 import Futhark.Server
 import Futhark.Server.Values
@@ -151,14 +151,7 @@ getValuesBS _ _ (ScriptFile f) =
 -- are dispatched to the server, files are read relative to the given directory,
 -- and traces and breakpoints are ignored.
 runScript :: FFI.Server -> FilePath -> F I.ExtOp a -> IO (Either I.InterpreterError a)
-runScript server dir m = runF m (pure . Right) intOp
-  where
-    intOp (I.ExtOpError err) = pure $ Left err
-    intOp (I.ExtOpTrace _ _ c) = c
-    intOp (I.ExtOpBreak _ _ _ c) = c
-    intOp (I.ExtOpFFI sm c) = either (pure . Left) c =<< runFFI (Just server) sm
-    intOp (I.ExtOpIO op c) =
-      either (pure . Left . I.InterpreterError) c =<< I.doIOOp (I.ioRelativeTo dir op)
+runScript server dir = runInterpreterWith (const $ pure ()) (Just server) (Just dir)
 
 -- | The entry points of the program (the last import).
 programEntryPoints :: Imports -> M.Map Name EntryPoint
@@ -267,69 +260,58 @@ valuesAsVars ::
   FilePath ->
   Values ->
   m [VarName]
-valuesAsVars server entry names_and_types futhark prog =
-  valuesAsVars' server entry names_and_types futhark prog (takeDirectory prog)
-
-valuesAsVars' ::
-  (MonadError T.Text m, MonadIO m) =>
-  Server ->
-  EntryName ->
-  [(VarName, TypeName)] ->
-  FutharkExe ->
-  FilePath ->
-  FilePath ->
-  Values ->
-  m [VarName]
-valuesAsVars' server _ names_and_types _ _ dir (InFile file)
-  | takeExtension file == ".gz" = do
-      s <- liftIO $ readAndDecompress $ dir </> file
-      case s of
-        Left e ->
-          throwError $ showText file <> ": " <> showText e
-        Right s' ->
-          cmdMaybe . withSystemTempFile "futhark-input" $ \tmpf tmpf_h -> do
-            BS.hPutStr tmpf_h s'
-            hClose tmpf_h
-            cmdRestore server tmpf names_and_types
-      pure $ map fst names_and_types
-  | otherwise = do
-      cmdMaybe $ cmdRestore server (dir </> file) names_and_types
-      pure $ map fst names_and_types
-valuesAsVars' server _ names_and_types futhark _ dir (GenValues gens) = do
-  unless (length gens == length names_and_types) . throwError . T.unlines $
-    [ "Expected "
-        <> showText (length names_and_types)
-        <> " input values of types",
-      "  " <> T.unwords (map snd names_and_types),
-      "Provided "
-        <> showText (length gens)
-        <> " input values of types",
-      "  " <> T.unwords (map genValueType gens)
-    ]
-  gen_fs <- mapM (getGenFile futhark dir) gens
-  forM_ (zip gen_fs names_and_types) $ \(file, (v, t)) ->
-    cmdMaybe $ cmdRestore server (dir </> file) [(v, t)]
-  pure $ map fst names_and_types
-valuesAsVars' server _ names_and_types _ _ _ (Values vs) = do
-  let types = map snd names_and_types
-      vs_types = map (V.valueTypeTextNoDims . V.valueType) vs
-  unless (types == vs_types) . throwError . T.unlines $
-    [ "Expected input of types: " <> T.unwords (map prettyTextOneLine types),
-      "Provided input of types: " <> T.unwords (map prettyTextOneLine vs_types)
-    ]
-  cmdMaybe . withSystemTempFile "futhark-input" $ \tmpf tmpf_h -> do
-    mapM_ (BS.hPutStr tmpf_h . Bin.encode) vs
-    hClose tmpf_h
-    cmdRestore server tmpf names_and_types
-  pure $ map fst names_and_types
-valuesAsVars' server entry names_and_types _ prog _ (ScriptValues e) =
-  scriptValuesAsVars server entry (map fst names_and_types) prog e
-valuesAsVars' server entry names_and_types _ prog dir (ScriptFile f) = do
-  let f' = dir </> f
-  e <-
-    either (\(SyntaxError _ err) -> throwError err) pure . parseExp f'
-      =<< liftIO (T.readFile f')
-  scriptValuesAsVars server entry (map fst names_and_types) prog e
+valuesAsVars server entry names_and_types futhark prog values =
+  case values of
+    InFile file
+      | takeExtension file == ".gz" -> do
+          s <- liftIO $ readAndDecompress $ dir </> file
+          case s of
+            Left e -> throwError $ showText file <> ": " <> showText e
+            Right s' -> restoreBytes s'
+          pure names
+      | otherwise -> do
+          cmdMaybe $ cmdRestore server (dir </> file) names_and_types
+          pure names
+    GenValues gens -> do
+      unless (length gens == length names_and_types) . throwError . T.unlines $
+        [ "Expected "
+            <> showText (length names_and_types)
+            <> " input values of types",
+          "  " <> T.unwords (map snd names_and_types),
+          "Provided "
+            <> showText (length gens)
+            <> " input values of types",
+          "  " <> T.unwords (map genValueType gens)
+        ]
+      gen_fs <- mapM (getGenFile futhark dir) gens
+      forM_ (zip gen_fs names_and_types) $ \(file, (v, t)) ->
+        cmdMaybe $ cmdRestore server (dir </> file) [(v, t)]
+      pure names
+    Values vs -> do
+      let types = map snd names_and_types
+          vs_types = map (V.valueTypeTextNoDims . V.valueType) vs
+      unless (types == vs_types) . throwError . T.unlines $
+        [ "Expected input of types: " <> T.unwords (map prettyTextOneLine types),
+          "Provided input of types: " <> T.unwords (map prettyTextOneLine vs_types)
+        ]
+      restoreBytes $ mconcat $ map Bin.encode vs
+      pure names
+    ScriptValues e ->
+      scriptValuesAsVars server entry names prog e
+    ScriptFile f -> do
+      let f' = dir </> f
+      e <-
+        either (\(SyntaxError _ err) -> throwError err) pure . parseExp f'
+          =<< liftIO (T.readFile f')
+      scriptValuesAsVars server entry names prog e
+  where
+    dir = takeDirectory prog
+    names = map fst names_and_types
+    restoreBytes bytes =
+      cmdMaybe . withSystemTempFile "futhark-input" $ \tmpf tmpf_h -> do
+        BS.hPutStr tmpf_h bytes
+        hClose tmpf_h
+        cmdRestore server tmpf names_and_types
 
 -- | There is a risk of race conditions when multiple programs have
 -- identical 'GenValues'.  In such cases, multiple threads in 'futhark

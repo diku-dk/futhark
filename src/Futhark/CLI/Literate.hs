@@ -4,7 +4,7 @@ module Futhark.CLI.Literate (main) where
 import Codec.BMP qualified as BMP
 import Control.Monad
 import Control.Monad.Except
-import Control.Monad.Free.Church (F, runF)
+import Control.Monad.Free.Church (F)
 import Control.Monad.State hiding (State)
 import Control.Monad.Trans.Maybe (MaybeT (..), hoistMaybe)
 import Data.Array qualified as A
@@ -32,7 +32,7 @@ import Futhark.Eval
     evalConfig,
     forceValue,
     initialiseInterpreter,
-    runFFI,
+    runInterpreterWith,
   )
 import Futhark.FreshNames (VNameSource)
 import Futhark.Server
@@ -46,7 +46,6 @@ import Futhark.Util
     runProgramWithExitCode,
     showText,
   )
-import Futhark.Util.Loc qualified as Loc
 import Futhark.Util.Options
 import Futhark.Util.Pretty (prettyText, prettyTextOneLine)
 import Futhark.Util.Pretty qualified as PP
@@ -54,7 +53,6 @@ import Futhark.Util.ProgressBar
 import Language.Futhark.Interpreter qualified as I
 import Language.Futhark.Interpreter.FFI.ServerM qualified as FFI
 import Language.Futhark.Interpreter.Values qualified as IV
-import Language.Futhark.Parser (SyntaxError (..), parseExpAt)
 import Language.Futhark.Pretty ()
 import Language.Futhark.Primitive qualified as P
 import Language.Futhark.Prop (UncheckedExp, typeOf)
@@ -343,40 +341,10 @@ stripCommentPrefix = T.unlines . map onLine . T.lines
       | "-- " `T.isPrefixOf` s = T.drop 3 s
       | otherwise = T.drop 2 s
 
--- | The current position, in the form used by the Futhark parser.
-sourcePos :: Parser Loc.Pos
-sourcePos = do
-  p <- getSourcePos
-  Loc.Pos (sourceName p) (unPos (sourceLine p)) (unPos (sourceColumn p)) <$> getOffset
-
--- | Replace the comment marker on every line but the first with spaces.
-blankCommentPrefix :: T.Text -> T.Text
-blankCommentPrefix s =
-  case T.lines s of
-    [] -> s
-    l : ls -> T.intercalate "\n" $ l : map onLine ls
-  where
-    onLine l = maybe l ("  " <>) $ T.stripPrefix "--" l
-
 -- | A directive expression extends to the end of the enclosing comment block,
--- or to the ';' that introduces directive parameters. We slice out that text
--- and hand it to the Futhark parser. This is somewhat clumsy because the
--- Futhark parser is not written with parser combinators.
+-- or to the ';' that introduces directive parameters.
 parseDirectiveExp :: Parser UncheckedExp
-parseDirectiveExp = do
-  pos <- sourcePos
-  s <- getInput
-  bef <- getOffset
-  expText
-  aft <- getOffset
-  -- To get the right source positions, we replace comment prefixes with spaces.
-  case parseExpAt pos $ blankCommentPrefix $ T.take (aft - bef) s of
-    Left (SyntaxError loc msg) -> do
-      case loc of
-        Loc.Loc start _ -> setOffset $ Loc.posCoff start
-        Loc.NoLoc -> pure ()
-      fail $ T.unpack $ T.strip msg
-    Right e -> pure e
+parseDirectiveExp = parseEmbeddedExp expText
   where
     expText = do
       more <- expLine
@@ -695,22 +663,15 @@ data Env = Env
 -- | Run an interpreter action. Traces are shown when verbose, external calls
 -- are dispatched to the server, and breakpoints are ignored.
 runInterpreter :: Env -> F I.ExtOp a -> LiterateM a
-runInterpreter env m = runF m pure intOp
+runInterpreter env =
+  either (throwError . PP.docText . I.prettyInterpreterError) pure
+    <=< runInterpreterWith report (Just (envServer env)) Nothing
   where
-    intOp (I.ExtOpError err) =
-      throwError $ PP.docText $ I.prettyInterpreterError err
-    intOp (I.ExtOpTrace w v c) = do
+    report d =
       when (scriptVerbose (envOpts env) > 0) $
-        liftIO . T.putStrLn . PP.docText $
-          PP.pretty w <> ":" PP.<+> PP.align v
-      c
-    intOp (I.ExtOpBreak _ _ _ c) = c
-    intOp (I.ExtOpFFI sm c) =
-      either (throwError . PP.docText . I.prettyInterpreterError) c
-        =<< liftIO (runFFI (Just (envServer env)) sm)
-    intOp (I.ExtOpIO op c) =
-      either throwError c
-        =<< liftIO (I.doIOOp op)
+        liftIO $
+          T.putStrLn $
+            PP.docText d
 
 -- | Type check and evaluate an expression, returning its type (which is useful
 -- for error messages) and the value in full.

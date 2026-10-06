@@ -7,16 +7,15 @@ module Futhark.Eval
   ( EvalConfig (..),
     InterpreterState,
     runExpr,
-    runParsedExpr,
     evalConfig,
     evalServerOptions,
     runFFI,
     forceValue,
     externaliseLast,
+    runInterpreterWith,
     interpretImports,
     initialiseInterpreter,
     newInterpreterState,
-    newInterpreterStateWith,
     Evaluation (..),
     EvalRecordRef,
     runEvalRecordRef,
@@ -137,7 +136,7 @@ runParsedExpr (InterpreterState (src, env, ctx, s)) uexp = do
             "The following types are ambiguous: "
               <> commasep (map (pretty . nameToText . toName . typeParamName) tparams)
           ]
-  pval <- runInterpreterNoBreak s $ I.interpretExp ctx fexp
+  pval <- runInterpreterWith trace s Nothing $ I.interpretExp ctx fexp
   case pval of
     Left err -> abort $ I.prettyInterpreterError err
     Right val -> do
@@ -268,26 +267,7 @@ newInterpreterState ::
   EvalConfig ->
   VFS ->
   m (Either (Doc AnsiStyle) InterpreterState)
-newInterpreterState cfg vfs = newInterpreterStateOn cfg vfs Nothing
-
--- | As 'newInterpreterState', but dispatch entry point calls to a server that
--- is already running, instead of starting one. The server is never shut down by
--- this function; that remains the responsibility of whoever started it.
-newInterpreterStateWith ::
-  (MonadIO m, Evaluation m) =>
-  EvalConfig ->
-  VFS ->
-  FFI.Server ->
-  m (Either (Doc AnsiStyle) InterpreterState)
-newInterpreterStateWith cfg vfs = newInterpreterStateOn cfg vfs . Just
-
-newInterpreterStateOn ::
-  (MonadIO m, Evaluation m) =>
-  EvalConfig ->
-  VFS ->
-  Maybe FFI.Server ->
-  m (Either (Doc AnsiStyle) InterpreterState)
-newInterpreterStateOn cfg vfs server = runExceptT $ do
+newInterpreterState cfg vfs = runExceptT $ do
   let maybe_file = evalFile cfg
   (ws, imports, src) <-
     badOnLeft prettyCompilerError
@@ -300,7 +280,7 @@ newInterpreterStateOn cfg vfs server = runExceptT $ do
     liftIO . hPutDoc stderr $
       prettyWarnings ws
 
-  (s, tenv, ienv) <- ExceptT $ initialiseInterpreter cfg maybe_file server imports
+  (s, tenv, ienv) <- ExceptT $ initialiseInterpreter cfg maybe_file Nothing imports
 
   pure $ InterpreterState (src, tenv, ienv, s)
 
@@ -351,26 +331,32 @@ initialiseInterpreter cfg maybe_file server imports =
     evalWith s =
       runExceptT
         . fmap (\(tenv, ienv) -> (s, tenv, ienv))
-        . interpretImports (runInterpreterNoBreak s)
+        . interpretImports (runInterpreterWith trace s Nothing)
 
--- | Run an interpreter action, dispatching external calls to the given
--- server (if any). Breakpoints are ignored, as there is no way to enter a
--- debugging prompt.
-runInterpreterNoBreak ::
-  (Evaluation m, MonadIO m) =>
+-- | Run an interpreter action non-interactively. Breakpoints are ignored, as
+-- there is no way to enter a debugging prompt. Traces, and the breakpoints
+-- that are ignored, are reported with the given function. External calls are
+-- dispatched to the given server (if any). Relative paths in IO operations are
+-- resolved relative to the given directory, if any, and otherwise relative to
+-- the working directory.
+runInterpreterWith ::
+  (MonadIO m) =>
+  (Doc AnsiStyle -> m ()) ->
   Maybe FFI.Server ->
+  Maybe FilePath ->
   F I.ExtOp a ->
   m (Either I.InterpreterError a)
-runInterpreterNoBreak s m = runF m (pure . Right) intOp
+runInterpreterWith report s dir m = runF m (pure . Right) intOp
   where
     intOp (I.ExtOpError err) = pure $ Left err
     intOp (I.ExtOpTrace w v c) = do
-      trace $ pretty w <> ":" <+> align (unAnnotate v)
+      report $ pretty w <> ":" <+> align (unAnnotate v)
       c
     intOp (I.ExtOpBreak _ I.BreakNaN _ c) = c
     intOp (I.ExtOpBreak w _ _ c) = do
-      trace $ pretty (locText w) <> ": ignoring breakpoint in top-level constant."
+      report $ pretty (locText w) <> ": ignoring breakpoint."
       c
     intOp (I.ExtOpFFI sm c) = either (pure . Left) c =<< liftIO (runFFI s sm)
     intOp (I.ExtOpIO op c) =
-      either (pure . Left . I.InterpreterError) c =<< liftIO (I.doIOOp op)
+      either (pure . Left . I.InterpreterError) c
+        =<< liftIO (I.doIOOp (maybe id I.ioRelativeTo dir op))
