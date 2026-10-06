@@ -158,9 +158,12 @@ programEntryPoints :: Imports -> M.Map Name EntryPoint
 programEntryPoints imports =
   M.fromList
     [ (baseName $ valBindName vb, ep)
-    | ValDec vb <- progDecs $ fileProg $ snd $ last imports,
+    | ValDec vb <- map unLocal $ progDecs $ fileProg $ snd $ last imports,
       Just (Info ep) <- [valBindEntryPoint vb]
     ]
+  where
+    unLocal (LocalDec dec _) = unLocal dec
+    unLocal dec = dec
 
 -- | Read, type check and interpret the program, with its entry points run on
 -- the server. Produces what is needed to type check and evaluate script

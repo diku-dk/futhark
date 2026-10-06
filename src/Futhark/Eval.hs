@@ -54,7 +54,7 @@ import Language.Futhark.Parser.Monad (SyntaxError (SyntaxError))
 import Language.Futhark.Pretty (toName)
 import Language.Futhark.Prop (UncheckedExp, typeOf)
 import Language.Futhark.Semantic qualified as T
-import Language.Futhark.Syntax (DecBase (ValDec), ProgBase (progDecs), ValBindBase (..), nameToText, typeParamName)
+import Language.Futhark.Syntax (DecBase (LocalDec, ValDec), ProgBase (progDecs), ValBindBase (..), nameToText, typeParamName)
 import Language.Futhark.TypeChecker qualified as T
 import Prettyprinter (Doc, align, pretty, unAnnotate, vcat, (<+>))
 import Prettyprinter.Render.Terminal (AnsiStyle)
@@ -250,6 +250,7 @@ externalise fm = fm {fileProg = (fileProg fm) {progDecs = map onDec $ progDecs $
     onDec (ValDec vb)
       | isJust $ valBindEntryPoint vb =
           ValDec $ vb {valBindAttrs = "$external" : valBindAttrs vb}
+    onDec (LocalDec dec loc) = LocalDec (onDec dec) loc
     onDec dec = dec
 
 -- | Mark the entry points of the last import - which is the file the
