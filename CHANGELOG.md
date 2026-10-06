@@ -28,6 +28,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Changed
 
+* FutharkScript has been replaced by ordinary Futhark. The magical builtins have
+  been replaced by magical functions, e.g., `$loadbytes` is now `io.loadbytes`.
+  Obviously only works in interpreted code. Futhark is not an exact
+  functionality match for FutharkScript, but most things should be able to work.
+
+* `futhark literate` no longer implicit marks functions used in directives as
+  entry points. Use ``entry`` when you actually want compiled entry points.
+
 ### Fixed
 
 * Python input reading no longer hangs on an unsuffixed `0`, an unsuffixed
