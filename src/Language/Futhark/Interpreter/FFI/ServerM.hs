@@ -8,6 +8,7 @@ module Language.Futhark.Interpreter.FFI.ServerM
     ServerM,
     runServerM,
     gc,
+    release,
     call,
     -- Interrogation
     inputs,
@@ -44,13 +45,14 @@ module Language.Futhark.Interpreter.FFI.ServerM
 where
 
 import Control.Exception (catch)
-import Control.Monad (replicateM)
+import Control.Monad (replicateM, unless, zipWithM_)
 import Control.Monad.Except (ExceptT, MonadError, runExceptT, throwError)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Reader (ReaderT, asks, runReaderT)
-import Data.IORef (IORef, mkWeakIORef, newIORef, readIORef)
+import Data.IORef (IORef, atomicModifyIORef', mkWeakIORef, newIORef, readIORef)
 import Data.List (intercalate)
 import Data.Map qualified as M
+import Data.Set qualified as S
 import Data.Text qualified as T
 import Data.Unique (hashUnique, newUnique)
 import Data.Vector.Storable qualified as V
@@ -91,10 +93,14 @@ dToP (D.F64Value _ vs) = FloatValue $ Float64Value $ vs V.! 0
 dToP (D.BoolValue _ vs) = BoolValue $ vs V.! 0
 
 newtype ValueRef = ValueRef (IORef FS.VarName)
+  deriving (Eq)
 
 data Server = Server
   { server :: FS.Server,
-    queue :: AL.AtomicList FS.VarName
+    -- | Variables whose 'ValueRef' has been garbage collected.
+    queue :: AL.AtomicList FS.VarName,
+    -- | Variables created by us that have not yet been freed.
+    live :: IORef (S.Set FS.VarName)
   }
 
 newtype ServerM a = ServerM (ReaderT Server (ExceptT String IO) a)
@@ -112,13 +118,18 @@ askServer = ServerM $ asks server
 askQueue :: ServerM (AL.AtomicList FS.VarName)
 askQueue = ServerM $ asks queue
 
+modifyLive :: (S.Set FS.VarName -> S.Set FS.VarName) -> ServerM ()
+modifyLive f = do
+  r <- ServerM $ asks live
+  liftIO $ atomicModifyIORef' r $ (,()) . f
+
 startServer :: FS.ServerCfg -> IO Server
 startServer cfg = newServer =<< FS.startServer cfg
 
 -- | Use an already-running server. Shutting it down remains the
 -- responsibility of whoever started it.
 newServer :: FS.Server -> IO Server
-newServer s = Server s <$> AL.new
+newServer s = Server s <$> AL.new <*> newIORef mempty
 
 -- | Shut down the server. Returns a message on termination failure.
 stopServer :: Server -> IO (Maybe T.Text)
@@ -137,17 +148,40 @@ uniqueName = ("v" <>) . T.show . hashUnique <$> liftIO newUnique
 
 mkValueRef :: FS.VarName -> ServerM ValueRef
 mkValueRef n = do
+  modifyLive $ S.insert n
   r <- liftIO $ newIORef n
   q <- askQueue
   _ <- liftIO $ mkWeakIORef r $ AL.prepend n q
   pure $ ValueRef r
 
 gc :: ServerM ()
-gc = do
+gc = freeVars =<< liftIO . AL.flush =<< askQueue
+
+freeVars :: [FS.VarName] -> ServerM ()
+freeVars vns = do
   s <- askServer
-  vns <- askQueue >>= liftIO . AL.flush
   liftIO (FS.cmdFree s vns)
     >>= throwServerJust ("cmdFree failed on variables " ++ csList (map T.unpack vns) ++ ".")
+  modifyLive (`S.difference` S.fromList vns)
+
+-- | End the use of this 'Server'. The variables of the given values are
+-- adopted by the caller under the given names, and every other variable we
+-- have created is freed, whether or not its 'ValueRef' is still reachable.
+-- Neither the 'Server' nor any 'ValueRef' may be used afterwards.
+release :: [(ValueRef, FS.VarName)] -> ServerM ()
+release adopted = do
+  s <- askServer
+  -- Everything in the queue is also live, so it is freed below.
+  _ <- askQueue >>= liftIO . AL.flush
+  srcs <- mapM (varName . fst) adopted
+  unless (S.size (S.fromList srcs) == length srcs) $
+    throwError "The same variable cannot be adopted more than once."
+  let rename src dst =
+        liftIO (FS.cmdRename s src dst)
+          >>= throwServerJust ("cmdRename failed on variable " ++ T.unpack src ++ ".")
+  zipWithM_ rename srcs $ map snd adopted
+  modifyLive (`S.difference` S.fromList srcs)
+  freeVars . S.toList =<< liftIO . readIORef =<< ServerM (asks live)
 
 call :: Name -> [ValueRef] -> ServerM ValueRef
 call fn ps = do
