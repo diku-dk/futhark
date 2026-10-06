@@ -38,10 +38,13 @@ import Data.Void
 import Futhark.Analysis.Metrics.Type
 import Futhark.Data.Parser
 import Futhark.Data.Parser qualified as V
-import Futhark.Script qualified as Script
 import Futhark.Test.Values qualified as V
 import Futhark.Util (directoryContents, nubOrd, showText)
+import Futhark.Util.Loc qualified as Loc
 import Futhark.Util.Pretty (prettyTextOneLine)
+import Language.Futhark.Parser (SyntaxError (..), parseExpAt)
+import Language.Futhark.Pretty ()
+import Language.Futhark.Prop (UncheckedExp)
 import System.Exit
 import System.FilePath
 import System.IO
@@ -126,8 +129,12 @@ data Values
   = Values [V.Value]
   | InFile FilePath
   | GenValues [GenValue]
-  | ScriptValues Script.Exp
-  | ScriptFile FilePath
+  | -- | A Futhark expression, evaluated by the interpreter in the
+    -- context of the program, with calls to entry points run on the
+    -- compiled program.
+    ScriptValues UncheckedExp
+  | -- | A file containing such an expression.
+    ScriptFile FilePath
   deriving (Show)
 
 -- | How to generate a single random value.
@@ -340,11 +347,48 @@ parseExpectedError sep = lexeme sep $ do
 parseScriptValues :: Parser () -> Parser Values
 parseScriptValues sep =
   choice
-    [ ScriptValues <$> inBraces sep (Script.parseExp sep),
+    [ ScriptValues <$> inBraces sep parseScriptExp,
       ScriptFile . T.unpack <$> (lexeme sep "@" *> lexeme sep nextWord)
     ]
   where
     nextWord = takeWhileP Nothing $ not . isSpace
+
+-- | A script expression extends to the matching closing brace. We slice
+-- out that text and hand it to the Futhark parser. Braces inside string
+-- literals are not counted.
+parseScriptExp :: Parser UncheckedExp
+parseScriptExp = do
+  p <- getSourcePos
+  s <- getInput
+  bef <- getOffset
+  balanced
+  aft <- getOffset
+  let pos = Loc.Pos (sourceName p) (unPos (sourceLine p)) (unPos (sourceColumn p)) bef
+  -- To get the right source positions, we replace comment prefixes with spaces.
+  case parseExpAt pos $ blankCommentPrefix $ T.take (aft - bef) s of
+    Left (SyntaxError loc msg) -> do
+      case loc of
+        Loc.Loc start _ -> setOffset $ Loc.posCoff start
+        Loc.NoLoc -> pure ()
+      fail $ T.unpack $ T.strip msg
+    Right e -> pure e
+  where
+    balanced =
+      skipMany $
+        choice
+          [ void $ takeWhile1P Nothing (`notElem` ("{}\"" :: String)),
+            void $ char '"' *> manyTill charLiteral (char '"'),
+            void $ char '{' *> balanced *> char '}'
+          ]
+
+-- | Replace the comment marker on every line but the first with spaces.
+blankCommentPrefix :: T.Text -> T.Text
+blankCommentPrefix s =
+  case T.lines s of
+    [] -> s
+    l : ls -> T.intercalate "\n" $ l : map onLine ls
+  where
+    onLine l = maybe l ("  " <>) $ T.stripPrefix "--" l
 
 parseRandomValues :: Parser () -> Parser Values
 parseRandomValues sep = GenValues <$> inBraces sep (many (parseGenValue sep))

@@ -1,5 +1,6 @@
 module Language.Futhark.Interpreter.FFI.Push
   ( put,
+    putArgs,
     get,
     hasLazy,
     getLazy,
@@ -64,6 +65,12 @@ lazyGet (I.ShapeRecord sm) vr =
   I.ValueRecord
     <$> sequence (M.mapWithKey (\fn cshp -> project vr fn >>= lazyGet cshp) sm)
 lazyGet shp vr = get shp vr
+
+-- | Put these values on the server as the arguments of the given entry point.
+putArgs :: Name -> [I.Value m] -> ServerM [ValueRef]
+putArgs fn vs = do
+  ts <- inputs fn
+  zipWithM put ts vs
 
 put :: TypeName -> I.Value m -> ServerM ValueRef
 put _ (I.ValuePrim p) = putPrim p

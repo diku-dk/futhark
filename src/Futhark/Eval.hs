@@ -12,6 +12,7 @@ module Futhark.Eval
     evalServerOptions,
     runFFI,
     forceValue,
+    externaliseLast,
     interpretImports,
     initialiseInterpreter,
     newInterpreterState,
@@ -41,7 +42,7 @@ import Futhark.Compiler.Program (FileModule (..), Imports, VFS, fileScope)
 import Futhark.Error (badOnLeft, externalErrorS, prettyCompilerError)
 import Futhark.FreshNames (VNameSource)
 import Futhark.Server qualified as S
-import Futhark.Test (FutharkExe (..), compileProgram, futharkServerCfg)
+import Futhark.Test.Compile (FutharkExe (..), compileProgram, futharkServerCfg)
 import Futhark.Util (showText)
 import Futhark.Util.Options (ArgDescr (..), FunOptDescr, OptDescr (..))
 import Futhark.Util.Pretty (commasep, hPutDoc, hPutDocLn, hardline, putDocLn)

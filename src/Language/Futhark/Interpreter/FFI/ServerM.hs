@@ -45,7 +45,7 @@ module Language.Futhark.Interpreter.FFI.ServerM
 where
 
 import Control.Exception (catch)
-import Control.Monad (replicateM, unless, zipWithM_)
+import Control.Monad (replicateM)
 import Control.Monad.Except (ExceptT, MonadError, runExceptT, throwError)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Reader (ReaderT, asks, runReaderT)
@@ -59,6 +59,7 @@ import Data.Vector.Storable qualified as V
 import Futhark.Data qualified as D
 import Futhark.Server qualified as FS
 import Futhark.Server.Values qualified as FS
+import Futhark.Util (mapAccumLM)
 import Language.Futhark.Interpreter.FFI.AtomicList as AL
 import Language.Futhark.Syntax
 
@@ -93,7 +94,6 @@ dToP (D.F64Value _ vs) = FloatValue $ Float64Value $ vs V.! 0
 dToP (D.BoolValue _ vs) = BoolValue $ vs V.! 0
 
 newtype ValueRef = ValueRef (IORef FS.VarName)
-  deriving (Eq)
 
 data Server = Server
   { server :: FS.Server,
@@ -167,21 +167,25 @@ freeVars vns = do
 -- | End the use of this 'Server'. The variables of the given values are
 -- adopted by the caller under the given names, and every other variable we
 -- have created is freed, whether or not its 'ValueRef' is still reachable.
--- Neither the 'Server' nor any 'ValueRef' may be used afterwards.
-release :: [(ValueRef, FS.VarName)] -> ServerM ()
+-- Neither the 'Server' nor any 'ValueRef' may be used afterwards. A variable
+-- may occur more than once, in which case it is adopted under the first of its
+-- names. Returns the name of the variable of each value.
+release :: [(ValueRef, FS.VarName)] -> ServerM [FS.VarName]
 release adopted = do
   s <- askServer
   -- Everything in the queue is also live, so it is freed below.
   _ <- askQueue >>= liftIO . AL.flush
   srcs <- mapM (varName . fst) adopted
-  unless (S.size (S.fromList srcs) == length srcs) $
-    throwError "The same variable cannot be adopted more than once."
-  let rename src dst =
-        liftIO (FS.cmdRename s src dst)
-          >>= throwServerJust ("cmdRename failed on variable " ++ T.unpack src ++ ".")
-  zipWithM_ rename srcs $ map snd adopted
-  modifyLive (`S.difference` S.fromList srcs)
+  let adopt renamed (src, dst)
+        | Just dst' <- M.lookup src renamed = pure (renamed, dst')
+        | otherwise = do
+            liftIO (FS.cmdRename s src dst)
+              >>= throwServerJust ("cmdRename failed on variable " ++ T.unpack src ++ ".")
+            pure (M.insert src dst renamed, dst)
+  (renamed, dsts) <- mapAccumLM adopt mempty $ zip srcs $ map snd adopted
+  modifyLive (`S.difference` M.keysSet renamed)
   freeVars . S.toList =<< liftIO . readIORef =<< ServerM (asks live)
+  pure dsts
 
 call :: Name -> [ValueRef] -> ServerM ValueRef
 call fn ps = do

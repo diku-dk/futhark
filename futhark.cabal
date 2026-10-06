@@ -399,8 +399,8 @@ library
       Futhark.Profile.EventSummary
       Futhark.Profile.Html
       Futhark.Profile.SourceRange
-      Futhark.Script
       Futhark.Test
+      Futhark.Test.Compile
       Futhark.Test.Property
       Futhark.Test.Spec
       Futhark.Test.Values

@@ -1356,8 +1356,7 @@ extCall n ps resshp = liftF $ ExtOpFFI call id
   where
     call = do
       FFI.gc
-      pts <- FFI.inputs n
-      vr <- FFI.call n =<< zipWithM FFI.put pts ps
+      vr <- FFI.call n =<< FFI.putArgs n ps
       shp <- FFI.resultShape resshp vr
       FFI.lazyGet shp vr
 
