@@ -33,6 +33,7 @@ module Language.Futhark.Interpreter
     IOOp,
     determineIO,
     doIOOp,
+    ioRelativeTo,
   )
 where
 
