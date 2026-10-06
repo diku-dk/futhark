@@ -57,8 +57,12 @@ getLazy (I.ValueLazyFFI shp r os) = do
   pure $ foldl (\(I.ValueArray _ a) i -> a A.! fromIntegral i) v $ reverse os
 getLazy v = pure v
 
+-- | As 'get', but arrays, including those in records, are left on the server.
 lazyGet :: I.ValueShape -> ValueRef -> ServerM (I.Value m)
 lazyGet shp@(I.ShapeDim {}) vr = pure $ I.ValueLazyFFI shp vr []
+lazyGet (I.ShapeRecord sm) vr =
+  I.ValueRecord
+    <$> sequence (M.mapWithKey (\fn cshp -> project vr fn >>= lazyGet cshp) sm)
 lazyGet shp vr = get shp vr
 
 put :: TypeName -> I.Value m -> ServerM ValueRef
