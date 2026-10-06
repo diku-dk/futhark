@@ -57,9 +57,9 @@ cliOptions =
     ++ [ Option
            { optionLongName = "use-primary-context",
              optionShortName = Nothing,
-             optionArgument = RequiredArgument "INT",
-             optionDescription = "Whether to use the device's primary context instead of creating a new one (for sharing device pointers with other libraries such as XLA).",
-             optionAction = [C.cstm|futhark_context_config_set_use_primary_context(cfg, atoi(optarg));|]
+             optionArgument = NoArgument,
+             optionDescription = "Use the device's primary context instead of creating a new one (for sharing device pointers with other libraries such as XLA).",
+             optionAction = [C.cstm|futhark_context_config_set_use_primary_context(cfg, 1);|]
            },
          Option
            { optionLongName = "dump-cuda",
