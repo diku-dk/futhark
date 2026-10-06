@@ -349,6 +349,17 @@ blockAlloc (Pat [_]) _ ScalarSpace {} =
   pure ()
 blockAlloc (Pat [mem]) size (Space "shared") =
   allocLocal (patElemName mem) $ Imp.bytes $ pe64 size
+blockAlloc (Pat [mem]) _ space
+  | space == intrablockResultSpace = do
+      -- An intra-block kernel result is not allocated; it is bound to
+      -- its slice of the global result.
+      aliases <- kernelGlobalResultAliases <$> askEnv
+      case M.lookup (patElemName mem) aliases of
+        Just (global_mem, offset) ->
+          sOp $ Imp.GlobalAlias (patElemName mem) global_mem offset
+        Nothing ->
+          compilerLimitationS $
+            "No global alias for intra-block result " ++ prettyString mem ++ "."
 blockAlloc (Pat [mem]) _ _ =
   compilerLimitationS $ "Cannot allocate memory block " ++ prettyString mem ++ " in kernel block."
 blockAlloc dest _ _ =
@@ -636,6 +647,15 @@ arrayInSharedMemory (Var name) = do
     _ -> pure False
 arrayInSharedMemory Constant {} = pure False
 
+-- | The memory block backing an array, if it is a materialised array.
+arrayMemory :: SubExp -> InKernelGen (Maybe VName)
+arrayMemory (Var name) = do
+  res <- lookupVar name
+  case res of
+    ArrayVar _ entry -> pure $ Just $ memLocName $ entryArrayLoc entry
+    _ -> pure Nothing
+arrayMemory Constant {} = pure Nothing
+
 -- | Create a kernel with GPU operations at the block level.
 sKernelBlock ::
   Name ->
@@ -721,20 +741,27 @@ compileBlockResult space pe (RegTileReturns _ dims_n_tiles what) = do
       sWhen (foldl1 (.&&.) $ zipWith (.<.) dest_is $ map pe64 dims) $
         copyDWIMFix (patElemName pe) dest_is (Var what) src_is
 compileBlockResult space pe (Returns _ _ what) = do
-  constants <- kernelConstants <$> askEnv
-  in_shared_memory <- arrayInSharedMemory what
-  let gids = map (Imp.le64 . fst) $ unSegSpace space
+  aliases <- kernelGlobalResultAliases <$> askEnv
+  what_mem <- arrayMemory what
+  case what_mem >>= (`M.lookup` aliases) of
+    -- The block body already wrote the result straight to the global
+    -- memory slice, so there is nothing to copy out.
+    Just _ -> pure ()
+    Nothing -> do
+      constants <- kernelConstants <$> askEnv
+      in_shared_memory <- arrayInSharedMemory what
+      let gids = map (Imp.le64 . fst) $ unSegSpace space
 
-  if not in_shared_memory
-    then
-      localOps threadOperations $
-        sWhen (kernelLocalThreadId constants .==. 0) $
+      if not in_shared_memory
+        then
+          localOps threadOperations $
+            sWhen (kernelLocalThreadId constants .==. 0) $
+              copyDWIMFix (patElemName pe) gids what []
+        else -- If the result of the block is an array in shared memory, we
+        -- store it by collective copying among all the threads of the
+        -- block.  TODO: also do this if the array is in global memory
+        -- (but this is a bit more tricky, synchronisation-wise).
           copyDWIMFix (patElemName pe) gids what []
-    else -- If the result of the block is an array in shared memory, we
-    -- store it by collective copying among all the threads of the
-    -- block.  TODO: also do this if the array is in global memory
-    -- (but this is a bit more tricky, synchronisation-wise).
-      copyDWIMFix (patElemName pe) gids what []
 
 -- | The sizes of nested iteration spaces in the kernel.
 type SegOpSizes = S.Set [SubExp]

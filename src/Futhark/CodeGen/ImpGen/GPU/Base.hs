@@ -85,7 +85,13 @@ data HostEnv = HostEnv
 data KernelEnv = KernelEnv
   { kernelAtomics :: AtomicBinOp,
     kernelConstants :: KernelConstants,
-    kernelLocks :: M.Map VName Locks
+    kernelLocks :: M.Map VName Locks,
+    -- | Memory blocks that should be bound to a slice of a global
+    -- memory block instead of being allocated in shared memory.  Maps
+    -- the kernel-local memory to the global memory and the byte offset
+    -- of the slice.  Used for writing intra-block kernel results
+    -- directly to global memory.
+    kernelGlobalResultAliases :: M.Map VName (VName, Imp.TExp Int64)
   }
 
 type CallKernelGen = ImpM GPUMem HostEnv Imp.HostOp
@@ -938,6 +944,9 @@ readsFromSet = fmap catMaybes . mapM f . namesToList
         Array {} -> pure Nothing
         Acc {} -> pure Nothing
         Mem (Space "shared") -> pure Nothing
+        Mem space
+          | space == intrablockResultSpace ->
+              pure Nothing
         Mem {} -> pure $ Just $ Imp.MemoryUse var
         Prim bt ->
           isConstExp vtable (Imp.var var bt) >>= \case
@@ -1225,7 +1234,7 @@ sKernelOp ::
   CallKernelGen ()
 sKernelOp attrs constants ops name m = do
   HostEnv atomics _ locks <- askEnv
-  body <- makeAllMemoryGlobal $ subImpM_ (KernelEnv atomics constants locks) ops m
+  body <- makeAllMemoryGlobal $ subImpM_ (KernelEnv atomics constants locks mempty) ops m
   uses <- computeKernelUses body $ M.keys $ kAttrConstExps attrs
   tblock_size <- onBlockSize $ kernelBlockSize constants
   -- XXX: the provenance of the kernel itself is usually boring (it just points

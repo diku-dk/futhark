@@ -35,4 +35,9 @@ handleMCOp (OtherOp soac) =
 
 -- | The pass from 'MC' to 'MCMem'.
 explicitAllocations :: Pass MC MCMem
-explicitAllocations = explicitAllocationsGeneric DefaultSpace handleMCOp scalarSpaceExpHints
+explicitAllocations =
+  explicitAllocationsGeneric
+    DefaultSpace
+    handleMCOp
+    scalarSpaceExpHints
+    (\_ _ -> mempty)

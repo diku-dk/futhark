@@ -15,3 +15,4 @@ explicitAllocations =
     DefaultSpace
     (const $ pure $ Inner NoOp)
     scalarSpaceExpHints
+    (\_ _ -> mempty)
