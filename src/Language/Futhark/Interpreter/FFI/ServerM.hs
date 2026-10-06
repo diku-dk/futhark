@@ -18,6 +18,7 @@ module Language.Futhark.Interpreter.FFI.ServerM
     -- Primitives
     getPrim,
     putPrim,
+    putData,
     getData,
     -- Arrays
     rank,
@@ -226,10 +227,17 @@ getPrim vr = do
   pure $ dToP v
 
 putPrim :: PrimValue -> ServerM ValueRef
-putPrim p = do
+putPrim = putData . pToD
+
+-- | Put an entire value on the server at once. This is only possible for
+-- values that can be represented in the Futhark data format (primitives and
+-- arrays of primitive).
+putData :: D.Value -> ServerM ValueRef
+putData v = do
   s <- askServer
   ndst <- uniqueName
-  liftIO (FS.putValue s ndst $ pToD p) >>= throwServerJust ("Failed to put primitive " ++ show p ++ ".")
+  liftIO (FS.putValue s ndst v)
+    >>= throwServerJust ("Failed to put value of type " ++ T.unpack (D.valueTypeText (D.valueType v)) ++ ".")
   mkValueRef ndst
 
 -- Arrays

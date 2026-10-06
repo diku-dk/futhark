@@ -360,4 +360,4 @@ runInterpreterWith report s dir m = runF m (pure . Right) intOp
     intOp (I.ExtOpFFI sm c) = either (pure . Left) c =<< liftIO (runFFI s sm)
     intOp (I.ExtOpIO op c) =
       either (pure . Left . I.InterpreterError) c
-        =<< liftIO (I.doIOOp (maybe id I.ioRelativeTo dir op))
+        =<< liftIO (I.doIOOp s (maybe id I.ioRelativeTo dir op))

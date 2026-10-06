@@ -384,8 +384,9 @@ runInterpreter m = runF m (pure . Right) intOp
     intOp (I.ExtOpFFI sm c) = do
       server <- gets futharkiServer
       either (pure . Left) c =<< liftIO (runFFI server sm)
-    intOp (I.ExtOpIO op c) =
-      either (pure . Left . I.InterpreterError) c =<< liftIO (I.doIOOp op)
+    intOp (I.ExtOpIO op c) = do
+      server <- gets futharkiServer
+      either (pure . Left . I.InterpreterError) c =<< liftIO (I.doIOOp server op)
 
 replComplete :: Haskeline.CompletionFunc IO
 replComplete = loadComplete

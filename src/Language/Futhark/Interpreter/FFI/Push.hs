@@ -24,8 +24,16 @@ toArray vs = A.listArray (0, length vs - 1) vs
 
 get :: I.ValueShape -> ValueRef -> ServerM (I.Value m)
 get I.ShapeLeaf vr = I.ValuePrim <$> getPrim vr
-get rshp@(I.ShapeDim {}) vr = getArray rshp
+get rshp@(I.ShapeDim {}) vr
+  | primArray rshp =
+      -- Retrieving the array in one go is much faster than element by
+      -- element.
+      maybe (getArray rshp) (pure . I.fromDataValue) =<< getData vr
+  | otherwise = getArray rshp
   where
+    primArray (I.ShapeDim _ shp) = primArray shp
+    primArray I.ShapeLeaf = True
+    primArray _ = False
     getArray :: I.ValueShape -> ServerM (I.Value m)
     getArray shp = getArray' shp []
     getArray' :: I.ValueShape -> [Int64] -> ServerM (I.Value m)

@@ -35,6 +35,7 @@ import Language.Futhark
     prettyString,
     toStruct,
   )
+import Language.Futhark.Interpreter.FFI.ServerM qualified as FFI
 import Language.Futhark.Interpreter.Values
 import System.Exit
 import System.FilePath
@@ -206,26 +207,36 @@ ioRelativeTo dir (LoadImg f) = LoadImg $ dir </> f
 ioRelativeTo dir (LoadAudio f) = LoadAudio $ dir </> f
 ioRelativeTo dir (LoadValue t f) = LoadValue t $ dir </> f
 
--- | Run an IO operation.
-doIOOp :: IOOp -> IO (Either T.Text (Value m))
-doIOOp (LoadBytes fname) =
-  tryIO $ fromDataValue . V.putValue1 <$> BS.readFile fname
-doIOOp (LoadImg fname) =
-  tryIO $ fromDataValue <$> loadImage fname
-doIOOp (LoadAudio fname) =
-  tryIO $ fromDataValue <$> loadAudio fname
-doIOOp (LoadValue ts fname) =
-  tryIO $ fmap (asValue . map fromDataValue) $ do
-    vs <- loadValues fname
-    let vs_ts = map V.valueType vs
-    when (vs_ts /= ts) . fail $
-      "Expected file \""
-        <> fname
-        <> "\" to contain data of types "
-        <> unwords (map prettyString ts)
-        <> " but found data of types "
-        <> unwords (map prettyString vs_ts)
-    pure vs
+-- | Turn a loaded value into an interpreter value. Arrays are put on the server,
+-- if there is one, as they are very expensive to represent in the interpreter,
+-- and are often just passed on to entry points.
+fromData :: Maybe FFI.Server -> V.Value -> IO (Value m)
+fromData (Just s) v
+  | dims@(_ : _) <- V.valueShape v = do
+      let shape = foldr (ShapeDim . fromIntegral) ShapeLeaf dims
+      either fail (\ref -> pure $ ValueLazyFFI shape ref [])
+        =<< FFI.runServerM s (FFI.putData v)
+fromData _ v = pure $ fromDataValue v
+
+-- | Run an IO operation. Arrays are put on the server, if one is given.
+doIOOp :: Maybe FFI.Server -> IOOp -> IO (Either T.Text (Value m))
+doIOOp s (LoadBytes fname) =
+  tryIO $ fromData s . V.putValue1 =<< BS.readFile fname
+doIOOp s (LoadImg fname) =
+  tryIO $ fromData s =<< loadImage fname
+doIOOp s (LoadAudio fname) =
+  tryIO $ fromData s =<< loadAudio fname
+doIOOp s (LoadValue ts fname) = tryIO $ do
+  vs <- loadValues fname
+  let vs_ts = map V.valueType vs
+  when (vs_ts /= ts) . fail $
+    "Expected file \""
+      <> fname
+      <> "\" to contain data of types "
+      <> unwords (map prettyString ts)
+      <> " but found data of types "
+      <> unwords (map prettyString vs_ts)
+  asValue <$> mapM (fromData s) vs
   where
     asValue [v] = v
     asValue vs = toTuple vs
