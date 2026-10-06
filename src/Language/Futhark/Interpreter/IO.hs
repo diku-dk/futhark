@@ -3,6 +3,7 @@ module Language.Futhark.Interpreter.IO
   ( IOOp (..),
     determineIO,
     doIOOp,
+    ioRelativeTo,
   )
 where
 
@@ -94,7 +95,7 @@ loadResType t =
 determineIO :: (Monad m) => T.Text -> Maybe (m ValueType -> Value m -> m IOOp)
 determineIO "io_loadbytes" = load $ const $ pure . LoadBytes
 determineIO "io_loadimg" = load $ const $ pure . LoadImg
-determineIO "io_loadaudio" = load $ const $ pure . LoadBytes
+determineIO "io_loadaudio" = load $ const $ pure . LoadAudio
 determineIO "io_loadvalue" = load $ \t fname -> do
   t' <- t
   pure $ LoadValue (loadResType t') fname
@@ -196,6 +197,14 @@ loadValues datafile = do
   contents <- liftIO $ LBS.readFile datafile
   maybe (fail $ "Failed to read data file: " <> datafile) pure $
     V.readValues contents
+
+-- | Resolve relative file paths in the operation relative to the given
+-- directory, rather than the current working directory.
+ioRelativeTo :: FilePath -> IOOp -> IOOp
+ioRelativeTo dir (LoadBytes f) = LoadBytes $ dir </> f
+ioRelativeTo dir (LoadImg f) = LoadImg $ dir </> f
+ioRelativeTo dir (LoadAudio f) = LoadAudio $ dir </> f
+ioRelativeTo dir (LoadValue t f) = LoadValue t $ dir </> f
 
 -- | Run an IO operation.
 doIOOp :: IOOp -> IO (Either T.Text (Value m))
