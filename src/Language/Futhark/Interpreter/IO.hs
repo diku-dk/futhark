@@ -13,6 +13,7 @@ import Control.Monad.IO.Class
 import Data.Bits
 import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as LBS
+import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
 import Data.Text.Read qualified as T
@@ -29,6 +30,7 @@ import Language.Futhark
     Shape (..),
     TypeBase (..),
     ValueType,
+    isTupleRecord,
     prettyString,
     toStruct,
   )
@@ -43,7 +45,8 @@ data IOOp
   = LoadBytes FilePath
   | LoadImg FilePath
   | LoadAudio FilePath
-  | LoadValue V.ValueType FilePath
+  | -- | One value of each type. More than one value is represented as a tuple.
+    LoadValue [V.ValueType] FilePath
 
 load ::
   (m ValueType -> FilePath -> m IOOp) ->
@@ -66,18 +69,20 @@ primTypeToValueType (FloatType Float32) = V.F32
 primTypeToValueType (FloatType Float64) = V.F64
 primTypeToValueType Bool = V.Bool
 
--- This is a general function and could live somewhere else. I'm actually a
--- little surprised I could not find it anywhere.
-typeToValueType :: ValueType -> Maybe V.ValueType
-typeToValueType (Scalar (Prim pt)) =
-  Just $ V.ValueType [] $ primTypeToValueType pt
-typeToValueType (Array _ (Shape ds) (Prim pt)) =
-  Just $ V.ValueType (map fromIntegral ds) $ primTypeToValueType pt
-typeToValueType _ = Nothing
+-- | The types of the values in a data file that can be loaded as a value of
+-- this type. A tuple corresponds to one value per element.
+typeToValueTypes :: ValueType -> Maybe [V.ValueType]
+typeToValueTypes t = mapM onValue $ fromMaybe [t] $ isTupleRecord t
+  where
+    onValue (Scalar (Prim pt)) =
+      Just $ V.ValueType [] $ primTypeToValueType pt
+    onValue (Array _ (Shape ds) (Prim pt)) =
+      Just $ V.ValueType (map fromIntegral ds) $ primTypeToValueType pt
+    onValue _ = Nothing
 
-loadResType :: ValueType -> V.ValueType
+loadResType :: ValueType -> [V.ValueType]
 loadResType (Scalar (Arrow _ _ _ _ (RetType _ rt)))
-  | Just rt' <- typeToValueType $ toStruct rt =
+  | Just rt' <- typeToValueTypes $ toStruct rt =
       rt'
 loadResType t =
   error $ "loadResType: invalid type " <> prettyString t
@@ -186,17 +191,11 @@ tryIO =
     (pure . Right)
     <=< liftIO . try
 
-loadValue :: FilePath -> IO V.Value
-loadValue datafile = do
+loadValues :: FilePath -> IO [V.Value]
+loadValues datafile = do
   contents <- liftIO $ LBS.readFile datafile
-  let maybe_vs = V.readValues contents
-  case maybe_vs of
-    Nothing ->
-      fail $ "Failed to read data file: " <> datafile
-    Just [v] ->
-      pure v
-    Just _vs ->
-      fail $ "Too many values in data file: " <> datafile
+  maybe (fail $ "Failed to read data file: " <> datafile) pure $
+    V.readValues contents
 
 -- | Run an IO operation.
 doIOOp :: IOOp -> IO (Either T.Text (Value m))
@@ -206,16 +205,19 @@ doIOOp (LoadImg fname) =
   tryIO $ fromDataValue <$> loadImage fname
 doIOOp (LoadAudio fname) =
   tryIO $ fromDataValue <$> loadAudio fname
-doIOOp (LoadValue t fname) =
-  tryIO $ fmap fromDataValue $ do
-    v <- loadValue fname
-    let v_t = V.valueType v
-    when (v_t /= t) . fail $
+doIOOp (LoadValue ts fname) =
+  tryIO $ fmap (asValue . map fromDataValue) $ do
+    vs <- loadValues fname
+    let vs_ts = map V.valueType vs
+    when (vs_ts /= ts) . fail $
       "Expected file \""
         <> fname
-        <> "\" to contain data of type "
-        <> prettyString t
-        <> " but found data of type "
-        <> prettyString v_t
-    pure v
+        <> "\" to contain data of types "
+        <> unwords (map prettyString ts)
+        <> " but found data of types "
+        <> unwords (map prettyString vs_ts)
+    pure vs
+  where
+    asValue [v] = v
+    asValue vs = toTuple vs
 {-# NOINLINE doIOOp #-}

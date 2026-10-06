@@ -60,7 +60,8 @@ module io
       val loadaudio [k] : [k]u8 -> ?[n][m].*[n][m]f64
 
       -- | Load a Futhark value of known type (including size!) from the given
-      -- file.
+      -- file. If the type is a tuple, the file must contain one value for
+      -- each element.
       val loadvalue 'a [k] : [k]u8 -> *a
     } = {
   def loadbytes = intrinsics.io_loadbytes
