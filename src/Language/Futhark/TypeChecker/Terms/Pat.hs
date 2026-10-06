@@ -224,7 +224,7 @@ bindingParam p t m = do
 -- | Check and bind a @let@-pattern.
 bindingPat ::
   [SizeBinder VName] ->
-  Pat (TypeBase Size u) ->
+  Pat (TypeBase Size o) ->
   StructType ->
   (Pat ParamType -> TermTypeM a) ->
   TermTypeM a

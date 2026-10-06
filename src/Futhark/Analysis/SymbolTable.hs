@@ -57,10 +57,10 @@ where
 
 import Control.Arrow ((&&&))
 import Control.Monad
+import Data.IntMap.Strict qualified as IM
 import Data.List (elemIndex)
 import Data.Map.Strict qualified as M
 import Data.Maybe
-import Data.Ord
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR hiding (FParam, lookupType)
 import Futhark.IR qualified as AST
@@ -69,7 +69,8 @@ import Prelude hiding (elem, lookup)
 
 data SymbolTable rep = SymbolTable
   { loopDepth :: Int,
-    bindings :: M.Map VName (Entry rep),
+    -- | Keyed by 'baseTag'; see Note [Symbol table indexing].
+    bindings :: IM.IntMap (Entry rep),
     -- | Which names are available just before the most enclosing
     -- loop?
     availableAtClosestLoop :: Names,
@@ -80,7 +81,7 @@ data SymbolTable rep = SymbolTable
   }
 
 empty :: SymbolTable rep
-empty = SymbolTable 0 M.empty mempty False
+empty = SymbolTable 0 IM.empty mempty False
 
 -- | Construct a symbol table from a scope. All names in the scope are
 -- considered as free variables. Equivalent to 'insertScope' on 'empty'.
@@ -89,13 +90,14 @@ fromScope scope = insertScope scope empty
 
 -- | Construct a Scope from a symbol table.
 toScope :: SymbolTable rep -> Scope rep
-toScope = M.map entryInfo . bindings
+toScope =
+  M.fromDistinctAscList . map (entryName &&& entryInfo) . IM.elems . bindings
 
 deepen :: SymbolTable rep -> SymbolTable rep
 deepen vtable =
   vtable
     { loopDepth = loopDepth vtable + 1,
-      availableAtClosestLoop = namesFromList $ M.keys $ bindings vtable
+      availableAtClosestLoop = namesFromList $ map entryName $ IM.elems $ bindings vtable
     }
 
 -- | The result of indexing a delayed array.
@@ -119,7 +121,10 @@ instance FreeIn Indexed where
 type IndexArray = [TPrimExp Int64 VName] -> Maybe Indexed
 
 data Entry rep = Entry
-  { -- | True if consumed.
+  { -- | The name this entry is for.  Also the key (via 'baseTag') under
+    -- which it is stored.
+    entryName :: VName,
+    -- | True if consumed.
     entryConsumed :: Bool,
     entryDepth :: Int,
     -- | True if this name has been used as an array size,
@@ -216,7 +221,7 @@ elem :: VName -> SymbolTable rep -> Bool
 elem name = isJust . lookup name
 
 lookup :: VName -> SymbolTable rep -> Maybe (Entry rep)
-lookup name = M.lookup name . bindings
+lookup name = IM.lookup (baseTag name) . bindings
 
 lookupStm :: VName -> SymbolTable rep -> Maybe (Stm rep)
 lookupStm name vtable = entryStm =<< lookup name vtable
@@ -240,20 +245,20 @@ lookupSubExpType (Constant v) = const $ Just $ Prim $ primValueType v
 
 lookupSubExp :: VName -> SymbolTable rep -> Maybe (SubExp, Certs)
 lookupSubExp name vtable = do
-  (e, cs) <- lookupExp name vtable
-  case e of
-    BasicOp (SubExp se) -> Just (se, cs)
+  stm <- lookupStm name vtable
+  case stmExp stm of
+    BasicOp (SubExp se) -> Just (se, stmCerts stm)
     _ -> Nothing
 
 lookupAliases :: VName -> SymbolTable rep -> Names
 lookupAliases name vtable =
-  maybe mempty (entryAliases . entryType) $ M.lookup name (bindings vtable)
+  maybe mempty (entryAliases . entryType) $ IM.lookup (baseTag name) (bindings vtable)
 
 -- | If the given variable name is the name of a 'ForLoop' parameter,
 -- then return the bound of that loop.
 lookupLoopVar :: VName -> SymbolTable rep -> Maybe SubExp
 lookupLoopVar name vtable = do
-  LoopVar e <- entryType <$> M.lookup name (bindings vtable)
+  LoopVar e <- entryType <$> IM.lookup (baseTag name) (bindings vtable)
   pure $ loopVarBound e
 
 -- | Look up the initial value and eventual result of a loop
@@ -261,7 +266,7 @@ lookupLoopVar name vtable = do
 -- something that is not part of the symbol table.
 lookupLoopParam :: VName -> SymbolTable rep -> Maybe (SubExp, SubExp)
 lookupLoopParam name vtable = do
-  FParam e <- entryType <$> M.lookup name (bindings vtable)
+  FParam e <- entryType <$> IM.lookup (baseTag name) (bindings vtable)
   fparamMerge e
 
 -- | Do these two names alias each other?  This is expected to be a
@@ -272,7 +277,7 @@ aliases x y vtable = x == y || (x `nameIn` lookupAliases y vtable)
 
 -- | In symbol table and not consumed.
 available :: VName -> SymbolTable rep -> Bool
-available name = maybe False (not . entryConsumed) . M.lookup name . bindings
+available name = maybe False (not . entryConsumed) . IM.lookup (baseTag name) . bindings
 
 -- | Constant or 'available'
 subExpAvailable :: SubExp -> SymbolTable rep -> Bool
@@ -353,14 +358,12 @@ indexExp table (BasicOp (Replicate s (Var v))) _ is = do
   guard $ v `available` table
   Just $ indexNext v (drop (shapeRank s) is) table
 indexExp table (BasicOp (Reshape v newshape)) _ is
-  | Just oldshape <- arrayDims <$> lookupType v table =
-      -- TODO: handle coercions more efficiently.
-      let is' =
-            reshapeIndex
-              (map pe64 oldshape)
-              (map pe64 $ shapeDims $ newShape newshape)
-              is
-       in Just $ indexNext v is' table
+  | Just oldshape <- arrayShape <$> lookupType v table,
+    -- Map the indices to the old index space, one splice at a time.
+    Just is' <-
+      mapM dimFix
+        =<< unreshapeSlice (pe64 <$> oldshape) (pe64 <$> newshape) (map DimFix is) =
+      Just $ indexNext v is' table
 indexExp table (BasicOp (Rearrange v perm)) _ is =
   Just $ indexNext v (rearrangeShape (rearrangeInverse perm) is) table
 indexExp table (BasicOp (Index v slice)) _ is = do
@@ -402,8 +405,8 @@ bindingEntries stm@(Let pat _ _) vtable = do
   pat_elem <- patElems pat
   pure $ defBndEntry vtable pat_elem (expandAliases (Aliases.aliasesOf pat_elem) vtable) stm
 
-adjustSeveral :: (Ord k) => (v -> v) -> [k] -> M.Map k v -> M.Map k v
-adjustSeveral f = flip $ foldl' $ flip $ M.adjust f
+adjustSeveral :: (v -> v) -> [VName] -> IM.IntMap v -> IM.IntMap v
+adjustSeveral f = flip $ foldl' $ \m -> flip (IM.adjust f) m . baseTag
 
 insertEntry ::
   (ASTRep rep) =>
@@ -414,7 +417,8 @@ insertEntry ::
 insertEntry name entry vtable =
   let entry' =
         Entry
-          { entryConsumed = False,
+          { entryName = name,
+            entryConsumed = False,
             entryDepth = loopDepth vtable,
             entryIsSize = False,
             entryAccInput = Nothing,
@@ -425,7 +429,7 @@ insertEntry name entry vtable =
    in vtable
         { bindings =
             adjustSeveral isSize dims $
-              M.insert name entry' $
+              IM.insert (baseTag name) entry' $
                 bindings vtable
         }
 
@@ -584,12 +588,12 @@ consume consumee vtable =
       expandAliases (oneName consumee) vtable
   where
     consume' vtable' v =
-      vtable' {bindings = M.adjust consume'' v $ bindings vtable'}
+      vtable' {bindings = IM.adjust consume'' (baseTag v) $ bindings vtable'}
     consume'' e = e {entryConsumed = True}
 
 -- | Hide definitions of those entries that satisfy some predicate.
 hideIf :: (Entry rep -> Bool) -> SymbolTable rep -> SymbolTable rep
-hideIf hide vtable = vtable {bindings = M.map maybeHide $ bindings vtable}
+hideIf hide vtable = vtable {bindings = IM.map maybeHide $ bindings vtable}
   where
     maybeHide entry
       | hide entry =
@@ -621,10 +625,24 @@ noteAccTokens ::
 noteAccTokens = flip (foldl' f)
   where
     f vtable (v, accum) =
-      case M.lookup v $ bindings vtable of
+      case IM.lookup (baseTag v) $ bindings vtable of
         Nothing -> vtable
         Just e ->
           vtable
             { bindings =
-                M.insert v (e {entryAccInput = Just accum}) $ bindings vtable
+                IM.insert (baseTag v) (e {entryAccInput = Just accum}) $ bindings vtable
             }
+
+-- Note [Symbol table indexing]
+--
+-- The bindings are indexed by 'baseTag' in an 'IM.IntMap' rather than by
+-- 'VName' in an 'M.Map', because looking up entries here is extremely frequent
+-- in the simplifier, and this saves a pointer lookup.
+--
+-- The price is that the keys no longer carry the names, so 'Entry' records its
+-- own 'entryName', and 'toScope' has to rebuild a 'Scope' in linear time rather
+-- than mapping lazily over the bindings. That is a good trade only because
+-- 'toScope' is essentially never forced: the simplifier's 'HasScope' instance
+-- answers 'lookupType' from the symbol table directly, and the 'Scope' handed
+-- to a simplification rule is examined only by the rare rule that asks for the
+-- whole scope.

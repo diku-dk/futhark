@@ -250,8 +250,8 @@ instance ASTMappable (TypeExp (ExpBase Info VName) VName) where
     TERecord <$> traverse (traverse $ astMap tv) ts <*> pure loc
   astMap tv (TEArray te dim loc) =
     TEArray <$> astMap tv te <*> astMap tv dim <*> pure loc
-  astMap tv (TEUnique t loc) =
-    TEUnique <$> astMap tv t <*> pure loc
+  astMap tv (TEStar t loc) =
+    TEStar <$> astMap tv t <*> pure loc
   astMap tv (TEApply t1 t2 loc) =
     TEApply <$> astMap tv t1 <*> astMap tv t2 <*> pure loc
   astMap tv (TEArrow v t1 t2 loc) =
@@ -295,11 +295,11 @@ traverseScalarType _ _ _ (Prim t) = pure $ Prim t
 traverseScalarType f g h (Record fs) = Record <$> traverse (traverseType f g h) fs
 traverseScalarType f g h (TypeVar als t args) =
   TypeVar <$> h als <*> f t <*> traverse (traverseTypeArg f g) args
-traverseScalarType f g h (Arrow als v u t1 (RetType dims t2)) =
+traverseScalarType f g h (Arrow als v o t1 (RetType dims t2)) =
   Arrow
     <$> h als
     <*> pure v
-    <*> pure u
+    <*> pure o
     <*> traverseType f g pure t1
     <*> (RetType dims <$> traverseType f g pure t2)
 traverseScalarType f g h (Sum cs) =
@@ -328,7 +328,7 @@ instance ASTMappable StructType where
 instance ASTMappable ParamType where
   astMap tv = traverseType (mapOnName tv) (mapOnExp tv) pure
 
-instance ASTMappable (TypeBase Size Uniqueness) where
+instance ASTMappable (TypeBase Size Freshness) where
   astMap tv = traverseType (mapOnName tv) (mapOnExp tv) pure
 
 instance ASTMappable ResRetType where
@@ -453,7 +453,7 @@ bareTypeExp (TEParens te loc) = TEParens (bareTypeExp te) loc
 bareTypeExp (TETuple tys loc) = TETuple (map bareTypeExp tys) loc
 bareTypeExp (TERecord fs loc) = TERecord (map (second bareTypeExp) fs) loc
 bareTypeExp (TEArray size ty loc) = TEArray (bareSizeExp size) (bareTypeExp ty) loc
-bareTypeExp (TEUnique ty loc) = TEUnique (bareTypeExp ty) loc
+bareTypeExp (TEStar ty loc) = TEStar (bareTypeExp ty) loc
 bareTypeExp (TEApply ty ta loc) = TEApply (bareTypeExp ty) (bareTypeArgExp ta) loc
   where
     bareTypeArgExp (TypeArgExpSize size) =

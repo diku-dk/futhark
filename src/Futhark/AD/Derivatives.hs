@@ -77,7 +77,7 @@ pdBinOp (SDiv it _) a b =
   intBinOp derivs derivs derivs derivs it a b
   where
     derivs x y = (1 `quot` y, negate (x `quot` (y * y)))
-pdBinOp (SDivUp it _) a b =
+pdBinOp (SCeilDiv it _) a b =
   intBinOp derivs derivs derivs derivs it a b
   where
     derivs x y = (1 `quot` y, negate (x `quot` (y * y)))
@@ -89,7 +89,7 @@ pdBinOp (UDiv it _) a b =
   intBinOp derivs derivs derivs derivs it a b
   where
     derivs x y = (1 `quot` y, negate (x `quot` (y * y)))
-pdBinOp (UDivUp it _) a b =
+pdBinOp (UCeilDiv it _) a b =
   intBinOp derivs derivs derivs derivs it a b
   where
     derivs x y = (1 `quot` y, negate (x `quot` (y * y)))

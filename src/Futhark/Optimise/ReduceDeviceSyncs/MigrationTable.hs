@@ -295,7 +295,7 @@ analyseStms hof usage stms =
 isScalar :: (Typed t) => t -> Bool
 isScalar = isScalarType . typeOf
 
-isScalarType :: TypeBase shape u -> Bool
+isScalarType :: TypeBase shape o -> Bool
 isScalarType (Prim Unit) = False
 isScalarType (Prim _) = True
 isScalarType _ = False
@@ -303,7 +303,7 @@ isScalarType _ = False
 isArray :: (Typed t) => t -> Bool
 isArray = isArrayType . typeOf
 
-isArrayType :: (ArrayShape shape) => TypeBase shape u -> Bool
+isArrayType :: (ArrayShape shape) => TypeBase shape o -> Bool
 isArrayType = (0 <) . arrayRank
 
 --------------------------------------------------------------------------------

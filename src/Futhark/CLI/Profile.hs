@@ -3,17 +3,18 @@ module Futhark.CLI.Profile (main) where
 
 import Control.Arrow ((&&&), (>>>))
 import Control.Exception (catch)
-import Control.Monad (forM_, when)
+import Control.Monad (forM_)
 import Control.Monad.Except (ExceptT, liftEither, runExcept, runExceptT)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Except (Except)
 import Data.Bifunctor (first, second)
 import Data.ByteString.Lazy.Char8 qualified as BS
+import Data.Char (isAlphaNum, isAscii, ord)
 import Data.Foldable (toList)
 import Data.Function ((&))
 import Data.List qualified as L
 import Data.Map qualified as M
-import Data.Maybe (isJust)
+import Data.Maybe (catMaybes, isJust)
 import Data.Monoid (Sum (..))
 import Data.Sequence qualified as Seq
 import Data.Set qualified as S
@@ -54,6 +55,7 @@ import System.FilePath
 import System.IO (hPutStrLn, stderr)
 import Text.Blaze.Html.Renderer.Text qualified as H
 import Text.Blaze.Html5 qualified as H
+import Text.Blaze.Html5.Attributes qualified as A
 import Text.Printf (printf)
 
 commonPrefix :: (Eq e) => [e] -> [e] -> [e]
@@ -411,9 +413,13 @@ analyseBenchResults :: FilePath -> [BenchResult] -> IO ()
 analyseBenchResults json_path bench_results = do
   top_dir <- prepareDir json_path
   T.hPutStrLn stderr $ "Stripping '" <> T.pack prefix <> "' from program paths."
-  mapM_ (onBenchResult top_dir) bench_results
+  programs <- mapM (onBenchResult top_dir) bench_results
+  writeNavigationIndex (top_dir </> "index.html") "Program Index" programs
   where
-    prefix = longestCommonPrefix $ map benchResultProg bench_results
+    programPaths = map (takeWhile (/= ':') . benchResultProg) bench_results
+    prefix = case S.toList $ S.fromList programPaths of
+      [path] -> path
+      paths -> takeDirectory $ longestCommonPrefix paths
 
     -- Eliminate characters that are filesystem-meaningful.
     escape '/' = '_'
@@ -424,13 +430,26 @@ analyseBenchResults json_path bench_results = do
 
     onBenchResult top_dir (BenchResult prog_path data_results) = do
       let (prog_path', entry) = span (/= ':') prog_path
-          prog_name = drop (length prefix) prog_path'
-          prog_dir = top_dir </> dropExtension prog_name </> drop 1 entry
+          prog_name = makeRelative prefix prog_path'
+          relative_dir = dropExtension prog_name </> drop 1 entry
+          -- Preserve the established <entry>/<dataset>-index.html layout for
+          -- one source file. A file without an entry point still needs its
+          -- own directory so it does not collide with the top-level index.
+          prog_dir =
+            top_dir
+              </> if null relative_dir || relative_dir == "."
+                then "program"
+                else relative_dir
       createDirectoryIfMissing True prog_dir
-      mapM_ (onDataResult prog_dir (T.pack prog_name)) data_results
+      datasets <-
+        catMaybes <$> mapM (onDataResult prog_dir (T.pack prog_name)) data_results
+      let index = prog_dir </> "index.html"
+      writeNavigationIndex index (T.pack prog_path) datasets
+      pure (T.pack prog_path, makeRelative top_dir index)
 
-    onDataResult _ prog_name (DataResult name (Left _)) =
+    onDataResult _ prog_name (DataResult name (Left _)) = do
       problem prog_name name "execution failed"
+      pure Nothing
     onDataResult prog_dir prog_name (DataResult name (Right res)) = do
       let name' = prog_dir </> T.unpack (T.map escape name)
       case stdErr res of
@@ -446,8 +465,31 @@ analyseBenchResults json_path bench_results = do
                 htmlIndexFile = name' <> "-index.html",
                 htmlDir = name' <> ".html/"
               }
-      when (isJust (stdErr res) || isJust (report res)) $
-        writeAnalysis tf (stdErr res) (report res)
+      if isJust (stdErr res) || isJust (report res)
+        then do
+          writeAnalysis tf (stdErr res) (report res)
+          pure $ Just (name, makeRelative prog_dir $ htmlIndexFile tf)
+        else pure Nothing
+
+-- | Write an index of generated reports, with paths relative to the index.
+writeNavigationIndex :: FilePath -> T.Text -> [(T.Text, FilePath)] -> IO ()
+writeNavigationIndex path title links =
+  writeLazyTextFile path $ H.renderHtml $ H.docTypeHtml $ do
+    H.head $ do
+      H.meta H.! A.charset "utf-8"
+      H.title $ H.text title
+      H.style $ H.text cssFile
+    H.body $ do
+      H.h2 $ H.text title
+      H.ul $ forM_ links $ \(label, target) ->
+        H.li $ H.a H.! A.href (H.toValue $ escapePath target) $ H.text label
+  where
+    -- Percent-encode UTF-8 bytes, retaining separators and URI-unreserved bytes.
+    escapePath =
+      concatMap escapeByte . BS.unpack . BS.fromStrict . T.encodeUtf8 . T.pack
+    escapeByte c
+      | isAscii c && (isAlphaNum c || c `elem` ['-', '.', '/', '_', '~']) = [c]
+      | otherwise = printf "%%%02X" (ord c)
 
 readFileSafely :: FilePath -> IO (Either String BS.ByteString)
 readFileSafely filepath =

@@ -61,7 +61,7 @@ def sdivN(x, y):
         return x // y
 
 
-def sdiv_upN(x, y):
+def sceil_divN(x, y):
     if y == 0:
         return intlit(type(x), 0)
     else:
@@ -82,7 +82,7 @@ def udivN(x, y):
         return signed(unsigned(x) // unsigned(y))
 
 
-def udiv_upN(x, y):
+def uceil_divN(x, y):
     if y == 0:
         return intlit(type(x), 0)
     else:
@@ -294,15 +294,19 @@ def zext_i64_i64(x):
 
 
 sdiv8 = sdiv16 = sdiv32 = sdiv64 = sdivN
-sdiv_up8 = sdiv1_up6 = sdiv_up32 = sdiv_up64 = sdiv_upN
+sceil_div8 = sdiv1_up6 = sceil_div32 = sceil_div64 = sceil_divN
 sdiv_safe8 = sdiv1_safe6 = sdiv_safe32 = sdiv_safe64 = sdivN
-sdiv_up_safe8 = sdiv_up1_safe6 = sdiv_up_safe32 = sdiv_up_safe64 = sdiv_upN
+sceil_div_safe8 = sceil_div1_safe6 = sceil_div_safe32 = sceil_div_safe64 = (
+    sceil_divN
+)
 smod8 = smod16 = smod32 = smod64 = smodN
 smod_safe8 = smod_safe16 = smod_safe32 = smod_safe64 = smodN
 udiv8 = udiv16 = udiv32 = udiv64 = udivN
-udiv_up8 = udiv_up16 = udiv_up32 = udiv_up64 = udivN
-udiv_safe8 = udiv_safe16 = udiv_safe32 = udiv_safe64 = udiv_upN
-udiv_up_safe8 = udiv_up_safe16 = udiv_up_safe32 = udiv_up_safe64 = udiv_upN
+uceil_div8 = uceil_div16 = uceil_div32 = uceil_div64 = udivN
+udiv_safe8 = udiv_safe16 = udiv_safe32 = udiv_safe64 = uceil_divN
+uceil_div_safe8 = uceil_div_safe16 = uceil_div_safe32 = uceil_div_safe64 = (
+    uceil_divN
+)
 umod8 = umod16 = umod32 = umod64 = umodN
 umod_safe8 = umod_safe16 = umod_safe32 = umod_safe64 = umodN
 squot8 = squot16 = squot32 = squot64 = squotN
@@ -407,7 +411,7 @@ uitofp_i8_f64 = uitofp_i16_f64 = uitofp_i32_f64 = uitofp_i64_f64 = uitofp_T_f64
 
 
 def fptosi_T_i8(x):
-    if np.isnan(x) or np.isinf(x):
+    if np.isnan(x) or x < -(1 << 7) or x >= (1 << 7):
         return np.int8(0)
     else:
         return np.int8(np.trunc(x))
@@ -417,7 +421,7 @@ fptosi_f16_i8 = fptosi_f32_i8 = fptosi_f64_i8 = fptosi_T_i8
 
 
 def fptosi_T_i16(x):
-    if np.isnan(x) or np.isinf(x):
+    if np.isnan(x) or x < -(1 << 15) or x >= (1 << 15):
         return np.int16(0)
     else:
         return np.int16(np.trunc(x))
@@ -427,7 +431,7 @@ fptosi_f16_i16 = fptosi_f32_i16 = fptosi_f64_i16 = fptosi_T_i16
 
 
 def fptosi_T_i32(x):
-    if np.isnan(x) or np.isinf(x):
+    if np.isnan(x) or x < -(1 << 31) or x >= (1 << 31):
         return np.int32(0)
     else:
         return np.int32(np.trunc(x))
@@ -437,7 +441,7 @@ fptosi_f16_i32 = fptosi_f32_i32 = fptosi_f64_i32 = fptosi_T_i32
 
 
 def fptosi_T_i64(x):
-    if np.isnan(x) or np.isinf(x):
+    if np.isnan(x) or x < -(1 << 63) or x >= (1 << 63):
         return np.int64(0)
     else:
         return np.int64(np.trunc(x))
@@ -447,7 +451,7 @@ fptosi_f16_i64 = fptosi_f32_i64 = fptosi_f64_i64 = fptosi_T_i64
 
 
 def fptoui_T_i8(x):
-    if np.isnan(x) or np.isinf(x):
+    if np.isnan(x) or x < 0 or x >= (1 << 8):
         return np.int8(0)
     else:
         return np.int8(np.trunc(x))
@@ -457,7 +461,7 @@ fptoui_f16_i8 = fptoui_f32_i8 = fptoui_f64_i8 = fptoui_T_i8
 
 
 def fptoui_T_i16(x):
-    if np.isnan(x) or np.isinf(x):
+    if np.isnan(x) or x < 0 or x >= (1 << 16):
         return np.int16(0)
     else:
         return np.int16(np.trunc(x))
@@ -467,7 +471,7 @@ fptoui_f16_i16 = fptoui_f32_i16 = fptoui_f64_i16 = fptoui_T_i16
 
 
 def fptoui_T_i32(x):
-    if np.isnan(x) or np.isinf(x):
+    if np.isnan(x) or x < 0 or x >= (1 << 32):
         return np.int32(0)
     else:
         return np.int32(np.trunc(x))
@@ -477,7 +481,7 @@ fptoui_f16_i32 = fptoui_f32_i32 = fptoui_f64_i32 = fptoui_T_i32
 
 
 def fptoui_T_i64(x):
-    if np.isnan(x) or np.isinf(x):
+    if np.isnan(x) or x < 0 or x >= (1 << 64):
         return np.int64(0)
     else:
         return np.int64(np.trunc(x))

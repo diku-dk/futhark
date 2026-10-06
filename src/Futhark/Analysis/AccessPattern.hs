@@ -298,28 +298,34 @@ analyseStms ctx body_constructor pats body = do
         }
 
     -- Recursively looks up dependencies, until they're in scope or empty set.
+    -- The set of already-expanded names is threaded through; see Note
+    -- [Expanding dependencies only once].
     rmOutOfScopeDeps :: Context rep -> M.Map VName (VariableInfo rep) -> Names
-    rmOutOfScopeDeps ctx' new_assignments =
-      let throwaway_assignments = assignments ctx'
-          local_assignments = assignments ctx
-          f result a var_info =
-            -- if the VName of the assignment exists in the context, we are good
-            if a `M.member` local_assignments
-              then result <> oneName a
-              else -- Otherwise, recurse on its dependencies;
-              -- 0. Add dependencies in ctx to result
-                let (deps_in_ctx, deps_not_in_ctx) =
-                      L.partition (`M.member` local_assignments) $
-                        namesToList (deps var_info)
-                    deps_not_in_ctx' =
-                      M.fromList $
-                        mapMaybe
-                          (\d -> (d,) <$> M.lookup d throwaway_assignments)
-                          deps_not_in_ctx
-                 in result
-                      <> namesFromList deps_in_ctx
-                      <> rmOutOfScopeDeps ctx' deps_not_in_ctx'
-       in M.foldlWithKey f mempty new_assignments
+    rmOutOfScopeDeps ctx' = snd . expand mempty
+      where
+        throwaway_assignments = assignments ctx'
+        local_assignments = assignments ctx
+
+        expand seen = M.foldlWithKey f (seen, mempty)
+
+        f (seen, result) a var_info
+          | a `nameIn` seen = (seen, result)
+          -- if the VName of the assignment exists in the context, we are good
+          | a `M.member` local_assignments =
+              (seen <> oneName a, result <> oneName a)
+          -- Otherwise, recurse on its dependencies, adding the ones already in
+          -- ctx to the result.
+          | otherwise =
+              let (deps_in_ctx, deps_not_in_ctx) =
+                    L.partition (`M.member` local_assignments) $
+                      namesToList (deps var_info)
+                  deps_not_in_ctx' =
+                    M.fromList $
+                      mapMaybe
+                        (\d -> (d,) <$> M.lookup d throwaway_assignments)
+                        deps_not_in_ctx
+                  (seen', sub) = expand (seen <> oneName a) deps_not_in_ctx'
+               in (seen', result <> namesFromList deps_in_ctx <> sub)
 
 -- | Analyse a rep statement and return the updated context and array index
 -- descriptors.
@@ -723,3 +729,17 @@ instance Pretty VarType where
   pretty Variable = "var"
   pretty ThreadID = "tid"
   pretty LoopVar = "iter"
+
+-- Note [Expanding dependencies only once]
+--
+-- 'rmOutOfScopeDeps' replaces each out-of-scope name by the in-scope names it
+-- transitively depends on. The dependency graph is shared, so a name reachable
+-- along several paths would, without memoisation, be expanded once per path, so
+-- the work is exponential in the depth of the graph rather than linear in its
+-- size.
+--
+-- Threading a set of already-expanded names through the traversal fixes that.
+-- It cannot change the answer, because the result is a union of name sets and
+-- re-expanding a name contributes exactly what its first expansion did.
+--
+-- This matters for programs with long chains of scalar definitions.

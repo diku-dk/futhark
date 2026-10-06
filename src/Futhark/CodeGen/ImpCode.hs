@@ -114,6 +114,7 @@ import Futhark.IR.Pretty ()
 import Futhark.IR.Prop.Names
 import Futhark.IR.Syntax.Core
   ( Attrs (..),
+    Diet (..),
     EntryPointType (..),
     ErrorMsg (..),
     ErrorMsgPart (..),
@@ -202,10 +203,9 @@ data ValueDesc
     ScalarValue PrimType Signedness VName
   deriving (Eq, Show)
 
--- | ^ An externally visible value.  This can be an opaque value
+-- | An externally visible value.  This can be an opaque value
 -- (covering several physical internal values), or a single value that
--- can be used externally.  We record the uniqueness because it is
--- important to the external interface as well.
+-- can be used externally.
 data ExternalValue
   = -- | The string is a human-readable description with no other
     -- semantics.
@@ -214,10 +214,12 @@ data ExternalValue
   deriving (Show)
 
 -- | Information about how this function can be called from the outside world.
+-- We record the consumption/freshness because it is important to the external
+-- interface as well.
 data EntryPoint = EntryPoint
   { entryPointName :: Name,
-    entryPointResults :: (Uniqueness, ExternalValue),
-    entryPointArgs :: [((Name, Uniqueness), ExternalValue)],
+    entryPointResults :: (Diet, ExternalValue),
+    entryPointArgs :: [((Name, Diet), ExternalValue)],
     entryPointDocs :: Maybe T.Text
   }
   deriving (Show)
@@ -523,8 +525,8 @@ instance Pretty EntryPoint where
         "results" <+> nestedBlock (ppRes result)
       ]
     where
-      ppArg ((p, u), t) = pretty p <+> ":" <+> ppRes (u, t)
-      ppRes (u, t) = pretty u <> pretty t
+      ppArg ((p, o), t) = pretty p <+> ":" <+> ppRes (o, t)
+      ppRes (o, t) = pretty o <> pretty t
 
 instance (Pretty op) => Pretty (FunctionT op) where
   pretty (Function entry outs ins attrs body) =

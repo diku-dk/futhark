@@ -64,7 +64,7 @@ funHeader ::
   [I.FParam I.SOACS] ->
   [[Tree (I.FParam I.SOACS)]] ->
   E.ResRetType ->
-  ([Tree (I.FParam I.SOACS)], [I.DeclExtType], [(I.DeclExtType, RetAls)], FunInfo)
+  ([Tree (I.FParam I.SOACS)], [I.ExtType], [(I.ExtType, RetAls)], FunInfo)
 funHeader shapeparams params' rettype =
   (all_params, rettype', fun_rettype, info)
   where
@@ -116,7 +116,7 @@ internaliseValBindBody types fb@(E.ValBind entry fname _ _ (Info rettype) _ _ bo
     when (null params') $
       bindExtSizes (E.AppRes (E.toStruct $ E.retType rettype) (E.retDims rettype)) body_res
 
-    ensureResultExtShape msg (map I.fromDecl rettype') $ subExpsRes body_res
+    ensureResultExtShape msg rettype' $ subExpsRes body_res
 
   attrs' <- internaliseAttrs attrs
 
@@ -178,7 +178,7 @@ generateEntryPoint types (E.EntryPoint e_params e_rettype doc) vb = do
         ("entry_" <> baseName ofname)
         ( ctx_ts
             ++ zip
-              (zeroExts (concat entry_rettype))
+              (map I.fromDecl (zeroExts (concat entry_rettype)))
               (map (shiftRetAls num_ctx) $ concat retals)
         )
         (shapeparams ++ foldMap (foldMap toList) params')
@@ -367,7 +367,7 @@ internaliseAppExp desc _ (E.Range start maybe_second end _) = do
     certifying cs $
       letSubExp "num_elems" $
         I.BasicOp $
-          I.BinOp (SDivUp Int64 I.Unsafe) distance pos_step
+          I.BinOp (SCeilDiv Int64 I.Unsafe) distance pos_step
 
   se <- letSubExp desc (I.BasicOp $ I.Iota num_elems start' step it)
   pure [se]
@@ -758,7 +758,7 @@ internaliseExp desc (E.Coerce e _ (Info et) _) = do
             ++ ["] cannot match shape of type \""]
             ++ dt'
             ++ ["\"."]
-    ensureExtShape (errorMsg parts) (I.fromDecl t') desc e'
+    ensureExtShape (errorMsg parts) t' desc e'
 internaliseExp desc (E.Negate e loc) = locating loc $ do
   e' <- internaliseExp1 "negate_arg" e
   et <- subExpType e'
@@ -907,10 +907,10 @@ internaliseExp desc (E.Update src steps ve _ loc) = locating loc $ do
           ++ prettyString t
 
     indexType :: E.StructType -> [E.DimIndex] -> E.StructType
-    indexType (E.Array u (E.Shape dims) et) idxs =
+    indexType (E.Array o (E.Shape dims) et) idxs =
       case dims' of
         [] -> E.Scalar et
-        ds -> E.Array u (E.Shape ds) et
+        ds -> E.Array o (E.Shape ds) et
       where
         dims' = keptPrefix <> suffix
         keptPrefix = [d | (d, i) <- zip prefix idxs, keepDim i]
@@ -1391,7 +1391,7 @@ internaliseHist dim desc rf hist op ne buckets img = do
 
   -- reshape neutral element to have same size as the destination array
   ne_shp <- forM (zip ne' hist') $ \(n, h) -> do
-    rowtype <- I.stripArray 1 <$> lookupType h
+    rowtype <- I.stripArray dim <$> lookupType h
     ensureShape
       "Row shape of destination array does not match shape of neutral element"
       rowtype
@@ -2280,7 +2280,7 @@ sizeExpForError e
       e' <- internaliseExp1 "size" e
       pure ["[", ErrorVal int64 e', "]"]
 
-typeExpForError :: E.TypeBase Size u -> InternaliseM [ErrorMsgPart SubExp]
+typeExpForError :: E.TypeBase Size o -> InternaliseM [ErrorMsgPart SubExp]
 typeExpForError (E.Scalar (E.Prim t)) = pure [ErrorString $ prettyText t]
 typeExpForError (E.Scalar (E.TypeVar _ v args)) = do
   args' <- concat <$> mapM onArg args

@@ -220,7 +220,7 @@ analyseDimAccessesTests = testGroup
       \  let {segmap_group_size_5202 : i64} =\
       \    get_size(segmap_group_size_5190, thread_block_size)\
       \  let {segmap_usable_groups_5203 : i64} =\
-      \    sdiv_up64(n_5142, segmap_group_size_5202)\
+      \    sceil_div64(n_5142, segmap_group_size_5202)\
       \  let {defunc_0_map_res_5204 : [n_5142]i64} =\
       \    segmap(thread; ; grid=segmap_usable_groups_5203; blocksize=segmap_group_size_5202)\
       \    (gtid_5205 < n_5142) (~phys_tid_5206) : {i64} {\

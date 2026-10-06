@@ -7,7 +7,7 @@ module Language.Futhark.TypeChecker.Consumption
     Alias (..),
     Aliases,
     TypeAliases,
-    inferReturnUniqueness,
+    inferReturnFreshness,
   )
 where
 
@@ -65,21 +65,21 @@ type TypeAliases = TypeBase Size Aliases
 
 -- | @t \`setAliases\` als@ returns @t@, but with @als@ substituted for
 -- any already present aliases.
-setAliases :: TypeBase dim asf -> ast -> TypeBase dim ast
+setAliases :: TypeBase dim o1 -> o2 -> TypeBase dim o2
 setAliases t = addAliases t . const
 
 -- | @t \`addAliases\` f@ returns @t@, but with any already present
 -- aliases replaced by @f@ applied to that aliases.
 addAliases ::
-  TypeBase dim asf ->
-  (asf -> ast) ->
-  TypeBase dim ast
+  TypeBase dim o1 ->
+  (o1 -> o2) ->
+  TypeBase dim o2
 addAliases = flip second
 
 aliases :: TypeAliases -> Aliases
 aliases = bifoldMap (const mempty) id
 
-selfAliasType :: VName -> TypeBase Size asf -> TypeAliases
+selfAliasType :: VName -> TypeBase Size o1 -> TypeAliases
 selfAliasType v = insertSelfAliases v . second (const mempty)
 
 insertSelfAliases :: VName -> TypeAliases -> TypeAliases
@@ -197,49 +197,49 @@ incCounter =
 returnAliased :: Name -> SrcLoc -> CheckM ()
 returnAliased name loc =
   addError loc mempty . withIndexLink "return-aliased" $
-    "Unique-typed return value is aliased to"
+    "Fresh-declared return value is aliased to"
       <+> dquotes (prettyName name)
       <> ", which is not consumable."
 
-uniqueReturnAliased :: SrcLoc -> CheckM ()
-uniqueReturnAliased loc =
-  addError loc mempty . withIndexLink "unique-return-aliased" $
-    "A unique-typed component of the return value is aliased to some other component."
+freshReturnAliased :: SrcLoc -> CheckM ()
+freshReturnAliased loc =
+  addError loc mempty . withIndexLink "fresh-return-aliased" $
+    "A fresh-declared component of the return value is aliased to some other component."
 
 checkReturnAlias :: SrcLoc -> [Pat ParamType] -> ResType -> TypeAliases -> CheckM ()
 checkReturnAlias loc params rettp =
   foldM_ (checkReturnAlias' params) S.empty . returnAliases rettp
   where
-    checkReturnAlias' params' seen (Unique, names) = do
+    checkReturnAlias' params' seen (Fresh, names) = do
       when (any (`S.member` S.map snd seen) $ S.toList names) $
-        uniqueReturnAliased loc
+        freshReturnAliased loc
       notAliasesParam params' $ S.map aliasVar names
-      pure $ seen `S.union` tag Unique names
-    checkReturnAlias' _ seen (Nonunique, names) = do
-      when (any (`S.member` seen) $ S.toList $ tag Unique names) $
-        uniqueReturnAliased loc
-      pure $ seen `S.union` tag Nonunique names
+      pure $ seen `S.union` tag Fresh names
+    checkReturnAlias' _ seen (Nonfresh, names) = do
+      when (any (`S.member` seen) $ S.toList $ tag Fresh names) $
+        freshReturnAliased loc
+      pure $ seen `S.union` tag Nonfresh names
 
     notAliasesParam params' names =
       forM_ params' $ \p ->
-        let consumedNonunique (v, t) =
+        let aliasedNonconsumable (v, t) =
               not (consumableParamType t) && (v `S.member` names)
-         in case find consumedNonunique $ patternMap p of
+         in case find aliasedNonconsumable $ patternMap p of
               Just (v, _) ->
                 returnAliased (baseName v) loc
               Nothing ->
                 pure ()
 
-    tag u = S.map (u,)
+    tag o = S.map (o,)
 
     returnAliases (Scalar (Record ets1)) (Scalar (Record ets2)) =
       concat $ M.elems $ M.intersectionWith returnAliases ets1 ets2
     returnAliases expected got =
-      [(uniqueness expected, aliases got)]
+      [(freshness expected, aliases got)]
 
-    consumableParamType (Array u _ _) = u == Consume
+    consumableParamType (Array o _ _) = o == Consume
     consumableParamType (Scalar Prim {}) = True
-    consumableParamType (Scalar (TypeVar u _ _)) = u == Consume
+    consumableParamType (Scalar (TypeVar o _ _)) = o == Consume
     consumableParamType (Scalar (Record fs)) = all consumableParamType fs
     consumableParamType (Scalar (Sum fs)) = all (all consumableParamType) fs
     consumableParamType (Scalar Arrow {}) = False
@@ -436,7 +436,7 @@ combineAliases (Scalar (Prim t)) _ = Scalar $ Prim t
 combineAliases t1 t2 =
   error $ "combineAliases invalid args: " ++ show (t1, t2)
 
--- An alias inhibits uniqueness if it is used in disjoint values.
+-- An alias inhibits freshness if it is used in disjoint values.
 aliasesMultipleTimes :: TypeAliases -> Names
 aliasesMultipleTimes = S.fromList . map fst . filter ((> 1) . snd) . M.toList . delve
   where
@@ -474,9 +474,9 @@ overlapCheck loc (src, src_als) (ve, ve_als) =
         <+> dquotes "copy"
         <+> "to remove aliases from the value."
 
-inferReturnUniqueness :: [Pat ParamType] -> ResType -> TypeAliases -> ResType
-inferReturnUniqueness [] ret _ = ret `setUniqueness` Nonunique
-inferReturnUniqueness params ret ret_als = delve ret ret_als
+inferReturnFreshness :: [Pat ParamType] -> ResType -> TypeAliases -> ResType
+inferReturnFreshness [] ret _ = ret `setMode` Nonfresh
+inferReturnFreshness params ret ret_als = delve ret ret_als
   where
     forbidden = aliasesMultipleTimes ret_als
     consumings = consumingParams params
@@ -487,9 +487,9 @@ inferReturnUniqueness params ret ret_als = delve ret ret_als
     delve t t_als
       | all (`S.member` consumings) $ boundAliases (arrayAliases t_als),
         not $ any ((`S.member` forbidden) . aliasVar) (aliases t_als) =
-          t `setUniqueness` Unique
+          t `setMode` Fresh
       | otherwise =
-          t `setUniqueness` Nonunique
+          t `setMode` Nonfresh
 
 checkSubExps :: (ASTMappable e) => e -> CheckM e
 checkSubExps = astMap identityMapper {mapOnExp = fmap fst . checkExp}
@@ -554,17 +554,17 @@ checkArg prev p_t e = do
 -- an argument the given types to a function with the given return
 -- type, consuming the argument with the given diet.
 returnType :: Aliases -> ResType -> Diet -> TypeAliases -> TypeAliases
-returnType _ (Array Unique et shape) _ _ =
+returnType _ (Array Fresh et shape) _ _ =
   Array mempty et shape
-returnType appres (Array Nonunique et shape) Consume _ =
+returnType appres (Array Nonfresh et shape) Consume _ =
   Array appres et shape
-returnType appres (Array Nonunique et shape) Observe arg =
+returnType appres (Array Nonfresh et shape) Observe arg =
   Array (appres <> aliases arg) et shape
-returnType _ (Scalar (TypeVar Unique t targs)) _ _ =
+returnType _ (Scalar (TypeVar Fresh t targs)) _ _ =
   Scalar $ TypeVar mempty t targs
-returnType appres (Scalar (TypeVar Nonunique t targs)) Consume _ =
+returnType appres (Scalar (TypeVar Nonfresh t targs)) Consume _ =
   Scalar $ TypeVar appres t targs
-returnType appres (Scalar (TypeVar Nonunique t targs)) Observe arg =
+returnType appres (Scalar (TypeVar Nonfresh t targs)) Observe arg =
   Scalar $ TypeVar (appres <> aliases arg) t targs
 returnType appres (Scalar (Record fs)) d arg =
   Scalar $ Record $ fmap (\et -> returnType appres et d arg) fs
@@ -598,7 +598,7 @@ boundFreeInExp e = do
     M.mapMaybe (fmap entryAliases) . M.fromSet (`M.lookup` vtable) $
       fvVars (freeInExp e)
 
--- Loops are tricky because we want to infer the uniqueness of their
+-- Loops are tricky because we want to infer the freshness of their
 -- parameters.  This is pretty unusual: we do not do this for ordinary
 -- functions.
 type Loop = (Pat ParamType, LoopInitBase Info VName, LoopFormBase Info VName, Exp)
@@ -609,17 +609,17 @@ updateParamDiet :: (VName -> Bool) -> Pat ParamType -> Pat ParamType
 updateParamDiet cons = recurse
   where
     recurse (Wildcard (Info t) wloc) =
-      Wildcard (Info $ t `setUniqueness` Observe) wloc
+      Wildcard (Info $ t `setMode` Observe) wloc
     recurse (PatParens p ploc) =
       PatParens (recurse p) ploc
     recurse (PatAttr attr p ploc) =
       PatAttr attr (recurse p) ploc
     recurse (Id name (Info t) iloc)
       | cons name =
-          let t' = t `setUniqueness` Consume
+          let t' = t `setMode` Consume
            in Id name (Info t') iloc
       | otherwise =
-          let t' = t `setUniqueness` Observe
+          let t' = t `setMode` Observe
            in Id name (Info t') iloc
     recurse (TuplePat pats ploc) =
       TuplePat (map recurse pats) ploc
@@ -638,7 +638,7 @@ convergeLoopParam loop_loc param body_cons body_als = do
 
   -- Check that the new values of consumed merge parameters do not
   -- alias something bound outside the loop, AND that anything
-  -- returned for a unique merge parameter does not alias anything
+  -- returned for a consumed merge parameter does not alias anything
   -- else returned.
   let checkMergeReturn (Id pat_v (Info pat_v_t) patloc) t = do
         let free_als = S.filter (`notElem` patNames param) $ boundAliases (aliases t)
@@ -774,7 +774,7 @@ checkExp :: Exp -> CheckM (Exp, TypeAliases)
 --
 checkExp (AppExp (Apply f args loc) appres) = do
   (f', f_als) <- checkExp f
-  (args', args_als) <- NE.unzip <$> checkArgs (diets $ toRes Nonunique f_als) args
+  (args', args_als) <- NE.unzip <$> checkArgs (diets $ toRes Nonfresh f_als) args
   res_als <- checkFuncall loc (fname f) f_als args_als
   pure (AppExp (Apply f' args' loc) appres, res_als)
   where
@@ -864,7 +864,7 @@ checkExp (AppExp (LetFun fname (typarams, params, retdecl, Info (RetType ext ret
     checkReturnAlias loc params ret funbody_als
     checkGlobalAliases loc params funbody_als
     free_bound <- boundFreeInExp funbody
-    let ret' = maybe (inferReturnUniqueness params ret funbody_als) (const ret) retdecl
+    let ret' = maybe (inferReturnFreshness params ret funbody_als) (const ret) retdecl
         als = foldMap aliases (M.elems free_bound)
         ftype = funType params (RetType ext ret') `setAliases` als
     pure ((ret', funbody'), ftype)
@@ -895,7 +895,7 @@ checkExp e@(Lambda params body te (Info (RetType ext ret)) loc) =
     checkReturnAlias loc params ret body_als
     checkGlobalAliases loc params body_als
     free_bound <- boundFreeInExp e
-    let ret' = maybe (inferReturnUniqueness params ret body_als) (const ret) te
+    let ret' = maybe (inferReturnFreshness params ret body_als) (const ret) te
         als = foldMap aliases (M.elems free_bound)
         ftype = funType params (RetType ext ret') `setAliases` als
     pure
@@ -1060,7 +1060,7 @@ checkGlobalAliases loc params body_t = do
           <+> "to break the aliasing."
 
 -- | Type-check a value definition.  This also infers a new return
--- type that may be more unique than previously.
+-- type that may be fresher than previously.
 checkValDef ::
   (VName, [Pat ParamType], Exp, ResRetType, Maybe (TypeExp Exp VName), SrcLoc) ->
   ((Exp, ResRetType), [TypeError])
@@ -1070,19 +1070,19 @@ checkValDef (_fname, params, body, RetType ext ret, retdecl, loc) = runCheckM (l
     checkReturnAlias loc params ret body_als
     checkGlobalAliases loc params body_als
     -- If the user did not provide an annotation (meaning the return
-    -- type is fully inferred), we infer the uniqueness.  Otherwise,
+    -- type is fully inferred), we infer the freshness.  Otherwise,
     -- we go with whatever they wanted.  This lets the user define
-    -- non-unique return types even if the body actually has no
+    -- nonfresh return types even if the body actually has no
     -- aliases.
     ret' <- case retdecl of
       Just retdecl' -> do
-        when (null params && unique ret) $
-          addError retdecl' mempty "A top-level constant cannot have a unique type."
+        when (null params && fresh ret) $
+          addError retdecl' mempty "A top-level constant cannot be declared fresh."
         pure $ RetType ext ret
       Nothing ->
         pure $
           RetType ext $
-            inferReturnUniqueness params ret body_als
+            inferReturnFreshness params ret body_als
 
     pure
       ( (body', ret'),

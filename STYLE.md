@@ -269,6 +269,11 @@ Use concise and short names, but do not abbreviate aggresively,
 especially in complex names.  E.g, use `filter_result_size`, not
 `flt_res_sz`.
 
+When naming nested iteration spaces, dimensions, or similar, pick names in
+increasing lexicographic order (`x,y,z`), such that the innermost dimension
+(`z`) varies most quickly. Not that this is contrary to the convention in some
+languages (like CUDA or Fortran), but it is the convention we follow in the
+Futhark compiler.
 
 Misc
 ----

@@ -66,7 +66,7 @@ import Futhark.IR.GPUMem
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Transform.Rename
 import Futhark.Util (chunks, mapAccumLM)
-import Futhark.Util.IntegralExp (divUp, nextMul, quot, rem)
+import Futhark.Util.IntegralExp (ceilDiv, nextMul, quot, rem)
 import Prelude hiding (quot, rem)
 
 forM2_ :: (Monad m) => [a] -> [b] -> (a -> b -> m c) -> m ()
@@ -342,7 +342,7 @@ nonsegmentedReduction (Pat segred_pes) num_tblocks tblock_size (chunk_v, chunk_c
     -- necessarily be 0.
     forM_ gtids $ \v -> dPrimV_ v (0 :: Imp.TExp Int64)
 
-    q <- dPrimVE "q" $ n `divUp` (sExt64 (kernelNumThreads constants) * chunk)
+    q <- dPrimVE "q" $ n `ceilDiv` (sExt64 (kernelNumThreads constants) * chunk)
 
     slugs <-
       mapM (segBinOpSlug ltid tblock_id) $
@@ -394,7 +394,7 @@ smallSegmentsReduction (Pat segred_pes) num_tblocks tblock_size _ space segbinop
   num_threads <- fmap tvSize $ dPrimV "num_threads" $ num_tblocks' * tblock_size'
   let num_segments = product $ init dims'
       segments_per_block = tblock_size' `quot` segment_size_nonzero
-      required_blocks = sExt32 $ num_segments `divUp` segments_per_block
+      required_blocks = sExt32 $ num_segments `ceilDiv` segments_per_block
 
   emit $ Imp.DebugPrint "# SegRed-small" Nothing
   emit $ Imp.DebugPrint "num_segments" $ Just $ untyped num_segments
@@ -501,11 +501,11 @@ largeSegmentsReduction (Pat segred_pes) num_tblocks tblock_size (chunk_v, chunk_
 
   blocks_per_segment <-
     dPrimVE "blocks_per_segment" $
-      num_tblocks' `divUp` sMax64 1 num_segments
+      num_tblocks' `ceilDiv` sMax64 1 num_segments
 
   q <-
     dPrimVE "q" $
-      segment_size `divUp` (tblock_size' * blocks_per_segment * chunk)
+      segment_size `ceilDiv` (tblock_size' * blocks_per_segment * chunk)
 
   num_virtblocks <-
     dPrimV "num_virtblocks" $
@@ -986,7 +986,7 @@ reductionStageTwo segred_pes tblock_id segment_gtids first_block_for_segment blo
       sComment "read in the per-block-results" $ do
         read_per_thread <-
           dPrimVE "read_per_thread" $
-            blocks_per_segment `divUp` sExt64 tblock_size
+            blocks_per_segment `ceilDiv` sExt64 tblock_size
 
         forM2_ acc_params nes $ \p ne ->
           copyDWIM (paramName p) [] ne []

@@ -247,6 +247,10 @@ cases d t mat = case subMats d mat $ zeroExp t of
 -- Jacobian of the scan op. Figure out if the Jacobian has some
 -- special shape, discarding the temporary lambda.
 identifyCase :: VjpOps -> Lambda SOACS -> ADM ScanAlgo
+identifyCase _ lam
+  -- The IFL23 specialisation represents Jacobian entries as scalars.
+  -- Use PPAD for array results, before constructing the Jacobian.
+  | any ((> 0) . arrayRank) (lambdaReturnType lam) = pure GenericPPAD
 identifyCase ops lam = do
   let t = lambdaReturnType lam
   let d = length t

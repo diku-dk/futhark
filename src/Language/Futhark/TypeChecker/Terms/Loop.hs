@@ -46,11 +46,11 @@ someDimsFreshInType ::
   SrcLoc ->
   Name ->
   [VName] ->
-  TypeBase Size als ->
-  TermTypeM (TypeBase Size als)
-someDimsFreshInType loc desc fresh t = do
+  TypeBase Size o ->
+  TermTypeM (TypeBase Size o)
+someDimsFreshInType loc desc dims t = do
   areSameSize <- getAreSame
-  let freshen v = any (areSameSize v) fresh
+  let freshen v = any (areSameSize v) dims
   bitraverse (onDim freshen) pure t
   where
     onDim freshen (Var d _ _)
@@ -66,14 +66,14 @@ freshDimsInType ::
   Rigidity ->
   Name ->
   [VName] ->
-  TypeBase Size u ->
-  TermTypeM (TypeBase Size u, [VName])
-freshDimsInType usage r desc fresh t = do
+  TypeBase Size o ->
+  TermTypeM (TypeBase Size o, [VName])
+freshDimsInType usage r desc dims t = do
   areSameSize <- getAreSame
   second (map snd) <$> runStateT (bitraverse (onDim areSameSize) pure t) mempty
   where
     onDim areSameSize (Var (QualName _ d) _ _)
-      | any (areSameSize d) fresh = do
+      | any (areSameSize d) dims = do
           prev_subst <- gets $ L.find (areSameSize d . fst)
           case prev_subst of
             Just (_, d') -> pure $ sizeFromName (qualName d') $ srclocOf usage
@@ -88,7 +88,7 @@ freshDimsInType usage r desc fresh t = do
 -- [Loop size inference].
 data DimClass
   = -- | A genuinely new size: this position is variant.
-    Fresh
+    New
   | -- | The body produces this position's initial size (the size the fresh
     -- variable replaced). Either it produces that size directly (@Nothing@), or
     -- it copies the /current/ size of another parameter @u@ that started at the
@@ -235,7 +235,7 @@ checkLoop checkExp (looppat, loopinit, form, loopbody) loc = do
                       Just u <- sharesInitial e' d ->
                         modify $ M.insert v $ Reproduces (Just u)
                     | not $ v `S.member` known_before ->
-                        modify $ M.insert v Fresh
+                        modify $ M.insert v New
                     | otherwise ->
                         pure ()
                   Nothing ->
@@ -246,10 +246,10 @@ checkLoop checkExp (looppat, loopinit, form, loopbody) loc = do
 
         let classified =
               execState (matchDims onDims loop_t' loopbody_t') mempty
-            -- The variant sizes are the least set containing every 'Fresh'
+            -- The variant sizes are the least set containing every 'New'
             -- position and closed under the copies-from dependency.  See Note
             -- [Loop size inference].
-            seeds = S.fromList [v | (v, Fresh) <- M.toList classified]
+            seeds = S.fromList [v | (v, New) <- M.toList classified]
             grow vs =
               vs
                 <> S.fromList
@@ -405,12 +405,12 @@ checkLoop checkExp (looppat, loopinit, form, loopbody) loc = do
 --         fixed, but if an array one of them receives has been resized, they
 --         become variant.
 --
---       * If @d@ is a genuinely new size, then @v@ is variant (@Fresh@).
+--       * If @d@ is a genuinely new size, then @v@ is variant (@New@).
 --
 --     Variance can be mutual (in @loop (a,b) = ... in (b,a)@ each of @a@,@b@
 --     copies the other's size), so we take the variant set to be the least set
---     that contains every @Fresh@ position and is closed under the copies-from
---     dependency. Parameters that only copy from one another, with no @Fresh@
+--     that contains every @New@ position and is closed under the copies-from
+--     dependency. Parameters that only copy from one another, with no @New@
 --     seed feeding the cycle, are therefore never made variant -- a plain swap
 --     of two @[n]@ arrays keeps its precise size, while resizing one of them
 --     makes both existential. The variant new_dims become the loop's size

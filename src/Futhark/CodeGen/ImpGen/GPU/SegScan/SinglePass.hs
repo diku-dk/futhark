@@ -16,7 +16,7 @@ import Futhark.IR.GPUMem
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Transform.Rename
 import Futhark.Util (mapAccumLM)
-import Futhark.Util.IntegralExp (IntegralExp (mod, rem), divUp, nextMul, quot)
+import Futhark.Util.IntegralExp (IntegralExp (mod, rem), ceilDiv, nextMul, quot)
 import Prelude hiding (mod, quot, rem)
 
 xParams, yParams :: SegBinOp GPUMem -> [LParam GPUMem]
@@ -235,7 +235,7 @@ inBlockScanLookback constants arrs_full_size flag_arr arrs scan_lam = everything
 
 -- | Calculate the number of u64 words needed to store n bits
 bitArrayWords :: Imp.KernelConstExp -> Imp.KernelConstExp
-bitArrayWords n = untyped $ isInt64 n `divUp` 64
+bitArrayWords n = untyped $ isInt64 n `ceilDiv` 64
 
 -- | Set a bit in a bit array stored as u64 words
 setBitInBitArray :: Imp.TExp Int64 -> VName -> Imp.TExp Int64 -> Imp.TExp Bool -> InKernelGen ()
@@ -362,7 +362,7 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
     dPrimV "num_bit_words" . isInt64 =<< kernelConstToExp num_words_const
 
   num_virt_blocks <-
-    tvSize <$> dPrimV "num_virt_blocks" (n `divUp` (tblock_size_e * chunk))
+    tvSize <$> dPrimV "num_virt_blocks" (n `ceilDiv` (tblock_size_e * chunk))
   let num_virt_blocks_e = pe64 num_virt_blocks
 
   num_virt_threads <-
@@ -438,7 +438,7 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
     sOp $ Imp.GetBlockId (tvVar phys_block_id) 0
     iters <-
       dPrimVE "virtloop_bound" $
-        (num_virt_blocks_e - tvExp phys_block_id) `divUp` num_phys_blocks_e
+        (num_virt_blocks_e - tvExp phys_block_id) `ceilDiv` num_phys_blocks_e
 
     sFor "virtloop_i" iters $ const $ do
       dyn_id <- dPrim "dynamic_id"

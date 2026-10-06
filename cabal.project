@@ -1,13 +1,8 @@
 packages: futhark.cabal
-index-state: 2026-08-20T13:56:26Z
+index-state: 2026-09-08T20:11:38Z
 multi-repl: True
 
 package futhark
   ghc-options: -j -fwrite-ide-info -hiedir=.hie
-
-source-repository-package
-    type: git
-    location: https://github.com/jyp/glpk-hs.git
-    tag: 1f276aa19861203ea8367dc27a6ad4c8a31c9062
 
 allow-newer: base, template-haskell, ghc-prim

@@ -80,7 +80,7 @@ class Server:
         ins = [self._get_var(in_vname) for in_vname in in_vnames]
 
         try:
-            (runtime, vals) = getattr(self._ctx, entry_fname)(*ins)
+            runtime, vals = getattr(self._ctx, entry_fname)(*ins)
         except Exception as e:
             raise self.Failure(str(e))
 

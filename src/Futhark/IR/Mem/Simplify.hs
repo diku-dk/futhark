@@ -138,10 +138,10 @@ copyManifest vtable pat aux (Replicate (Shape []) (Var v2))
     Just (Manifest v0 perm, v1_cs) <- ST.lookupBasicOp v1 vtable,
     Pat [PatElem _ (_, MemArray _ _ _ (ArrayIn mem _))] <- pat =
       Simplify $ do
-        ~(MemArray pt shape u (ArrayIn _ v1_lmad)) <- lookupMemInfo v1
+        ~(MemArray pt shape o (ArrayIn _ v1_lmad)) <- lookupMemInfo v1
         v0' <- newVName (baseName v1 <> "_manifest")
         let manifest_pat =
-              Pat [PatElem v0' $ MemArray pt shape u $ ArrayIn mem v1_lmad]
+              Pat [PatElem v0' $ MemArray pt shape o $ ArrayIn mem v1_lmad]
             stm = mkWiseStm manifest_pat mempty $ BasicOp $ Manifest v0 perm
         certifying (v1_cs <> v2_cs) $ addStm stm
         auxing aux $ letBind pat $ BasicOp $ Reshape v0' s

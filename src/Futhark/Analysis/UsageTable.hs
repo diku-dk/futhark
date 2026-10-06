@@ -66,12 +66,14 @@ used = lookupPred $ const True
 expand :: (VName -> Names) -> UsageTable -> UsageTable
 expand look (UsageTable m) = UsageTable $ L.foldl' grow m $ IM.toList m
   where
+    -- The name is irrelevant; only the tag is used for lookup.
+    dummy = nameFromString ""
     grow m' (k, v) =
-      L.foldl'
+      IM.foldlWithKey'
         (grow'' $ v `withoutU` presentU)
         m'
-        (namesIntMap $ look $ VName (nameFromString "") k)
-    grow'' v m'' k = IM.insertWith (<>) (baseTag k) v m''
+        (namesIntMap $ look $ VName dummy k)
+    grow'' v m'' k _ = IM.insertWith (<>) k v m''
 
 is :: Usages -> VName -> UsageTable -> Bool
 is = lookupPred . matches

@@ -56,10 +56,10 @@ liftLoopParam lvl segments num_segments inps env loopParamNames (fparam, initSE)
       param <-
         newParam
           (baseName (paramName fparam) <> "_lifted")
-          (arrayOf (Prim pt) (segmentsShape segments) Nonunique)
+          (arrayOf (Prim pt) (segmentsShape segments) Observe)
       initV <- liftSubExpRegular lvl segments inps env (segmentsShape segments) initSE
       pure ([param], Regular $ paramName param, [Var initV])
-    Array pt _ u
+    Array pt _ o
       | needsIrregular inps loopParamNames t -> do
           (params, rep) <- liftParam num_segments fparam
           (_, initRep) <- liftSubExp lvl segments inps env initSE
@@ -75,7 +75,7 @@ liftLoopParam lvl segments num_segments inps env loopParamNames (fparam, initSE)
           p <-
             newParam
               (baseName (paramName fparam) <> "_lifted")
-              (arrayOf (Prim pt) pShape u)
+              (arrayOf (Prim pt) pShape o)
           initV <- liftSubExpRegular lvl segments inps env pShape initSE
           -- If the parameter is consumed, we must not consume the
           -- representation array (it may be used by other versions in
@@ -83,7 +83,7 @@ liftLoopParam lvl segments num_segments inps env loopParamNames (fparam, initSE)
           -- removes it again when consuming the representation directly is
           -- safe.
           initV' <-
-            if u == Unique
+            if o == Consume
               then letExp (baseName (paramName fparam) <> "_inter_copy") =<< eCopy (eVar initV)
               else pure initV
           pure ([p], Regular $ paramName p, [Var initV'])
@@ -550,7 +550,7 @@ flattenLoop ops segments env inps res (_pat, aux) (merge, WhileLoop cond, body) 
                         let initial_shape = Shape [w] <> arrayShape t
                         let final_shape = segmentsShape segments <> arrayShape t
                         let pt = elemType t
-                        space <- letExp "blank" =<< eBlank (Array pt initial_shape NoUniqueness)
+                        space <- letExp "blank" =<< eBlank (Array pt initial_shape NoMode)
 
                         out <-
                           foldM
@@ -568,7 +568,7 @@ flattenLoop ops segments env inps res (_pat, aux) (merge, WhileLoop cond, body) 
                       (Irregular ir0, Irregular ir1) -> do
                         segsSpace <-
                           letExp "blank_segs"
-                            =<< eBlank (Array int64 (Shape [w]) NoUniqueness)
+                            =<< eBlank (Array int64 (Shape [w]) NoMode)
 
                         segs <-
                           foldM
@@ -581,7 +581,7 @@ flattenLoop ops segments env inps res (_pat, aux) (merge, WhileLoop cond, body) 
                         let pt = elemType t
                         elemsSpace <-
                           letExp "blank_elems"
-                            =<< eBlank (Array pt (Shape [num_data]) NoUniqueness)
+                            =<< eBlank (Array pt (Shape [num_data]) NoMode)
 
                         elems <-
                           foldM

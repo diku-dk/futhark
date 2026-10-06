@@ -176,7 +176,7 @@ data TermEnv = TermEnv
     termCheckExp :: ExpBase Info VName -> TermTypeM Exp,
     termOuterEnv :: Env,
     termTySet :: TySet,
-    termTyVars :: M.Map TyVar (TypeBase () NoUniqueness),
+    termTyVars :: M.Map TyVar (TypeBase () NoMode),
     termImportName :: ImportName
   }
 
@@ -306,7 +306,7 @@ instance MonadUnify TermTypeM where
 -- by linking instantiated sizes to them (the connection between a binder and
 -- its uses is erased by the unsized pass). See Note [Size Inference] in
 -- Language.Futhark.TypeChecker.Terms.
-registerBinders :: Loc -> TypeBase Size u -> TermTypeM ()
+registerBinders :: Loc -> TypeBase Size o -> TermTypeM ()
 registerBinders loc (Scalar (Arrow _ pn _ ta (RetType _ tr))) = do
   case pn of
     Named pv -> constrain pv $ ParamSize loc
@@ -329,35 +329,35 @@ registerBinders loc (Array _ _ et) = registerBinders loc (Scalar et)
 -- with their solutions, instantiating their sizes with fresh
 -- (non-absorbable) size variables. See Note [Size Inference] in
 -- Language.Futhark.TypeChecker.Terms.
-replaceTyVars :: SrcLoc -> TypeBase Size u -> TermTypeM (TypeBase Size u)
+replaceTyVars :: SrcLoc -> TypeBase Size o -> TermTypeM (TypeBase Size o)
 replaceTyVars = replaceTyVarsWith False
 
 -- | Like 'replaceTyVars', but the fresh sizes may be determined to
 -- be existential by unification, like instantiated sizes. This is
 -- used for holes, which adopt whatever type the context provides.
 -- See Note [Size Inference] in Language.Futhark.TypeChecker.Terms.
-replaceTyVarsAbsorbable :: SrcLoc -> TypeBase Size u -> TermTypeM (TypeBase Size u)
+replaceTyVarsAbsorbable :: SrcLoc -> TypeBase Size o -> TermTypeM (TypeBase Size o)
 replaceTyVarsAbsorbable = replaceTyVarsWith True
 
-replaceTyVarsWith :: Bool -> SrcLoc -> TypeBase Size u -> TermTypeM (TypeBase Size u)
+replaceTyVarsWith :: Bool -> SrcLoc -> TypeBase Size o -> TermTypeM (TypeBase Size o)
 replaceTyVarsWith absorbable loc orig_t = do
   tyvars <- asks termTyVars
   let f ::
-        TypeBase Size u ->
-        StateT (M.Map VName (TypeBase Size NoUniqueness)) TermTypeM (TypeBase Size u)
+        TypeBase Size o ->
+        StateT (M.Map VName (TypeBase Size NoMode)) TermTypeM (TypeBase Size o)
       f (Scalar (Prim t)) = pure $ Scalar $ Prim t
       f
-        (Scalar (TypeVar u (QualName [] v) []))
+        (Scalar (TypeVar o (QualName [] v) []))
           | Just t <- M.lookup v tyvars = do
               -- Multiple occurrences of the same type variable must
               -- be given the same sizes.
               seen <- get
               case M.lookup v seen of
-                Just t' -> pure $ second (const u) t'
+                Just t' -> pure $ second (const o) t'
                 Nothing -> do
                   let usage = mkUsage loc "replaceTyVars"
                   (t', drepl) <-
-                    lift $ allDimsFreshInType usage Nonrigid "dv" (second (const u) t)
+                    lift $ allDimsFreshInType usage Nonrigid "dv" (second (const o) t)
                   -- The sizes are instantiated sizes: 'Unlifted' unless
                   -- absorbable, so they can be linked to binders of the
                   -- type itself (reconstructing dependent function
@@ -366,12 +366,12 @@ replaceTyVarsWith absorbable loc orig_t = do
                   lift . forM_ (M.keys drepl) $ \d ->
                     constrain d $ InstSize (if absorbable then Lifted else Unlifted) usage
                   lift $ registerBinders (locOf loc) t'
-                  modify $ M.insert v $ second (const NoUniqueness) t'
+                  modify $ M.insert v $ second (const NoMode) t'
                   pure t'
           | otherwise =
-              pure $ Scalar (TypeVar u (QualName [] v) [])
-      f (Scalar (TypeVar u qn targs)) =
-        Scalar . TypeVar u qn <$> mapM onTyArg targs
+              pure $ Scalar (TypeVar o (QualName [] v) [])
+      f (Scalar (TypeVar o qn targs)) =
+        Scalar . TypeVar o qn <$> mapM onTyArg targs
         where
           onTyArg (TypeArgDim e) = pure $ TypeArgDim e
           onTyArg (TypeArgType t) = TypeArgType <$> f t
@@ -379,12 +379,12 @@ replaceTyVarsWith absorbable loc orig_t = do
         Scalar . Record <$> traverse f fs
       f (Scalar (Sum fs)) =
         Scalar . Sum <$> traverse (mapM f) fs
-      f (Scalar (Arrow u pname d ta (RetType ext tr))) = do
+      f (Scalar (Arrow o pname d ta (RetType ext tr))) = do
         ta' <- f ta
         tr' <- f tr
-        pure $ Scalar $ Arrow u pname d ta' $ RetType ext tr'
-      f (Array u shape t) =
-        arrayOfWithAliases u shape <$> f (Scalar t)
+        pure $ Scalar $ Arrow o pname d ta' $ RetType ext tr'
+      f (Array o shape t) =
+        arrayOfWithAliases o shape <$> f (Scalar t)
 
   evalStateT (f orig_t) mempty
 
@@ -393,51 +393,51 @@ replaceTyVarsWith absorbable loc orig_t = do
 -- their sizes. See Note [Size Inference] in
 -- Language.Futhark.TypeChecker.Terms.
 instTyVars ::
-  (Substitutable (TypeBase Size u)) =>
+  (Substitutable (TypeBase Size o)) =>
   SrcLoc ->
   -- | The type parameters being instantiated, along with their
   -- liftedness.
   M.Map VName Liftedness ->
-  TypeBase () u ->
-  TypeBase Size u ->
-  TermTypeM (TypeBase Size u)
+  TypeBase () o ->
+  TypeBase Size o ->
+  TermTypeM (TypeBase Size o)
 instTyVars loc names orig_t1 orig_t2 = do
   tyvars <- asks termTyVars
   let f ::
-        TypeBase d u ->
-        TypeBase Size u ->
-        StateT (M.Map VName (TypeBase Size NoUniqueness)) TermTypeM (TypeBase Size u)
+        TypeBase d o ->
+        TypeBase Size o ->
+        StateT (M.Map VName (TypeBase Size NoMode)) TermTypeM (TypeBase Size o)
       f
-        (Scalar (TypeVar u (QualName [] v1) []))
+        (Scalar (TypeVar o (QualName [] v1) []))
         t2
           | Just t <- M.lookup v1 tyvars =
-              f (second (const u) t) t2
+              f (second (const o) t) t2
       f (Scalar (Record fs1)) (Scalar (Record fs2)) =
         Scalar . Record <$> sequence (M.intersectionWith f fs1 fs2)
       f (Scalar (Sum fs1)) (Scalar (Sum fs2)) =
         Scalar . Sum <$> sequence (M.intersectionWith (zipWithM f) fs1 fs2)
-      -- Note: uniqueness annotations are always taken from the
-      -- second type, as the first (inferred) type comes from the
-      -- unsized type checker, which does not track uniqueness.
+      -- Note: annotations are always taken from the second type, as
+      -- the first (inferred) type comes from the unsized type
+      -- checker, which does not track them.
       f
         (Scalar (Arrow _ _ _ t1a (RetType _ t1r)))
-        (Scalar (Arrow u pname d t2a (RetType ext t2r))) = do
+        (Scalar (Arrow o pname d t2a (RetType ext t2r))) = do
           ta <- f t1a t2a
           tr <- f t1r t2r
-          pure $ Scalar $ Arrow u pname d ta $ RetType ext tr
+          pure $ Scalar $ Arrow o pname d ta $ RetType ext tr
       f
         (Array _ (Shape (_ : ds1)) t1)
-        (Array u (Shape (d : ds2)) t2) =
-          arrayOfWithAliases u (Shape [d])
+        (Array o (Shape (d : ds2)) t2) =
+          arrayOfWithAliases o (Shape [d])
             <$> f (arrayOf (Shape ds1) (Scalar t1)) (arrayOf (Shape ds2) (Scalar t2))
       f
         (Scalar (TypeVar _ v1 targs1))
-        (Scalar (TypeVar u v2 targs2))
+        (Scalar (TypeVar o v2 targs2))
           -- If v2 is a type parameter being instantiated, it must be
           -- handled by the general case below.
           | qualLeaf v2 `M.notMember` names,
             length targs1 == length targs2 =
-              Scalar . TypeVar u v1 <$> zipWithM g targs1 targs2
+              Scalar . TypeVar o v1 <$> zipWithM g targs1 targs2
           where
             g (TypeArgType t1) (TypeArgType t2) =
               TypeArgType <$> f t1 t2
@@ -446,7 +446,7 @@ instTyVars loc names orig_t1 orig_t2 = do
         let usage = mkUsage loc "instantiation"
             mkNew = fst <$> lift (allDimsFreshInType usage Nonrigid "dv" t1)
         case t2 of
-          Scalar (TypeVar u (QualName [] v2) [])
+          Scalar (TypeVar o (QualName [] v2) [])
             | Just l <- M.lookup v2 names -> do
                 seen <- get
                 case M.lookup v2 seen of
@@ -461,7 +461,7 @@ instTyVars loc names orig_t1 orig_t2 = do
                     -- can reconstruct dependent function types by linking
                     -- instantiated sizes to them.
                     unless (null drepl) $ lift $ registerBinders (locOf loc) t
-                    modify $ M.insert v2 $ second (const NoUniqueness) t
+                    modify $ M.insert v2 $ second (const NoMode) t
                     pure t
                   Just t -> do
                     -- Another occurrence of an already instantiated
@@ -475,7 +475,7 @@ instTyVars loc names orig_t1 orig_t2 = do
                           lift $ constrain d $ CopySize c occ usage
                           pure $ Var (qualName d) info dloc
                         onDim d = pure d
-                    second (const u) <$> bitraverse onDim pure t
+                    second (const o) <$> bitraverse onDim pure t
           _ -> mkNew
 
   (t, seen) <- runStateT (f orig_t1 orig_t2) mempty
@@ -495,7 +495,7 @@ instTypeScheme ::
   SrcLoc ->
   [TypeParam] ->
   StructType ->
-  TypeBase () NoUniqueness ->
+  TypeBase () NoMode ->
   TermTypeM ([VName], StructType)
 instTypeScheme qn loc tparams scheme_t inferred = do
   (names, substs) <- fmap (unzip . catMaybes) . forM tparams $ \tparam -> do
@@ -695,7 +695,7 @@ isInt64 _ = Nothing
 initialTermScope :: TermScope Size
 initialTermScope = Scope.initialTermScope id
 
-runTermTypeM :: (ExpBase Info VName -> TermTypeM Exp) -> M.Map TyVar (TypeBase () NoUniqueness) -> TermTypeM a -> TypeM a
+runTermTypeM :: (ExpBase Info VName -> TermTypeM Exp) -> M.Map TyVar (TypeBase () NoMode) -> TermTypeM a -> TypeM a
 runTermTypeM checker tyvars (TermTypeM m) = do
   initial_scope <- (initialTermScope <>) . Scope.envToTermScopeNoVals <$> askEnv
   name <- askImportName

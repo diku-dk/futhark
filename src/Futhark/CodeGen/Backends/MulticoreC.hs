@@ -94,13 +94,16 @@ closureRetvalStructField :: VName -> Name
 closureRetvalStructField v =
   nameFromString "retval_" <> nameFromText (prettyText v)
 
-data ValueType = Prim PrimType | MemBlock | RawMem
+-- | How a value is passed to a worker through the closure struct.
+data ValueType = Prim PrimType | MemBlock | RawMem | ScalarMem
 
 compileFreeStructFields :: [VName] -> [(C.Type, C.Type, ValueType)] -> [C.FieldGroup]
 compileFreeStructFields = zipWith field
   where
     field name (_, storage_ty, Prim _) =
       [C.csdecl|$ty:storage_ty $id:(closureFreeStructField name);|]
+    field name (ty, _, ScalarMem) =
+      [C.csdecl|$ty:ty $id:(closureFreeStructField name);|]
     field name (_, _, _) =
       [C.csdecl|$ty:defaultMemBlockType $id:(closureFreeStructField name);|]
 
@@ -109,6 +112,8 @@ compileRetvalStructFields = zipWith field
   where
     field name (ty, _, Prim _) =
       [C.csdecl|$ty:ty *$id:(closureRetvalStructField name);|]
+    field name (ty, _, ScalarMem) =
+      [C.csdecl|$ty:ty $id:(closureRetvalStructField name);|]
     field name (_, _, _) =
       [C.csdecl|$ty:defaultMemBlockType $id:(closureRetvalStructField name);|]
 
@@ -125,6 +130,8 @@ compileSetStructValues struct = zipWith field
     field name (_, _, MemBlock) =
       [C.cstm|$id:struct.$id:(closureFreeStructField name)=$id:name.mem;|]
     field name (_, _, RawMem) =
+      [C.cstm|$id:struct.$id:(closureFreeStructField name)=$id:name;|]
+    field name (_, _, ScalarMem) =
       [C.cstm|$id:struct.$id:(closureFreeStructField name)=$id:name;|]
 
 compileSetRetvalStructValues ::
@@ -144,6 +151,8 @@ compileSetRetvalStructValues struct vnames we = concat $ zipWith field vnames we
       [C.cstms|$id:struct.$id:(closureRetvalStructField name)=$id:name.mem;|]
     field name (_, _, RawMem) =
       [C.cstms|$id:struct.$id:(closureRetvalStructField name)=$id:name;|]
+    field name (_, _, ScalarMem) =
+      [C.cstms|$id:struct.$id:(closureRetvalStructField name)=$id:name;|]
 
 compileGetRetvalStructVals :: (C.ToIdent a) => a -> [VName] -> [(C.Type, C.Type, ValueType)] -> [C.InitGroup]
 compileGetRetvalStructVals struct = zipWith field
@@ -151,6 +160,8 @@ compileGetRetvalStructVals struct = zipWith field
     field name (ty, _storage_ty, Prim _) =
       let inner = [C.cexp|*$id:struct->$id:(closureRetvalStructField name)|]
        in [C.cdecl|$ty:ty $id:name = $exp:inner;|]
+    field name (ty, _, ScalarMem) =
+      [C.cdecl|$ty:ty $id:name = $id:struct->$id:(closureRetvalStructField name);|]
     field name (ty, _, _) =
       [C.cdecl|$ty:ty $id:name =
                  {.desc = $string:(prettyString name),
@@ -168,6 +179,8 @@ compileGetStructVals struct = zipWith field
     field name (ty, _storage_ty, Prim pt) =
       let inner = [C.cexp|$id:struct->$id:(closureFreeStructField name)|]
        in [C.cdecl|$ty:ty $id:name = $exp:(fromStorage pt inner);|]
+    field name (ty, _, ScalarMem) =
+      [C.cdecl|$ty:ty $id:name = $id:struct->$id:(closureFreeStructField name);|]
     field name (ty, _, _) =
       [C.cdecl|$ty:ty $id:name =
                  {.desc = $string:(prettyString name),
@@ -179,6 +192,8 @@ compileWriteBackResVals struct = zipWith field
   where
     field name (_, _, Prim _) =
       [C.cstm|*$id:struct->$id:(closureRetvalStructField name) = $exp:(C.toExp name noLoc);|]
+    field name (_, _, ScalarMem) =
+      [C.cstm|$id:struct->$id:(closureRetvalStructField name) = $id:name;|]
     field name (_, _, _) =
       [C.cstm|$id:struct->$id:(closureRetvalStructField name) = $id:name.mem;|]
 
@@ -190,6 +205,8 @@ paramToCType (MemParam name space') = do
   pure (ct, ct, vt)
 
 mcMemToCType :: VName -> Space -> GC.CompilerM op s (C.Type, ValueType)
+mcMemToCType _ (ScalarSpace _ pt) =
+  pure ([C.cty|$ty:(GC.primTypeToCType pt)*|], ScalarMem)
 mcMemToCType v space = do
   refcount <- GC.fatMemory space
   cached <- isJust <$> GC.cacheMem v
@@ -426,8 +443,8 @@ compileOp (ParLoop s' body free) = do
                }|]
 
   mapM_ GC.item code'
-compileOp (Atomic aop) =
-  atomicOps aop (\ty _ -> pure [C.cty|$ty:ty*|])
+compileOp (Atomic space aop) =
+  atomicOps space aop (\ty _ -> pure [C.cty|$ty:ty*|])
 compileOp (ISPCKernel body _) =
   scopedBlock body
 compileOp (ForEach i from bound body) = do
@@ -456,27 +473,28 @@ scopedBlock code = do
 
 doAtomic ::
   (C.ToIdent a1) =>
+  Space ->
   a1 ->
   VName ->
-  Count u (TExp Int32) ->
+  Count m (TExp Int32) ->
   Exp ->
   String ->
   C.Type ->
   (C.Type -> VName -> GC.CompilerM op s C.Type) ->
   GC.CompilerM op s ()
-doAtomic old arr ind val op ty castf = do
+doAtomic space old arr ind val op ty castf = do
   ind' <- GC.compileExp $ untyped $ unCount ind
   val' <- GC.compileExp val
   cast <- castf ty arr
-  arr' <- GC.rawMem arr
+  arr' <- GC.rawMem arr space
   GC.stm [C.cstm|$id:old = $id:op(&(($ty:cast)$exp:arr')[$exp:ind'], ($ty:ty) $exp:val', __ATOMIC_RELAXED);|]
 
-atomicOps :: AtomicOp -> (C.Type -> VName -> GC.CompilerM op s C.Type) -> GC.CompilerM op s ()
-atomicOps (AtomicCmpXchg t old arr ind res val) castf = do
+atomicOps :: Space -> AtomicOp -> (C.Type -> VName -> GC.CompilerM op s C.Type) -> GC.CompilerM op s ()
+atomicOps space (AtomicCmpXchg t old arr ind res val) castf = do
   ind' <- GC.compileExp $ untyped $ unCount ind
   new_val' <- GC.compileExp val
   cast <- castf [C.cty|$ty:(GC.primTypeToCType t)|] arr
-  arr' <- GC.rawMem arr
+  arr' <- GC.rawMem arr space
   GC.stm
     [C.cstm|$id:res = $id:op(&(($ty:cast)$exp:arr')[$exp:ind'],
                  &$id:old,
@@ -485,36 +503,39 @@ atomicOps (AtomicCmpXchg t old arr ind res val) castf = do
   where
     op :: String
     op = "__atomic_compare_exchange_n"
-atomicOps (AtomicXchg t old arr ind val) castf = do
+atomicOps space (AtomicXchg t old arr ind val) castf = do
   ind' <- GC.compileExp $ untyped $ unCount ind
   val' <- GC.compileExp val
   cast <- castf [C.cty|$ty:(GC.primTypeToCType t)|] arr
-  GC.stm [C.cstm|$id:old = $id:op(&(($ty:cast)$id:arr.mem)[$exp:ind'], $exp:val', __ATOMIC_SEQ_CST);|]
+  arr' <- GC.rawMem arr space
+  GC.stm [C.cstm|$id:old = $id:op(&(($ty:cast)$exp:arr')[$exp:ind'], $exp:val', __ATOMIC_SEQ_CST);|]
   where
     op :: String
     op = "__atomic_exchange_n"
-atomicOps (AtomicLoad t ret arr ind) castf = do
+atomicOps space (AtomicLoad t ret arr ind) castf = do
   ind' <- GC.compileExp $ untyped $ unCount ind
   cast <- castf [C.cty|$ty:(GC.primTypeToCType t)|] arr
-  GC.stm [C.cstm|$id:ret = $id:op(&(($ty:cast)$id:arr.mem)[$exp:ind'], __ATOMIC_ACQUIRE);|]
+  arr' <- GC.rawMem arr space
+  GC.stm [C.cstm|$id:ret = $id:op(&(($ty:cast)$exp:arr')[$exp:ind'], __ATOMIC_ACQUIRE);|]
   where
     op :: String
     op = "__atomic_load_n"
-atomicOps (AtomicStore t arr ind val) castf = do
+atomicOps space (AtomicStore t arr ind val) castf = do
   ind' <- GC.compileExp $ untyped $ unCount ind
   val' <- GC.compileExp val
   cast <- castf [C.cty|$ty:(GC.primTypeToCType t)|] arr
-  GC.stm [C.cstm|$id:op(&(($ty:cast)$id:arr.mem)[$exp:ind'], $exp:val', __ATOMIC_RELEASE);|]
+  arr' <- GC.rawMem arr space
+  GC.stm [C.cstm|$id:op(&(($ty:cast)$exp:arr')[$exp:ind'], $exp:val', __ATOMIC_RELEASE);|]
   where
     op :: String
     op = "__atomic_store_n"
-atomicOps (AtomicAdd t old arr ind val) castf =
-  doAtomic old arr ind val "__atomic_fetch_add" [C.cty|$ty:(GC.intTypeToCType t)|] castf
-atomicOps (AtomicSub t old arr ind val) castf =
-  doAtomic old arr ind val "__atomic_fetch_sub" [C.cty|$ty:(GC.intTypeToCType t)|] castf
-atomicOps (AtomicAnd t old arr ind val) castf =
-  doAtomic old arr ind val "__atomic_fetch_and" [C.cty|$ty:(GC.intTypeToCType t)|] castf
-atomicOps (AtomicOr t old arr ind val) castf =
-  doAtomic old arr ind val "__atomic_fetch_or" [C.cty|$ty:(GC.intTypeToCType t)|] castf
-atomicOps (AtomicXor t old arr ind val) castf =
-  doAtomic old arr ind val "__atomic_fetch_xor" [C.cty|$ty:(GC.intTypeToCType t)|] castf
+atomicOps space (AtomicAdd t old arr ind val) castf =
+  doAtomic space old arr ind val "__atomic_fetch_add" [C.cty|$ty:(GC.intTypeToCType t)|] castf
+atomicOps space (AtomicSub t old arr ind val) castf =
+  doAtomic space old arr ind val "__atomic_fetch_sub" [C.cty|$ty:(GC.intTypeToCType t)|] castf
+atomicOps space (AtomicAnd t old arr ind val) castf =
+  doAtomic space old arr ind val "__atomic_fetch_and" [C.cty|$ty:(GC.intTypeToCType t)|] castf
+atomicOps space (AtomicOr t old arr ind val) castf =
+  doAtomic space old arr ind val "__atomic_fetch_or" [C.cty|$ty:(GC.intTypeToCType t)|] castf
+atomicOps space (AtomicXor t old arr ind val) castf =
+  doAtomic space old arr ind val "__atomic_fetch_xor" [C.cty|$ty:(GC.intTypeToCType t)|] castf

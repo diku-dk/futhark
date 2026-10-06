@@ -24,7 +24,7 @@ import Language.Futhark.TypeChecker.Monad (Notes, TypeError (..), aNote, withInd
 import Language.Futhark.TypeChecker.UnionFind
 
 -- | The type representation used by the constraint solver. Agnostic
--- to sizes and uniqueness.
+-- to sizes and freshness.
 type Type = CtType ()
 
 type UF s = M.Map TyVar (TyVarNode s)
@@ -39,7 +39,7 @@ newtype SolveM s a = SolveM
 -- | A solution maps a type variable to its substitution. This
 -- substitution is complete, in the sense there are no right-hand
 -- sides that contain a type variable.
-type Solution = M.Map TyVar (Either [PrimType] (TypeBase () NoUniqueness))
+type Solution = M.Map TyVar (Either [PrimType] (TypeBase () NoMode))
 
 -- | An unconstrained type variable comprises a name and (ironically)
 -- a constraint on how it can be instantiated.
@@ -73,7 +73,7 @@ typeError :: Loc -> Notes -> Doc () -> SolveM s ()
 typeError loc notes msg =
   throwError $ TypeError loc notes msg
 
-typeVar :: (Monoid u) => VName -> TypeBase dim u
+typeVar :: (Monoid o) => VName -> TypeBase dim o
 typeVar v = Scalar $ TypeVar mempty (qualName v) []
 
 cannotUnify ::
@@ -179,8 +179,8 @@ unsharedConstructorsMsg cs1 cs2 =
       filter (`notElem` M.keys cs1) (M.keys cs2)
         ++ filter (`notElem` M.keys cs2) (M.keys cs1)
 
-substTyVars :: (Monoid u) => TypeBase () u -> SolveM s (TypeBase () u)
-substTyVars (Scalar (TypeVar u qn args)) = do
+substTyVars :: (Monoid o) => TypeBase () o -> SolveM s (TypeBase () o)
+substTyVars (Scalar (TypeVar o qn args)) = do
   mb_node <- maybeLookupUF $ qualLeaf qn
   case mb_node of
     Just node -> do
@@ -195,7 +195,7 @@ substTyVars (Scalar (TypeVar u qn args)) = do
   where
     makeTyVar qn' = do
       args' <- mapM onArg args
-      pure $ Scalar $ TypeVar u qn' args'
+      pure $ Scalar $ TypeVar o qn' args'
     onArg (TypeArgType t) = TypeArgType <$> substTyVars t
     onArg d@(TypeArgDim _) = pure d
 substTyVars p@(Scalar (Prim _)) = pure p
@@ -203,17 +203,17 @@ substTyVars (Scalar (Record fs)) =
   Scalar . Record <$> traverse substTyVars fs
 substTyVars (Scalar (Sum cs)) =
   Scalar . Sum <$> traverse (mapM substTyVars) cs
-substTyVars (Scalar (Arrow u pname d t1 (RetType ext t2))) = do
+substTyVars (Scalar (Arrow o pname d t1 (RetType ext t2))) = do
   t1' <- substTyVars t1
   t2' <- substTyVars t2
   pure $
     Scalar $
-      Arrow u pname d t1' $
+      Arrow o pname d t1' $
         RetType ext $
-          t2' `setUniqueness` uniqueness t2
-substTyVars (Array u shape elemt) = do
+          t2' `setMode` freshness t2
+substTyVars (Array o shape elemt) = do
   elemt' <- substTyVars $ Scalar elemt
-  pure $ arrayOfWithAliases u shape elemt'
+  pure $ arrayOfWithAliases o shape elemt'
 
 occursCheck :: Reason Type -> VName -> VName -> Type -> SolveM s ()
 occursCheck reason v k tp = do
@@ -314,7 +314,7 @@ solveEq reason obcs orig_t1 orig_t2 = do
             _ -> Nothing
         Nothing -> pure Nothing
 
-    normalize :: TypeBase () NoUniqueness -> SolveM s (TypeBase () NoUniqueness)
+    normalize :: TypeBase () NoMode -> SolveM s (TypeBase () NoMode)
     normalize t@(Scalar (TypeVar _ (QualName [] v) [])) = do
       uf <- asks solverTyVars
       case M.lookup v uf of
@@ -382,8 +382,8 @@ unify
   (Scalar (Arrow _ _ _ t2a (RetType _ t2r))) =
     Right [(mempty, (t1a, t2a)), (mempty, (t1r', t2r'))]
     where
-      t1r' = t1r `setUniqueness` NoUniqueness
-      t2r' = t2r `setUniqueness` NoUniqueness
+      t1r' = t1r `setMode` NoMode
+      t2r' = t2r `setMode` NoMode
 unify (Scalar (Record fs1)) (Scalar (Record fs2))
   | M.keys fs1 == M.keys fs2 =
       Right $
@@ -736,7 +736,7 @@ getSolution = do
     resolve ::
       TyVar ->
       TyVarNode s ->
-      SolveM s (Either [PrimType] (TypeBase () NoUniqueness), Maybe Liftedness)
+      SolveM s (Either [PrimType] (TypeBase () NoMode), Maybe Liftedness)
     resolve tv node = do
       sol <- getSol' node
       case sol of
@@ -757,7 +757,7 @@ getSolution = do
 
     unconstr ::
       TyVar ->
-      (Either [PrimType] (TypeBase () NoUniqueness), Maybe Liftedness) ->
+      (Either [PrimType] (TypeBase () NoMode), Maybe Liftedness) ->
       [UnconTyVar] ->
       [UnconTyVar]
     unconstr tv (_, Just l) acc = (tv, l) : acc
@@ -765,8 +765,8 @@ getSolution = do
 
     mkSubst ::
       TyVar ->
-      (Either [PrimType] (TypeBase () NoUniqueness), Maybe Liftedness) ->
-      Maybe (Either [PrimType] (TypeBase () NoUniqueness))
+      (Either [PrimType] (TypeBase () NoMode), Maybe Liftedness) ->
+      Maybe (Either [PrimType] (TypeBase () NoMode))
     mkSubst _ (_, Just _) = Nothing
     mkSubst tv (s@(Right (Scalar (TypeVar _ (QualName [] tv') _))), _) =
       if tv /= tv' then Just s else Nothing

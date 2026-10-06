@@ -18,7 +18,7 @@ import Futhark.Tools
 -- | A permutation for transposing the vector shape past the next dimension.
 --
 -- That is, converts @[vec...][d][elem...]@ to @[d][vec...][elem...]@.
-vecPerm :: (ArrayShape s) => Shape -> TypeBase s u -> [Int]
+vecPerm :: (ArrayShape s) => Shape -> TypeBase s o -> [Int]
 vecPerm vec_shape t =
   [shapeRank vec_shape]
     ++ [0 .. shapeRank vec_shape - 1]

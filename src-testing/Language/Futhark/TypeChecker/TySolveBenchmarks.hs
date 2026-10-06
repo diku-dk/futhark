@@ -17,7 +17,7 @@ import Language.Futhark.TypeChecker.Constraints
 import Language.Futhark.TypeChecker.Monad (TypeError (..))
 import Language.Futhark.TypeChecker.TySolve as N (Solution, UnconTyVar, solve)
 
-(~) :: TypeBase () NoUniqueness -> TypeBase () NoUniqueness -> CtTy ()
+(~) :: TypeBase () NoMode -> TypeBase () NoMode -> CtTy ()
 t1 ~ t2 = CtEq (Reason mempty) t1 t2
 
 tv :: VName -> Level -> (VName, (Level, TyVarInfo ()))
@@ -47,8 +47,8 @@ generateContraints num_vars
 
           ty_vars = M.fromList $ map (`tv` 0) var_names
 
-          mkTy :: VName -> TypeBase () NoUniqueness
-          mkTy v = Scalar (TypeVar NoUniqueness (qualName v) [])
+          mkTy :: VName -> TypeBase () NoMode
+          mkTy v = Scalar (TypeVar NoMode (qualName v) [])
 
           cts =
             zipWith

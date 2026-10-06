@@ -324,7 +324,7 @@ unifyWith onDims usage = subunify False
 
       -- The types are structurally identical, as this has already
       -- been verified by the unsized type checker - we are here only
-      -- to unify their sizes (and check consumption and uniqueness
+      -- to unify their sizes (and check consumption and freshness
       -- for functions). The 'failure' cases can be reached when the
       -- types contain distinct abstract types that the unsized
       -- checking could not distinguish, and serve as a backstop for
@@ -362,13 +362,13 @@ unifyWith onDims usage = subunify False
                     </> "and"
                     </> indent 2 (pretty d2 <> pretty a2)
                     </> "are incompatible regarding consuming their arguments."
-            | uncurry (<) $ swap ord (uniqueness b2) (uniqueness b1) -> do
+            | uncurry (<) $ swap ord (freshness b2) (freshness b1) -> do
                 unifyError usage mempty bcs $
                   "Return types"
                     </> indent 2 (pretty b1)
                     </> "and"
                     </> indent 2 (pretty b2)
-                    </> "have incompatible uniqueness."
+                    </> "have incompatible freshness."
             | otherwise -> do
                 -- Introduce the existentials as size variables so they
                 -- are subject to unification.  We will remove them again
@@ -744,8 +744,8 @@ allDimsFreshInType ::
   Usage ->
   Rigidity ->
   Name ->
-  TypeBase d als ->
-  m (TypeBase Size als, M.Map VName d)
+  TypeBase d o ->
+  m (TypeBase Size o, M.Map VName d)
 allDimsFreshInType usage r desc t =
   runStateT (bitraverse onDim pure t) mempty
   where

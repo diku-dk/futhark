@@ -204,7 +204,7 @@ fwdLoop pat aux loop =
     empty_saved_array <-
       forM loop_params_to_copy $ \p ->
         letSubExp (baseName (paramName p) <> "_empty_saved")
-          =<< eBlank (arrayOf (paramDec p) (Shape [bound64]) NoUniqueness)
+          =<< eBlank (arrayOf (paramDec p) (Shape [bound64]) NoMode)
 
     (body', (saved_pats, saved_params)) <- buildBody $
       localScope (scopeOfFParams loop_params) $
@@ -219,8 +219,8 @@ fwdLoop pat aux loop =
               saved_param_v <- newVName $ baseName v <> "_saved"
               saved_pat_v <- newVName $ baseName v <> "_saved"
               setLoopTape v saved_pat_v
-              let saved_param = Param mempty saved_param_v $ arrayOf t (Shape [bound64]) Unique
-                  saved_pat = PatElem saved_pat_v $ arrayOf t (Shape [bound64]) NoUniqueness
+              let saved_param = Param mempty saved_param_v $ arrayOf t (Shape [bound64]) Consume
+                  saved_pat = PatElem saved_pat_v $ arrayOf t (Shape [bound64]) NoMode
               saved_update <-
                 localScope (scopeOfFParams [saved_param])
                   $ letInPlace
@@ -245,7 +245,7 @@ valPatAdj v = do
   v_adj <- adjVName v
   init_adj <- lookupAdjVal v
   t <- lookupType init_adj
-  pure (Param mempty v_adj (toDecl t Unique), Var init_adj)
+  pure (Param mempty v_adj (toDecl t Consume), Var init_adj)
 
 valPatAdjs :: LoopInfo [VName] -> ADM (LoopInfo [(Param DeclType, SubExp)])
 valPatAdjs = (mapM . mapM) valPatAdj

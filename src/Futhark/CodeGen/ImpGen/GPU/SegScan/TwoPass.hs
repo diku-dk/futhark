@@ -14,7 +14,7 @@ import Futhark.CodeGen.ImpGen.GPU.Base
 import Futhark.IR.GPUMem
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Transform.Rename
-import Futhark.Util.IntegralExp (divUp, quot, rem)
+import Futhark.Util.IntegralExp (ceilDiv, quot, rem)
 import Prelude hiding (quot, rem)
 
 -- Aggressively try to reuse memory for different SegBinOps, because
@@ -53,7 +53,7 @@ makeLocalArrays tblock_id (Count tblock_size) scans = do
       pure arrs
 
     getMem pt shape = do
-      let size = typeSize $ Array pt shape NoUniqueness
+      let size = typeSize $ Array pt shape NoMode
       mems <- get
       case (L.find ((size `elem`) . fst) mems, mems) of
         (Just mem, _) -> do
@@ -160,7 +160,7 @@ scanStage1 scan_out map_out num_tblocks tblock_size space scans kbody = do
   let (gtids, dims) = unzip $ unSegSpace space
       dims' = map pe64 dims
   let num_elements = product dims'
-      elems_per_thread = num_elements `divUp` sExt64 (tvExp num_threads)
+      elems_per_thread = num_elements `ceilDiv` sExt64 (tvExp num_threads)
       elems_per_group = unCount tblock_size' * elems_per_thread
 
   let crossesSegment =
@@ -334,7 +334,7 @@ scanStage2 scan_out stage1_num_threads elems_per_group stage1_num_tblocks stage2
   -- Number of chunks needed to cover all stage-1 blocks.
   num_chunks <-
     dPrimVE "stage2_num_chunks" $
-      stage1_num_tblocks_e `divUp` stage2_tblock_size_e
+      stage1_num_tblocks_e `ceilDiv` stage2_tblock_size_e
 
   sKernelThread "scan_stage2" (segFlat space) (defKernelAttrs (Count (intConst Int64 1)) stage2_tblock_size) $ do
     constants <- kernelConstants <$> askEnv
@@ -506,7 +506,7 @@ scanStage3 pat scan_out map_out num_tblocks tblock_size elems_per_group crossesS
   required_groups <-
     dPrimVE "required_groups" $
       sExt32 $
-        product dims' `divUp` sExt64 (unCount tblock_size')
+        product dims' `ceilDiv` sExt64 (unCount tblock_size')
 
   sKernelThread "scan_stage3" (segFlat space) (defKernelAttrs num_tblocks tblock_size) $
     virtualiseBlocks SegVirt required_groups $ \virt_tblock_id -> do

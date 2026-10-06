@@ -683,11 +683,10 @@ vecToInner v = do
 --
 --  let ys_copy = copy ys
 --
--- Then we generate code for the return sweep as normal, but replace
--- _every instance_ of 'ys' in the generated code with 'ys_copy'.
--- This works because Futhark does not have *semantic* in-place
--- updates - any uniqueness violation can be replaced with copies (on
--- arrays, anyway).
+-- Then we generate code for the return sweep as normal, but replace _every
+-- instance_ of 'ys' in the generated code with 'ys_copy'. This works because
+-- Futhark does not have *semantic* in-place updates - any consumption violation
+-- can be replaced with copies (on arrays, anyway).
 --
 -- If we are lucky, the uses of 'ys_copy' will be removed by
 -- simplification, and there will be no overhead.  But even if not,

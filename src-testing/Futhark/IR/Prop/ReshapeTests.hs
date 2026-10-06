@@ -10,6 +10,7 @@ import Futhark.IR.Prop.Constants
 import Futhark.IR.Prop.Reshape
 import Futhark.IR.Syntax
 import Futhark.IR.SyntaxTests ()
+import Futhark.Util.IntegralExp (Wrapped (..))
 import Test.Tasty
 import Test.Tasty.HUnit
 
@@ -64,7 +65,12 @@ flipReshapeRearrangeTests =
       )
       $ flipReshapeRearrange v0_shape v1_shape perm @?= res
   | (v0_shape :: [String], v1_shape, perm, res) <-
-      [ ( ["A", "B", "C"],
+      [ ( ["M", "A", "B"],
+          ["M", "C", "D"],
+          [0, 2, 1],
+          Nothing
+        ),
+        ( ["A", "B", "C"],
           ["A", "BC"],
           [1, 0],
           Just [1, 2, 0]
@@ -127,7 +133,12 @@ simplifyTests :: TestTree
 simplifyTests =
   testGroup
     "simplifyNewShape"
-    [ testCase "Inverse flatten and unflatten - simple case" $
+    [ testCase "Partial inverse must preserve extra dimension" $
+        lhs
+          ["A", "B", "C"]
+          [dimSplice 0 2 ["AB", "1"], dimUnflatten 0 ["A", "B"]]
+          @?= Nothing,
+      testCase "Inverse flatten and unflatten - simple case" $
         lhs
           ["A", "B"]
           [dimFlatten 0 2 "AB", dimUnflatten 0 ["A", "B"]]
@@ -225,6 +236,44 @@ simplifyTests =
        in dimSplices
             <$> simplifyNewShape (Shape orig_shape) (NewShape ss res_shape)
 
+unreshapeSliceTests :: TestTree
+unreshapeSliceTests =
+  testGroup
+    "unreshapeSlice"
+    [ testCase "Unflatten" $
+        unreshape [6] [dimUnflatten 0 [2, 3]] [ix 1, ix 2]
+          @?= Just [ix 5],
+      testCase "Unflatten with untouched slice" $
+        unreshape [4, 6, 5] [dimUnflatten 1 [2, 3]] [ix 1, ix 1, ix 2, DimSlice 0 5 1]
+          @?= Just [ix 1, ix 5, DimSlice 0 5 1],
+      testCase "Flatten" $
+        unreshape [2, 3] [dimFlatten 0 2 6] [ix 5]
+          @?= Just [ix 1, ix 2],
+      testCase "Sliced flatten" $
+        unreshape [2, 3] [dimFlatten 0 2 6] [DimSlice 0 6 1]
+          @?= Nothing,
+      testCase "Sliced coercion" $
+        unreshape [4] [dimCoerce 0 4] [DimSlice 1 2 1]
+          @?= Just [DimSlice 1 2 1],
+      testCase "Flatten followed by unflatten" $
+        unreshape [2, 3, 4] [dimFlatten 1 2 12, dimUnflatten 1 [3, 4]] [ix 1, ix 2, ix 3]
+          @?= Just [ix 1, ix 2, ix 3],
+      testCase "Complete reshape agrees with reshapeIndex" $
+        unreshape [6, 4] [dimSplice 0 2 [4, 3, 2]] [ix 3, ix 2, ix 1]
+          @?= Just (map ix $ reshapeIndex [6, 4] [4, 3, 2] [3, 2, 1])
+    ]
+  where
+    ix = DimFix
+    unreshape ::
+      [Wrapped Int] ->
+      [DimSplice (Wrapped Int)] ->
+      [DimIndex (Wrapped Int)] ->
+      Maybe [DimIndex (Wrapped Int)]
+    unreshape shape ss =
+      unreshapeSlice (Shape shape) $
+        NewShape ss $
+          L.foldl' applySplice (Shape shape) ss
+
 tests :: TestTree
 tests =
   testGroup "ReshapeTests" . mconcat $
@@ -232,5 +281,5 @@ tests =
       reshapeInnerTests,
       flipReshapeRearrangeTests,
       flipRearrangeReshapeTests,
-      [simplifyTests]
+      [simplifyTests, unreshapeSliceTests]
     ]

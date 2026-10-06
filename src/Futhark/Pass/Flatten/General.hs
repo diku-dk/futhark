@@ -285,7 +285,7 @@ readTypeDims ::
   DistEnv ->
   [SubExp] ->
   DistInputs ->
-  TypeBase Shape u ->
+  TypeBase Shape o ->
   FlattenM [SubExp]
 readTypeDims segments env is inputs =
   mapM (readInput segments env is inputs) . arrayDims
@@ -634,23 +634,23 @@ liftParam w fparam =
       p <-
         newParam
           (desc <> "_lifted")
-          (arrayOf (Prim pt) (Shape [w]) Nonunique)
+          (arrayOf (Prim pt) (Shape [w]) Observe)
       pure ([p], Regular $ paramName p)
-    Array pt _ u -> do
+    Array pt _ o -> do
       num_data <-
         newParam (desc <> "_num_data") $ Prim int64
       segments <-
         newParam (desc <> "_S") $
-          arrayOf (Prim int64) (Shape [w]) Nonunique
+          arrayOf (Prim int64) (Shape [w]) Observe
       flags <-
         newParam (desc <> "_F") $
-          arrayOf (Prim Bool) (Shape [Var (paramName num_data)]) Nonunique
+          arrayOf (Prim Bool) (Shape [Var (paramName num_data)]) Observe
       offsets <-
         newParam (desc <> "_O") $
-          arrayOf (Prim int64) (Shape [w]) Nonunique
+          arrayOf (Prim int64) (Shape [w]) Observe
       elems <-
         newParam (desc <> "_D") $
-          arrayOf (Prim pt) (Shape [Var (paramName num_data)]) u
+          arrayOf (Prim pt) (Shape [Var (paramName num_data)]) o
       pure
         ( [num_data, segments, flags, offsets, elems],
           Irregular $
@@ -676,12 +676,12 @@ liftRegularParam w fparam =
       p <-
         newParam
           (desc <> "_lifted")
-          (arrayOf (Prim pt) (Shape [w]) Nonunique)
+          (arrayOf (Prim pt) (Shape [w]) Observe)
       pure (p, Regular $ paramName p)
-    Array pt shape u -> do
+    Array pt shape o -> do
       p <-
         newParam (desc <> "_lifted") $
-          arrayOf (Prim pt) (Shape [w] <> shape) u
+          arrayOf (Prim pt) (Shape [w] <> shape) o
       pure (p, Regular $ paramName p)
     Acc {} ->
       error "liftParam: Acc"
@@ -760,7 +760,7 @@ getIrregRep lvl segments env inps v =
 --
 -- See the 'liftResult' function for the opposite process i.e.
 -- turning 'ResRep's into results.
-resultToResReps :: [TypeBase s u] -> [VName] -> [ResRep]
+resultToResReps :: [TypeBase s o] -> [VName] -> [ResRep]
 resultToResReps types results =
   snd $
     L.mapAccumL

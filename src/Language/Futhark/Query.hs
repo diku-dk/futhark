@@ -63,7 +63,7 @@ data TermBinding
     TermFun TermFunData
   deriving (Eq, Show)
 
-termBindingType :: TermBinding -> TypeBase Size NoUniqueness
+termBindingType :: TermBinding -> TypeBase Size NoMode
 termBindingType = \case
   TermSize -> Scalar (Prim (Signed Int64))
   TermVar _ t _ -> t
@@ -101,7 +101,7 @@ sizeDefs (SizeBinder v loc) =
 
 patternDefs ::
   TermBindSrc ->
-  Pat (TypeBase Size u) ->
+  Pat (TypeBase Size o) ->
   Defs
 patternDefs bindSrc (Id vn (Info t) loc) =
   M.singleton vn $ DefBound $ BoundTerm tvar (locOf loc)
@@ -317,7 +317,7 @@ atPosInTypeExp te pos =
       msum $ map ((`atPosInTypeExp` pos) . snd) fields
     TEArray dim te' _ ->
       atPosInTypeExp te' pos `mplus` inDim dim
-    TEUnique te' _ ->
+    TEStar te' _ ->
       atPosInTypeExp te' pos
     TEApply e1 arg _ ->
       atPosInTypeExp e1 pos `mplus` inArg arg
@@ -333,7 +333,7 @@ atPosInTypeExp te pos =
     inDim (SizeExp e _) = atPosInExp e pos
     inDim SizeExpAny {} = Nothing
 
-atPosInPat :: Pat (TypeBase Size u) -> Pos -> Maybe RawAtPos
+atPosInPat :: Pat (TypeBase Size o) -> Pos -> Maybe RawAtPos
 atPosInPat (Id vn _ loc) pos = do
   guard $ loc `contains` pos
   Just $ RawAtName (qualName vn) $ locOf loc

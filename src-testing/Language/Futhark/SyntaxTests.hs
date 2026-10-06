@@ -26,8 +26,8 @@ tests = testGroup "Source SyntaxTests" []
 instance Arbitrary BinOp where
   arbitrary = elements [minBound .. maxBound]
 
-instance Arbitrary Uniqueness where
-  arbitrary = elements [Unique, Nonunique]
+instance Arbitrary Freshness where
+  arbitrary = elements [Fresh, Nonfresh]
 
 instance Arbitrary PrimType where
   arbitrary =
@@ -119,8 +119,8 @@ pPrimType =
   where
     f t = keyword (prettyText t) $> t
 
-pUniqueness :: Parser Uniqueness
-pUniqueness = choice [lexeme "*" $> Unique, pure Nonunique]
+pFreshness :: Parser Freshness
+pFreshness = choice [lexeme "*" $> Fresh, pure Nonfresh]
 
 pSize :: Parser Size
 pSize =
@@ -130,7 +130,7 @@ pSize =
         flip sizeFromName mempty <$> pQualVName
       ]
 
-pScalarNonFun :: Parser d -> Parser (ScalarTypeBase d Uniqueness)
+pScalarNonFun :: Parser d -> Parser (ScalarTypeBase d Freshness)
 pScalarNonFun pd =
   choice
     [ Prim <$> pPrimType,
@@ -140,11 +140,11 @@ pScalarNonFun pd =
     ]
   where
     pField = (,) <$> pName <* lexeme ":" <*> pType pd
-    pTypeVar = TypeVar <$> pUniqueness <*> pQualVName <*> many pTypeArg
+    pTypeVar = TypeVar <$> pFreshness <*> pQualVName <*> many pTypeArg
     pTypeArg =
       choice
         [ TypeArgDim <$> pd,
-          TypeArgType . second (const NoUniqueness) <$> pTypeArgType
+          TypeArgType . second (const NoMode) <$> pTypeArgType
         ]
     pTypeArgType =
       choice
@@ -152,14 +152,14 @@ pScalarNonFun pd =
           parens $ pType pd
         ]
 
-pArrayType :: Parser d -> Parser (TypeBase d Uniqueness)
+pArrayType :: Parser d -> Parser (TypeBase d Freshness)
 pArrayType pd =
   Array
-    <$> pUniqueness
+    <$> pFreshness
     <*> (Shape <$> some pd)
-    <*> (second (const NoUniqueness) <$> pScalarNonFun pd)
+    <*> (second (const NoMode) <$> pScalarNonFun pd)
 
-pNonFunType :: Parser d -> Parser (TypeBase d Uniqueness)
+pNonFunType :: Parser d -> Parser (TypeBase d Freshness)
 pNonFunType pd =
   choice
     [ try $ pArrayType pd,
@@ -167,11 +167,11 @@ pNonFunType pd =
       Scalar <$> pScalarNonFun pd
     ]
 
-uniquenessToDiet :: Uniqueness -> Diet
-uniquenessToDiet Unique = Consume
-uniquenessToDiet Nonunique = Observe
+freshnessToDiet :: Freshness -> Diet
+freshnessToDiet Fresh = Consume
+freshnessToDiet Nonfresh = Observe
 
-pScalarType :: Parser d -> Parser (ScalarTypeBase d Uniqueness)
+pScalarType :: Parser d -> Parser (ScalarTypeBase d Freshness)
 pScalarType pd = choice [try pFun, pScalarNonFun pd]
   where
     pFun =
@@ -181,21 +181,21 @@ pScalarType pd = choice [try pFun, pScalarNonFun pd]
         [ try pNamedParam,
           do
             t <- pNonFunType pd
-            pure $ Arrow Nonunique Unnamed (diet $ second uniquenessToDiet t) (toStruct t)
+            pure $ Arrow Nonfresh Unnamed (diet $ second freshnessToDiet t) (toStruct t)
         ]
     pNamedParam = parens $ do
       v <- pVName <* lexeme ":"
       t <- pType pd
-      pure $ Arrow Nonunique (Named v) (diet $ second uniquenessToDiet t) (toStruct t)
+      pure $ Arrow Nonfresh (Named v) (diet $ second freshnessToDiet t) (toStruct t)
 
-pRetType :: Parser d -> Parser (RetTypeBase d Uniqueness)
+pRetType :: Parser d -> Parser (RetTypeBase d Freshness)
 pRetType pd =
   choice
     [ lexeme "?" *> (RetType <$> some (brackets pVName) <* lexeme "." <*> pType pd),
       RetType [] <$> pType pd
     ]
 
-pType :: Parser d -> Parser (TypeBase d Uniqueness)
+pType :: Parser d -> Parser (TypeBase d Freshness)
 pType pd =
   choice [try $ Scalar <$> pScalarType pd, pArrayType pd, parens (pType pd)]
 
@@ -206,27 +206,27 @@ fromStringParse p what s =
     onError e =
       error $ "not a " <> what <> ": " <> s <> "\n" <> errorBundlePretty e
 
-instance IsString (ScalarTypeBase Size NoUniqueness) where
+instance IsString (ScalarTypeBase Size NoMode) where
   fromString =
     fromStringParse
-      (second (const NoUniqueness) <$> pScalarType pSize)
+      (second (const NoMode) <$> pScalarType pSize)
       "ScalarType"
 
-instance IsString (ScalarTypeBase () NoUniqueness) where
+instance IsString (ScalarTypeBase () NoMode) where
   fromString =
     fromStringParse
-      (second (const NoUniqueness) <$> pScalarType (pure ()))
+      (second (const NoMode) <$> pScalarType (pure ()))
       "ScalarType"
 
-instance IsString (TypeBase () NoUniqueness) where
+instance IsString (TypeBase () NoMode) where
   fromString =
     fromStringParse
-      (second (const NoUniqueness) <$> pType (brackets $ pure ()))
+      (second (const NoMode) <$> pType (brackets $ pure ()))
       "Type"
 
 instance IsString StructType where
   fromString =
-    fromStringParse (second (const NoUniqueness) <$> pType pSize) "StructType"
+    fromStringParse (second (const NoMode) <$> pType pSize) "StructType"
 
 instance IsString ParamType where
   fromString =
@@ -238,7 +238,7 @@ instance IsString ResType where
 
 instance IsString StructRetType where
   fromString =
-    fromStringParse (second (pure NoUniqueness) <$> pRetType pSize) "StructRetType"
+    fromStringParse (second (pure NoMode) <$> pRetType pSize) "StructRetType"
 
 instance IsString ResRetType where
   fromString = fromStringParse (pRetType pSize) "ResRetType"

@@ -263,13 +263,15 @@ getTySet :: TypeM TySet
 getTySet = gets stateTySet
 
 -- | Run type checking command while accumulating (and returning) all new
--- abstract types, then reset to known abstract types afterwards.
+-- abstract types.  Abstract types are uniquely named and their liftedness
+-- never changes, so the set of known abstract types only ever grows; an
+-- abstract type created inside a module expression is still nameable
+-- afterwards (as @m.t@), and so must remain known.
 collectTySet :: TypeM a -> TypeM (a, TySet)
 collectTySet m = do
   old <- gets stateTySet
   x <- m
   new <- gets stateTySet
-  modify $ \s -> s {stateTySet = old}
   pure (x, new `M.difference` old)
 
 -- | Look up the liftedness of an abstract type.
@@ -497,8 +499,8 @@ qualifyTypeVars ::
   Env ->
   [VName] ->
   [VName] ->
-  TypeBase Size as ->
-  TypeBase Size as
+  TypeBase Size o ->
+  TypeBase Size o
 qualifyTypeVars = qualifyTypeVarsWith onDim
   where
     onDim qual except e = runIdentity $ onDimM except e
@@ -510,30 +512,30 @@ qualifyTypeVars = qualifyTypeVarsWith onDim
 -- sizes, which are handled by the given function (that is passed the
 -- qualification function and the set of names not to qualify).
 qualifyTypeVarsWith ::
-  forall dim as.
+  forall dim o.
   ((S.Set VName -> QualName VName -> QualName VName) -> S.Set VName -> dim -> dim) ->
   Env ->
   [VName] ->
   [VName] ->
-  TypeBase dim as ->
-  TypeBase dim as
+  TypeBase dim o ->
+  TypeBase dim o
 qualifyTypeVarsWith onDim outer_env orig_except ref_qs
   | null ref_qs = id
   | otherwise = onType (S.fromList orig_except)
   where
     onType ::
-      forall as'.
+      forall o'.
       S.Set VName ->
-      TypeBase dim as' ->
-      TypeBase dim as'
-    onType except (Array u shape et) =
-      Array u (fmap (onDim qual except) shape) (onScalar except et)
+      TypeBase dim o' ->
+      TypeBase dim o'
+    onType except (Array o shape et) =
+      Array o (fmap (onDim qual except) shape) (onScalar except et)
     onType except (Scalar t) =
       Scalar $ onScalar except t
 
     onScalar _ (Prim t) = Prim t
-    onScalar except (TypeVar u qn targs) =
-      TypeVar u (qual except qn) (map (onTypeArg except) targs)
+    onScalar except (TypeVar o qn targs) =
+      TypeVar o (qual except qn) (map (onTypeArg except) targs)
     onScalar except (Record m) =
       Record $ M.map (onType except) m
     onScalar except (Sum m) =

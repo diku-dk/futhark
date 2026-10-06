@@ -421,7 +421,7 @@ addLambda ::
     MonadBuilder m,
     Buildable (Rep m)
   ) =>
-  TypeBase Shape NoUniqueness ->
+  TypeBase Shape NoMode ->
   m (Lambda (Rep m))
 addLambda (Prim pt) = binOpLambda (addBinOp pt) pt
 addLambda t@Array {} = do

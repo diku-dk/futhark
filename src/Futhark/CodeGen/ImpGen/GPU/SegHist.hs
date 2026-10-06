@@ -21,17 +21,25 @@
 --
 -- LMAX: maximum amount of shared memory per threadblock (hard limit).
 --
+-- SMAX: most passes we are willing to make over the input (depends on
+-- how expensive the atomic update is, e.g. 3, and is 1 if the kernel
+-- body cannot safely be executed more than once).
+--
 -- We wish to compute:
 --
 -- COOP: cooperation level (number of threads per subhistogram)
 --
 -- LH: number of shared memory subhistograms
 --
+-- S: number of chunks the buckets are split into, as LH subhistograms
+-- of the entire histogram will usually not fit in LMAX.
+--
 -- We do this as:
 --
 -- COOP = ceil(H / T)
 -- LH = ceil((G*T)/H)
--- if COOP <= G && H <= LMAX then
+-- S = ceil(H / (buckets that fit in LMAX))
+-- if COOP <= G && S <= SMAX then
 --   use shared memory
 -- else
 --   use global memory
@@ -53,7 +61,7 @@ import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Pass.ExplicitAllocations ()
 import Futhark.Transform.Substitute
 import Futhark.Util (chunks, mapAccumLM, maxinum, splitFromEnd, takeLast)
-import Futhark.Util.IntegralExp (divUp, quot, rem)
+import Futhark.Util.IntegralExp (ceilDiv, quot, rem)
 import Prelude hiding (quot, rem)
 
 data SubhistosInfo = SubhistosInfo
@@ -81,6 +89,27 @@ histSize = product . map pe64 . shapeDims . histShape
 
 histRank :: HistOp GPUMem -> Int
 histRank = shapeRank . histShape
+
+-- | The element types of the shared memory arrays that make up a
+-- single subhistogram for this operation: one per component of the
+-- operator, plus a lock array if the operator needs locking.
+slugSharedArrays :: SegHistSlug -> [Type]
+slugSharedArrays (SegHistSlug op _ _ do_op) =
+  case do_op of
+    AtomicLocking {} -> Prim int32 : lambdaReturnType (histOp op)
+    _ -> lambdaReturnType (histOp op)
+
+-- | The size of the largest of these histograms.
+maxHistSize :: [SegHistSlug] -> Imp.TExp Int64
+maxHistSize = L.foldl' sMax64 0 . map (histSize . slugOp)
+
+-- | Bytes of shared memory occupied by a single bucket of a single
+-- subhistogram for this operation, not counting the padding of the
+-- individual component arrays.
+slugSharedBytesPerBucket :: SegHistSlug -> Imp.TExp Int64
+slugSharedBytesPerBucket slug =
+  unCount . sum . map (typeSize . (`arrayOfShape` histOpShape (slugOp slug))) $
+    slugSharedArrays slug
 
 -- | Figure out how much memory is needed per histogram, both
 -- segmented and unsegmented, and compute some other auxiliary
@@ -265,7 +294,7 @@ prepareIntermediateArraysGlobal passage segments hist_T hist_N slugs = do
         MayBeMultiPass ->
           sExt32 $
             (sExt64 hist_M_min * hist_H * sExt64 hist_el_size)
-              `divUp` t64 (hist_F_L2 * r64 (tvExp hist_L2) * hist_RACE_exp)
+              `ceilDiv` t64 (hist_F_L2 * r64 (tvExp hist_L2) * hist_RACE_exp)
         MustBeSinglePass ->
           1
 
@@ -287,32 +316,19 @@ prepareIntermediateArraysGlobal passage segments hist_T hist_N slugs = do
     r64 = isF64 . ConvOpExp (SIToFP Int32 Float64) . untyped
     t64 = isInt64 . ConvOpExp (FPToSI Float64 Int64) . untyped
 
-    -- "Average element size" as computed by a formula that also takes
-    -- locking into account.
-    slugElAvgSize slug@(SegHistSlug op _ _ do_op) =
-      case do_op of
-        AtomicLocking {} ->
-          slugElSize slug `quot` (1 + L.genericLength (lambdaReturnType (histOp op)))
-        _ ->
-          slugElSize slug `quot` L.genericLength (lambdaReturnType (histOp op))
+    slugElSize :: SegHistSlug -> Imp.TExp Int32
+    slugElSize = sExt32 . slugSharedBytesPerBucket
 
     -- "Average element size" as computed by a formula that also takes
     -- locking into account.
-    slugElSize (SegHistSlug op _ _ do_op) =
-      sExt32 . unCount . sum $
-        case do_op of
-          AtomicLocking {} ->
-            map (typeSize . (`arrayOfShape` histOpShape op)) $
-              Prim int32 : lambdaReturnType (histOp op)
-          _ ->
-            map (typeSize . (`arrayOfShape` histOpShape op)) $
-              lambdaReturnType (histOp op)
+    slugElAvgSize slug =
+      slugElSize slug `quot` L.genericLength (slugSharedArrays slug)
 
     onOp hist_L2 hist_M_min hist_S hist_RACE_exp l slug = do
       let SegHistSlug op num_subhistos subhisto_info do_op = slug
           hist_H = histSize op
 
-      hist_H_chk <- dPrimVE "hist_H_chk" $ hist_H `divUp` sExt64 hist_S
+      hist_H_chk <- dPrimVE "hist_H_chk" $ hist_H `ceilDiv` sExt64 hist_S
 
       emit $ Imp.DebugPrint "Chunk size (H_chk)" $ Just $ untyped hist_H_chk
 
@@ -391,7 +407,7 @@ histKernelGlobalPass map_pes num_tblocks tblock_size space slugs kbody histogram
       total_w_64 = product space_sizes_64
 
   hist_H_chks <- forM (map (histSize . slugOp) slugs) $ \w ->
-    dPrimVE "hist_H_chk" $ w `divUp` sExt64 hist_S
+    dPrimVE "hist_H_chk" $ w `ceilDiv` sExt64 hist_S
 
   sKernelThread "seghist_global" (segFlat space) (defKernelAttrs num_tblocks tblock_size) $ do
     constants <- kernelConstants <$> askEnv
@@ -401,7 +417,7 @@ histKernelGlobalPass map_pes num_tblocks tblock_size space slugs kbody histogram
       dPrimVE "subhisto_ind" $
         sExt32 (kernelGlobalThreadId constants)
           `quot` ( kernelNumThreads constants
-                     `divUp` sExt32 (tvExp (slugNumSubhistos slug))
+                     `ceilDiv` sExt32 (tvExp (slugNumSubhistos slug))
                  )
 
     -- Loop over flat offsets into the input and output.  The
@@ -608,7 +624,7 @@ histKernelLocalPass
     num_segments <- dPrimVE "num_segments" $ product $ map pe64 segment_dims
 
     hist_H_chks <- forM (map slugOp slugs) $ \op ->
-      dPrimV "hist_H_chk" $ histSize op `divUp` sExt64 hist_S
+      dPrimV "hist_H_chk" $ histSize op `ceilDiv` sExt64 hist_S
 
     histo_sizes <- forM (zip slugs hist_H_chks) $ \(slug, hist_H_chk) -> do
       let histo_dims =
@@ -617,7 +633,7 @@ histKernelLocalPass
         dPrimVE "histo_size" $ product histo_dims
       let block_hists_size = sExt64 num_subhistos_per_block * histo_size
       init_per_thread <-
-        dPrimVE "init_per_thread" $ sExt32 $ block_hists_size `divUp` pe64 (unCount tblock_size)
+        dPrimVE "init_per_thread" $ sExt32 $ block_hists_size `ceilDiv` pe64 (unCount tblock_size)
       pure (histo_dims, histo_size, init_per_thread)
 
     let attrs = (defKernelAttrs num_tblocks tblock_size) {kAttrCheckSharedMemory = False}
@@ -909,7 +925,7 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
   num_tblocks <-
     fmap (Imp.Count . tvSize) $
       dPrimV "num_tblocks" $
-        sExt64 hist_T `divUp` pe64 (unCount tblock_size)
+        sExt64 hist_T `ceilDiv` pe64 (unCount tblock_size)
   let num_tblocks' = pe64 <$> num_tblocks
       tblock_size' = pe64 <$> tblock_size
 
@@ -922,7 +938,7 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
       r64
         ( sMin64
             (sExt64 (tvExp hist_L `quot` hist_el_size))
-            (hist_N `divUp` sExt64 (unCount num_tblocks'))
+            (hist_N `ceilDiv` sExt64 (unCount num_tblocks'))
         )
         / r64 hist_H
 
@@ -950,10 +966,10 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
           dPrimVE "hist_T_hist_min" $
             sExt32 $
               sMin64 (sExt64 hist_Nin * sExt64 hist_Nout) (sExt64 hist_T)
-                `divUp` sExt64 hist_Nout
+                `ceilDiv` sExt64 hist_Nout
 
         -- Number of blocks, rounded up.
-        let r = hist_T_hist_min `divUp` sExt32 hist_B
+        let r = hist_T_hist_min `ceilDiv` sExt32 hist_B
 
         dPrimVE "work_asymp_M_max" $ hist_Nin `quot` (sExt64 r * hist_H)
       else
@@ -974,7 +990,7 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
   -- working on the same (sub)histogram.
   hist_C <-
     dPrimVE "hist_C" $
-      hist_B `divUp` sExt64 hist_M_nonzero
+      hist_B `ceilDiv` sExt64 hist_M_nonzero
 
   emit $ Imp.DebugPrint "local hist_M0" $ Just $ untyped hist_M0
   emit $ Imp.DebugPrint "local work asymp M max" $ Just $ untyped work_asymp_M_max
@@ -987,20 +1003,29 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
         untyped $
           hist_H * hist_el_size * sExt64 (tvExp hist_M)
 
-  -- local_mem_needed is what we need to keep a single bucket in local
-  -- memory - this is an absolute minimum.  We can fit anything else
-  -- by doing multiple passes, although more than a few is
-  -- (heuristically) not efficient.
+  -- local_mem_needed is what we need to keep a single bucket of every
+  -- histogram in shared memory - this is an absolute minimum.  We can
+  -- fit anything else by doing multiple passes, although more than a
+  -- few is (heuristically) not efficient.
   local_mem_needed <-
     dPrimVE "local_mem_needed" $
-      hist_el_size * sExt64 (tvExp hist_M)
-  -- We add one to the memory requirement because if the chunk
-  -- otherwise *exactly* fits, it might actually *not* fit in the case
-  -- of a multi-value operator, as we individually round up the sizes
-  -- of the component arrays. (Very rare edge case.)
+      sum (map slugSharedBytesPerBucket slugs) * sExt64 hist_M_nonzero
+
+  -- Each component array is separately padded to a multiple of eight
+  -- bytes.
+  let padding_needed = 8 * L.genericLength (concatMap slugSharedArrays slugs)
+
+  -- We must bound the chunk directly, as dividing the total bucket
+  -- space by hist_L bounds only the average chunk, and the chunk we
+  -- actually use, ceil(hist_H/hist_S), can then still overrun.
+  hist_H_chk_max <-
+    dPrimVE "hist_H_chk_max" . sMax64 1 $
+      (tvExp hist_L - padding_needed) `quot` local_mem_needed
+
+  -- Fused histograms share a hist_S, so we chunk by the largest.
   hist_S <-
-    dPrimVE "hist_S" . sExt32 $
-      (hist_H * local_mem_needed + 1) `divUp` tvExp hist_L
+    dPrimVE "hist_S" . sExt32 . sMax64 1 $
+      maxHistSize slugs `ceilDiv` hist_H_chk_max
   let max_S = case bodyPassage kbody of
         MustBeSinglePass -> 1
         MayBeMultiPass -> fromIntegral $ maxinum $ map slugMaxLocalMemPasses slugs
@@ -1010,7 +1035,7 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
       then
         fmap Count $
           dPrimVE "blocks_per_segment" $
-            unCount num_tblocks' `divUp` hist_Nout
+            unCount num_tblocks' `ceilDiv` hist_Nout
       else pure num_tblocks'
 
   -- We only use shared memory if the number of updates per histogram
@@ -1020,7 +1045,7 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
   let pick_local =
         hist_Nin
           .>=. hist_H
-          .&&. (local_mem_needed .<=. tvExp hist_L)
+          .&&. ((local_mem_needed + padding_needed) .<=. tvExp hist_L)
           .&&. (hist_S .<=. max_S)
           .&&. hist_C
           .<=. hist_B
@@ -1096,7 +1121,7 @@ compileSegHist (Pat pes) lvl space ops kbody = do
           _ -> Nothing
     hist_el_size <-
       dPrimVE "hist_el_size" $
-        L.foldl' (+) (h `divUp` hist_H) $
+        L.foldl' (+) (h `ceilDiv` hist_H) $
           mapMaybe lockSize slugs
 
     -- Input elements contributing to each histogram.

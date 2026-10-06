@@ -18,7 +18,7 @@ import Futhark.Util.Pretty
 import Language.Futhark
 
 -- | The type representation used by the constraint solver.
-type CtType d = TypeBase d NoUniqueness
+type CtType d = TypeBase d NoMode
 
 -- | The reason for a type constraint. Used to generate type error
 -- messages. The expected type is always the first one.
@@ -50,7 +50,7 @@ instance Located (Reason t) where
   locOf (ReasonBranches l _ _) = l
 
 -- | A type constraint.
-data CtTy d = CtEq (Reason (CtType d)) (TypeBase d NoUniqueness) (TypeBase d NoUniqueness)
+data CtTy d = CtEq (Reason (CtType d)) (TypeBase d NoMode) (TypeBase d NoMode)
   deriving (Show)
 
 instance Functor CtTy where

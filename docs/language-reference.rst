@@ -1469,9 +1469,9 @@ update.  This involves also checking that no *alias* of ``a`` is used.
 Generally, most language constructs produce new arrays, but some
 (slicing) create arrays that alias their input arrays.
 
-When defining a function parameter we can mark it as *consuming* by
-prefixing it with an asterisk.  For a return type, we can mark it as
-*alias-free* by prefixing it with an asterisk.  For example::
+When defining a function parameter we can mark it as *consuming* by prefixing it
+with an asterisk. For a return type, we can mark it as *fresh* by prefixing it
+with an asterisk. For example::
 
   def modify (a: *[]i32) (i: i32) (x: i32): *[]i32 =
     a with [i] = a[i] + x
@@ -1925,6 +1925,17 @@ prevent the GPU backends from generating working code.
 ..........
 
 Always inline calls to this function.
+
+``cpu_function``
+................
+
+Compile the body of this function to sequential (CPU) code. Store the parameters
+and results in CPU memory, even when using a GPU backend for the rest of the
+program. This is useful when you have a costly sequential top-level function in
+an otherwise parallel program.
+
+You almost always want to combine this with ``#[noinline]``, as
+``#[cpu_function]`` only takes effect when the function is not inlined.
 
 Pattern attributes
 ~~~~~~~~~~~~~~~~~~

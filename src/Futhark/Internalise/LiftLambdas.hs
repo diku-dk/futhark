@@ -82,8 +82,8 @@ bindingForm (For i _) = bindingLetPat [] (Id (identName i) (identType i) mempty)
 bindingForm (ForIn p _) = bindingLetPat [] p
 bindingForm While {} = id
 
-toRet :: TypeBase Size u -> TypeBase Size Uniqueness
-toRet = second (const Nonunique)
+toRet :: TypeBase Size o -> TypeBase Size Freshness
+toRet = second (const Nonfresh)
 
 liftFunction :: VName -> [TypeParam] -> [Pat ParamType] -> ResRetType -> Exp -> LiftM (StructType -> Exp)
 liftFunction fname tparams params (RetType dims ret) funbody = do
@@ -108,7 +108,7 @@ liftFunction fname tparams params (RetType dims ret) funbody = do
       isSize (v, _) = v `S.member` fvVars sizes_in_types
       (free_dims, free_nondims) = partition isSize free
 
-      free_ts = map (second (`setUniqueness` Nonunique)) $ free_dims ++ free_nondims
+      free_ts = map (second (`setMode` Nonfresh)) $ free_dims ++ free_nondims
 
   addValBind $
     ValBind
@@ -145,10 +145,10 @@ liftFunction fname tparams params (RetType dims ret) funbody = do
 transformSubExps :: ASTMapper LiftM
 transformSubExps = identityMapper {mapOnExp = transformExp}
 
-transformType :: TypeBase Exp u -> LiftM (TypeBase Exp u)
+transformType :: TypeBase Exp o -> LiftM (TypeBase Exp o)
 transformType = bitraverse transformExp pure
 
-transformPat :: PatBase Info VName (TypeBase Exp u) -> LiftM (PatBase Info VName (TypeBase Exp u))
+transformPat :: PatBase Info VName (TypeBase Exp o) -> LiftM (PatBase Info VName (TypeBase Exp o))
 transformPat = traverse transformType
 
 transformExp :: Exp -> LiftM Exp

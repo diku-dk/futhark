@@ -663,8 +663,8 @@ mapResult f (Body _ stms res) =
 instantiateShapes ::
   (Monad m) =>
   (Int -> m SubExp) ->
-  [TypeBase ExtShape u] ->
-  m [TypeBase Shape u]
+  [TypeBase ExtShape o] ->
+  m [TypeBase Shape o]
 instantiateShapes f ts = evalStateT (mapM instantiate ts) M.empty
   where
     instantiate t = do
@@ -683,7 +683,7 @@ instantiateShapes f ts = evalStateT (mapM instantiate ts) M.empty
 -- | Like 'instantiateShapes', but obtains names from the provided
 -- list.  If an 'Ext' is out of bounds of this list, the function
 -- fails with 'error'.
-instantiateShapes' :: [VName] -> [TypeBase ExtShape u] -> [TypeBase Shape u]
+instantiateShapes' :: [VName] -> [TypeBase ExtShape o] -> [TypeBase Shape o]
 instantiateShapes' names ts =
   -- Carefully ensure that the order of idents we produce corresponds
   -- to their existential index.
