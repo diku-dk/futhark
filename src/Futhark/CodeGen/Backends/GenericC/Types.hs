@@ -845,7 +845,8 @@ sumVariants desc variants vds = do
     constructFunction ops ctx_ty opaque_ty i fname payload = do
       (params, new_stms) <- unzip <$> zipWithM constructPayload [0 ..] payload
 
-      let used = concatMap snd payload
+      -- The first field holds the variant, unless there is only one.
+      let used = [0 | not unary] ++ concatMap snd payload
       set_unused_stms <-
         mapM setUnused $ filter ((`notElem` used) . fst) (zip [0 ..] vds)
 
@@ -872,12 +873,11 @@ sumVariants desc variants vds = do
                     return FUTHARK_SUCCESS;
                   }|]
 
-    -- We must initialise some of the fields that are unused in this
-    -- variant; specifically the ones corresponding to arrays. This
-    -- has the unfortunate effect that all arrays in the nonused
-    -- constructor are set to have size 0.
-    setUnused (_, ValueType _ (Rank 0) _) =
-      pure [C.citem|{}|]
+    -- We must initialise the fields that are unused in this variant, as they
+    -- are still freed and serialised. Arrays in the unused constructors are
+    -- set to have size 0, and scalars to zero.
+    setUnused (i, ValueType _ (Rank 0) _) =
+      pure [C.citem|v->$id:(tupleField i) = 0;|]
     setUnused (i, ValueType signed (Rank rank) pt) = do
       new_array <- publicName $ "new_" <> arrayName pt signed rank
       let dims = replicate rank [C.cexp|0|]
