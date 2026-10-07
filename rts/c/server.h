@@ -919,7 +919,9 @@ void cmd_set(struct server_state *s, const char *args[]) {
     indices[i] = idx;
   }
 
-  a->set(s->ctx, arr->value.value.v_ptr, value_ptr(&val->value), indices);
+  int err = a->set(s->ctx, arr->value.value.v_ptr, value_ptr(&val->value), indices);
+  err |= futhark_context_sync(s->ctx);
+  error_check(s, err);
 }
 
 void cmd_index(struct server_state *s, const char *args[]) {

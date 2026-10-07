@@ -78,6 +78,7 @@ arrayLibraryFunctions pub space pt signed rank = do
   values_raw_array <- publicName $ "values_raw_" <> name
   shape_array <- publicName $ "shape_" <> name
   index_array <- publicName $ "index_" <> name
+  set_array <- publicName $ "set_" <> name
 
   let shape_names = ["dim" <> prettyText i | i <- [0 .. rank - 1]]
       shape_params = [[C.cparam|typename int64_t $id:k|] | k <- shape_names]
@@ -148,6 +149,19 @@ arrayLibraryFunctions pub space pt signed rank = do
         index_exp
         space
         [C.cexp|$int:(primByteSize pt::Int)|]
+  -- The source is a function parameter, so the copy must be finished before
+  -- we return.
+  set_body <-
+    collect $
+      copy
+        CopyBarrier
+        [C.cexp|arr->mem.mem|]
+        index_exp
+        space
+        [C.cexp|(unsigned char*)&v|]
+        [C.cexp|0|]
+        DefaultSpace
+        [C.cexp|$int:(primByteSize pt::Int)|]
 
   ctx_ty <- contextType
   ops <- asks envOperations
@@ -169,6 +183,9 @@ arrayLibraryFunctions pub space pt signed rank = do
   proto
     [C.cedecl|int $id:index_array($ty:ctx_ty *ctx, $ty:pt' *out, $ty:array_type *arr,
                                   $params:index_params);|]
+  proto
+    [C.cedecl|int $id:set_array($ty:ctx_ty *ctx, $ty:array_type *arr, $ty:pt' v,
+                                $params:index_params);|]
   proto
     [C.cedecl|$ty:memty $id:values_raw_array($ty:ctx_ty *ctx, $ty:array_type *arr);|]
   proto
@@ -227,6 +244,18 @@ arrayLibraryFunctions pub space pt signed rank = do
             return err;
           }
 
+          int $id:set_array($ty:ctx_ty *ctx, $ty:array_type *arr, $ty:pt' v,
+                            $params:index_params) {
+            int err = 0;
+            if ($exp:in_bounds) {
+              $items:(criticalSection ops set_body)
+            } else {
+              err = 1;
+              set_error(ctx, strdup("Index out of bounds."));
+            }
+            return err;
+          }
+
           $ty:memty $id:values_raw_array($ty:ctx_ty *ctx, $ty:array_type *arr) {
             (void)ctx;
             return arr->mem.mem;
@@ -246,7 +275,8 @@ arrayLibraryFunctions pub space pt signed rank = do
         Manifest.arrayNew = new_array,
         Manifest.arrayNewRaw = new_raw_array,
         Manifest.arrayValuesRaw = values_raw_array,
-        Manifest.arrayIndex = index_array
+        Manifest.arrayIndex = index_array,
+        Manifest.arraySet = set_array
       }
 
 entryPointTypeToCType :: Publicness -> EntryPointType -> CompilerM op s C.Type
@@ -845,7 +875,8 @@ sumVariants desc variants vds = do
     constructFunction ops ctx_ty opaque_ty i fname payload = do
       (params, new_stms) <- unzip <$> zipWithM constructPayload [0 ..] payload
 
-      let used = concatMap snd payload
+      -- The first field holds the variant, unless there is only one.
+      let used = [0 | not unary] ++ concatMap snd payload
       set_unused_stms <-
         mapM setUnused $ filter ((`notElem` used) . fst) (zip [0 ..] vds)
 
@@ -872,12 +903,11 @@ sumVariants desc variants vds = do
                     return FUTHARK_SUCCESS;
                   }|]
 
-    -- We must initialise some of the fields that are unused in this
-    -- variant; specifically the ones corresponding to arrays. This
-    -- has the unfortunate effect that all arrays in the nonused
-    -- constructor are set to have size 0.
-    setUnused (_, ValueType _ (Rank 0) _) =
-      pure [C.citem|{}|]
+    -- We must initialise the fields that are unused in this variant, as they
+    -- are still freed and serialised. Arrays in the unused constructors are
+    -- set to have size 0, and scalars to zero.
+    setUnused (i, ValueType _ (Rank 0) _) =
+      pure [C.citem|v->$id:(tupleField i) = 0;|]
     setUnused (i, ValueType signed (Rank rank) pt) = do
       new_array <- publicName $ "new_" <> arrayName pt signed rank
       let dims = replicate rank [C.cexp|0|]
