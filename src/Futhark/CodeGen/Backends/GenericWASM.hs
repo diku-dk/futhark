@@ -150,7 +150,8 @@ manifestFunctions manifest =
         arrayNew ops,
         arrayNewRaw ops,
         arrayValuesRaw ops,
-        arrayIndex ops
+        arrayIndex ops,
+        arraySet ops
       ]
     typeFunctions (TypeOpaque _ ops extra_ops _) =
       [opaqueFree ops, opaqueStore ops, opaqueRestore ops]
