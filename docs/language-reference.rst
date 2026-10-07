@@ -1926,6 +1926,17 @@ prevent the GPU backends from generating working code.
 
 Always inline calls to this function.
 
+``cpu_function``
+................
+
+Compile the body of this function to sequential (CPU) code. Store the parameters
+and results in CPU memory, even when using a GPU backend for the rest of the
+program. This is useful when you have a costly sequential top-level function in
+an otherwise parallel program.
+
+You almost always want to combine this with ``#[noinline]``, as
+``#[cpu_function]`` only takes effect when the function is not inlined.
+
 Pattern attributes
 ~~~~~~~~~~~~~~~~~~
 

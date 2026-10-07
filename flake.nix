@@ -79,8 +79,9 @@
       # Futhark-specific Haskell dependencies, factored out so it can be applied
       # both to the pinned `nixpkgs` used by `packages` below, and to a
       # downstream flake's own `nixpkgs` via `overlays.default`. Takes `pkgs`
-      # explicitly since it needs `pkgs.haskell.lib`, `pkgs.stdenv.isLinux`, and
-      # the various static library derivations.
+      # explicitly since it needs `pkgs.haskell.lib`,
+      # `stdenv.hostPlatform.isLinux`, and the various static library
+      # derivations.
       mkHaskellOverrides = pkgs: new: old: {
         # Custom dependencies for which Nixpkgs is too old.
         lsp = new.callPackage ./nix/lsp.nix { };
@@ -104,14 +105,14 @@
           isExecutable = true;
           isLibrary = false;
 
-          enableSharedExecutables = !pkgs.stdenv.isLinux;
-          enableSharedLibraries = !pkgs.stdenv.isLinux;
+          enableSharedExecutables = !pkgs.stdenv.hostPlatform.isLinux;
+          enableSharedLibraries = !pkgs.stdenv.hostPlatform.isLinux;
 
           configureFlags = [
             "--ghc-option=-Werror"
             "--ghc-option=-split-sections"
           ]
-          ++ lib.optionals pkgs.stdenv.isLinux (
+          ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux (
             [
               "--ghc-option=-optl=-static"
               "--ghc-option=-optl=-lbz2"
@@ -143,7 +144,7 @@
         system:
         let
           pkgs = import nixpkgs { inherit system; };
-          python = pkgs.python313Packages;
+          python = pkgs.python314Packages;
           haskell = pkgs.haskell.packages.ghc910;
 
           # The Nix 'system' convention is unfortunately the opposite of what we use
@@ -250,7 +251,7 @@
         system:
         let
           pkgs = import nixpkgs { inherit system; };
-          python = pkgs.python313Packages;
+          python = pkgs.python314Packages;
           haskell = pkgs.haskell.packages.ghc910;
         in
         {
@@ -303,7 +304,7 @@
                   }))
                   imagemagick # needed for literate tests
                 ]
-                ++ lib.optionals (stdenv.isLinux) [
+                ++ lib.optionals (pkgs.stdenv.hostPlatform.isLinux) [
                   xdot
                   opencl-headers
                   ocl-icd

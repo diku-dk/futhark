@@ -32,7 +32,7 @@ runs:
         script: |
           hostname
           module unload cuda
-          module load cuda/11.8
+          module load cuda/12.2
           futhark bench futhark-benchmarks \
             --backend ${{inputs.backend}} \
             --exclude no_${{inputs.system}} \

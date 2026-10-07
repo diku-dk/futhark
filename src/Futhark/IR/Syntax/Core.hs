@@ -37,6 +37,8 @@ module Futhark.IR.Syntax.Core
     ValueType (..),
     OpaqueType (..),
     OpaqueTypes (..),
+    lookupOpaqueType,
+    opaquePayload,
     Signedness (..),
     EntryPointType (..),
 
@@ -624,6 +626,27 @@ instance Monoid OpaqueTypes where
 instance Semigroup OpaqueTypes where
   OpaqueTypes x <> OpaqueTypes y =
     OpaqueTypes $ x <> filter ((`notElem` map fst x) . fst) y
+
+-- | Look up the representation of a named opaque type.
+lookupOpaqueType :: Name -> OpaqueTypes -> OpaqueType
+lookupOpaqueType v (OpaqueTypes types) =
+  case lookup v types of
+    Just (t, _) -> t
+    Nothing -> error $ "Unknown opaque type: " ++ show v
+
+-- | The values used to represent an opaque type.
+opaquePayload :: OpaqueTypes -> OpaqueType -> [ValueType]
+opaquePayload _ (OpaqueSum ts _) = ts
+opaquePayload _ (OpaqueArray _ _ ts) = ts
+opaquePayload _ (OpaqueRecord []) = [ValueType Signed (Rank 0) Unit]
+opaquePayload types (OpaqueRecord fs) = concatMap f fs
+  where
+    f (_, TypeOpaque s) = opaquePayload types $ lookupOpaqueType s types
+    f (_, TypeTransparent v) = [v]
+opaquePayload types (OpaqueRecordArray _ _ fs) = concatMap f fs
+  where
+    f (_, TypeOpaque s) = opaquePayload types $ lookupOpaqueType s types
+    f (_, TypeTransparent v) = [v]
 
 -- | Information about what in the original program a given IR statement
 -- corresponds to. See Note [Tracking Source Locations].

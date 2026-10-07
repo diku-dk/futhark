@@ -411,7 +411,7 @@ uitofp_i8_f64 = uitofp_i16_f64 = uitofp_i32_f64 = uitofp_i64_f64 = uitofp_T_f64
 
 
 def fptosi_T_i8(x):
-    if np.isnan(x) or np.isinf(x):
+    if np.isnan(x) or x < -(1 << 7) or x >= (1 << 7):
         return np.int8(0)
     else:
         return np.int8(np.trunc(x))
@@ -421,7 +421,7 @@ fptosi_f16_i8 = fptosi_f32_i8 = fptosi_f64_i8 = fptosi_T_i8
 
 
 def fptosi_T_i16(x):
-    if np.isnan(x) or np.isinf(x):
+    if np.isnan(x) or x < -(1 << 15) or x >= (1 << 15):
         return np.int16(0)
     else:
         return np.int16(np.trunc(x))
@@ -431,7 +431,7 @@ fptosi_f16_i16 = fptosi_f32_i16 = fptosi_f64_i16 = fptosi_T_i16
 
 
 def fptosi_T_i32(x):
-    if np.isnan(x) or np.isinf(x):
+    if np.isnan(x) or x < -(1 << 31) or x >= (1 << 31):
         return np.int32(0)
     else:
         return np.int32(np.trunc(x))
@@ -441,7 +441,7 @@ fptosi_f16_i32 = fptosi_f32_i32 = fptosi_f64_i32 = fptosi_T_i32
 
 
 def fptosi_T_i64(x):
-    if np.isnan(x) or np.isinf(x):
+    if np.isnan(x) or x < -(1 << 63) or x >= (1 << 63):
         return np.int64(0)
     else:
         return np.int64(np.trunc(x))
@@ -451,7 +451,7 @@ fptosi_f16_i64 = fptosi_f32_i64 = fptosi_f64_i64 = fptosi_T_i64
 
 
 def fptoui_T_i8(x):
-    if np.isnan(x) or np.isinf(x):
+    if np.isnan(x) or x < 0 or x >= (1 << 8):
         return np.int8(0)
     else:
         return np.int8(np.trunc(x))
@@ -461,7 +461,7 @@ fptoui_f16_i8 = fptoui_f32_i8 = fptoui_f64_i8 = fptoui_T_i8
 
 
 def fptoui_T_i16(x):
-    if np.isnan(x) or np.isinf(x):
+    if np.isnan(x) or x < 0 or x >= (1 << 16):
         return np.int16(0)
     else:
         return np.int16(np.trunc(x))
@@ -471,7 +471,7 @@ fptoui_f16_i16 = fptoui_f32_i16 = fptoui_f64_i16 = fptoui_T_i16
 
 
 def fptoui_T_i32(x):
-    if np.isnan(x) or np.isinf(x):
+    if np.isnan(x) or x < 0 or x >= (1 << 32):
         return np.int32(0)
     else:
         return np.int32(np.trunc(x))
@@ -481,7 +481,7 @@ fptoui_f16_i32 = fptoui_f32_i32 = fptoui_f64_i32 = fptoui_T_i32
 
 
 def fptoui_T_i64(x):
-    if np.isnan(x) or np.isinf(x):
+    if np.isnan(x) or x < 0 or x >= (1 << 64):
         return np.int64(0)
     else:
         return np.int64(np.trunc(x))

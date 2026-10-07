@@ -498,12 +498,6 @@ compileConsts used_consts stms = genConstants $ do
   compileStms used_consts stms $ pure ()
   pure (used_consts, ())
 
-lookupOpaqueType :: Name -> OpaqueTypes -> OpaqueType
-lookupOpaqueType v (OpaqueTypes types) =
-  case lookup v types of
-    Just (t, _) -> t
-    Nothing -> error $ "Unknown opaque type: " ++ show v
-
 valueTypeSign :: ValueType -> Signedness
 valueTypeSign (ValueType sign _ _) = sign
 

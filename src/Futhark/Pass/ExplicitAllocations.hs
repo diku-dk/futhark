@@ -84,6 +84,10 @@ data AllocEnv fromrep torep = AllocEnv
     -- | The set of names that are known to be constants at
     -- kernel compile time.
     envConsts :: S.Set VName,
+    -- | The memory space for function parameters. Currently we assume these are
+    -- all in the same space. The result must still be in the allocSpace. This
+    -- could be made more flexible.
+    funSpace :: Name -> Space,
     allocInOp :: Op fromrep -> AllocM fromrep torep (Op torep),
     envExpHints :: Exp torep -> AllocM fromrep torep [ExpHint]
   }
@@ -127,19 +131,25 @@ expHints e = do
 askDefaultSpace :: AllocM fromrep torep Space
 askDefaultSpace = asks allocSpace
 
+-- | The space in which this function accepts parameters and returns results.
+askFunSpace :: Name -> AllocM fromrep torep Space
+askFunSpace fname = asks funSpace <*> pure fname
+
 runAllocM ::
   (MonadFreshNames m) =>
   Space ->
+  (Name -> Space) ->
   (Op fromrep -> AllocM fromrep torep (Op torep)) ->
   (Exp torep -> AllocM fromrep torep [ExpHint]) ->
   AllocM fromrep torep a ->
   m a
-runAllocM space handleOp hints (AllocM m) =
+runAllocM space fun handleOp hints (AllocM m) =
   fmap fst $ modifyNameSource $ runState $ runReaderT (runBuilderT m mempty) env
   where
     env =
       AllocEnv
         { allocSpace = space,
+          funSpace = fun,
           envConsts = mempty,
           allocInOp = handleOp,
           envExpHints = hints
@@ -211,10 +221,11 @@ allocsForStm ::
   (Allocable fromrep torep inner) =>
   [Ident] ->
   StmAux a ->
-  Exp torep ->
+  Exp fromrep ->
   AllocM fromrep torep (Stm torep)
-allocsForStm idents aux e = do
+allocsForStm idents aux e0 = do
   def_space <- askDefaultSpace
+  e <- allocInExp e0
   hints <- expHints e
   (rts, e') <- expReturns' e
   pes <- allocsForPat def_space idents rts hints
@@ -578,13 +589,13 @@ allocLinearArray space s v = do
 
 funcallArgs ::
   (Allocable fromrep torep inner) =>
+  Space ->
   [(SubExp, Diet)] ->
   AllocM fromrep torep [(SubExp, Diet)]
-funcallArgs args = do
+funcallArgs space args = do
   (valargs, (ctx_args, mem_and_size_args)) <- runWriterT $
     forM args $ \(arg, d) -> do
       t <- lift $ subExpType arg
-      space <- lift askDefaultSpace
       arg' <- linearFuncallArg t space arg
       pure (arg', d)
   pure $ map (,Observe) (ctx_args <> mem_and_size_args) <> valargs
@@ -612,18 +623,26 @@ explicitAllocationsGeneric ::
   (Op fromrep -> AllocM fromrep torep (Op torep)) ->
   (Exp torep -> AllocM fromrep torep [ExpHint]) ->
   Pass fromrep torep
-explicitAllocationsGeneric space handleOp hints =
-  Pass "explicit allocations" "Transform program to explicit memory representation" $
-    intraproceduralTransformationWithConsts onStms allocInFun
+explicitAllocationsGeneric def_space handleOp hints =
+  Pass "explicit allocations" "Transform program to explicit memory representation" $ \prog ->
+    let spaceForfun :: Name -> Space
+        spaceForfun =
+          let f fd
+                | "cpu_function" `inAttrs` funDefAttrs fd = Just (funDefName fd, DefaultSpace)
+                | otherwise = Nothing
+              table = M.fromList $ mapMaybe f $ progFuns prog
+           in \fname -> fromMaybe def_space $ M.lookup fname table
+     in intraproceduralTransformationWithConsts onStms (allocInFun spaceForfun) prog
   where
     onStms stms =
-      runAllocM space handleOp hints $ collectStms_ $ allocInStms stms $ pure ()
+      runAllocM def_space (const def_space) handleOp hints $ collectStms_ $ allocInStms stms $ pure ()
 
-    allocInFun consts (FunDef entry attrs fname rettype params fbody) =
-      runAllocM space handleOp hints . inScopeOf consts $
+    allocInFun spaceForFun consts (FunDef entry attrs fname rettype params fbody) = do
+      let space = spaceForFun fname
+      runAllocM space spaceForFun handleOp hints . inScopeOf consts $
         allocInFParams (map (,space) params) $ \params' -> do
           (fbody', mem_rets) <-
-            allocInFunBody (map (const $ Just space) rettype) fbody
+            allocInFunBody (map (const $ Just def_space) rettype) fbody
           let num_extra_params = length params' - length params
               num_extra_rets = length mem_rets
               -- The mem_pals is an over-approximation, like in the case for Apply.
@@ -632,7 +651,7 @@ explicitAllocationsGeneric space handleOp hints =
               rettype' =
                 map (,mem_als) mem_rets
                   ++ zip
-                    (memoryInRetType space (length mem_rets) (map fst rettype))
+                    (memoryInRetType def_space (length mem_rets) (map fst rettype))
                     (map (shiftRetAls num_extra_params num_extra_rets . snd) rettype)
           pure $ FunDef entry attrs fname rettype' params' fbody'
 
@@ -648,7 +667,8 @@ explicitAllocationsInStmsGeneric ::
   m (Stms torep)
 explicitAllocationsInStmsGeneric space handleOp hints stms = do
   scope <- askScope
-  runAllocM space handleOp hints $
+  -- XXX: it is not good that we do not have access to function tables here.
+  runAllocM space (const space) handleOp hints $
     localScope scope $
       collectStms_ $
         allocInStms stms $
@@ -739,7 +759,7 @@ allocInStm ::
   Stm fromrep ->
   AllocM fromrep torep ()
 allocInStm (Let (Pat pes) aux e) =
-  addStm =<< allocsForStm (map patElemIdent pes) aux =<< allocInExp e
+  addStm =<< allocsForStm (map patElemIdent pes) aux e
 
 allocInLambda ::
   (Allocable fromrep torep inner) =>
@@ -943,19 +963,20 @@ allocInExp (Loop merge form (Body () bodystms bodyres)) =
           pure $ subExpsRes valctx <> zipWith SubExpRes (map resCerts bodyres) valres'
       pure $ Loop merge' form body'
 allocInExp (Apply fname args rettype loc) = do
-  args' <- funcallArgs args
-  space <- askDefaultSpace
+  arg_space <- askFunSpace fname
+  res_space <- askDefaultSpace
+  args' <- funcallArgs arg_space args
   args_ts <- mapM (subExpType . fst) args'
   -- We assume that every array is going to be in its own memory. Further, we
   -- assume that every result memory block can alias any argument memory block.
   -- This is an overapproximation that can be loosened in the future.
   let mem_als = RetAls (map fst $ filter (isMem . snd) $ zip [0 ..] args_ts) mempty
-      mems = replicate num_arrays (MemMem space, mem_als)
+      mems = replicate num_arrays (MemMem res_space, mem_als)
       num_extra_args = length args' - length args
       rettype' =
         mems
           ++ zip
-            (memoryInRetType space num_arrays (map fst rettype))
+            (memoryInRetType res_space num_arrays (map fst rettype))
             (map (shiftRetAls num_extra_args num_arrays . snd) rettype)
   pure $ Apply fname args' rettype' loc
   where

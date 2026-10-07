@@ -22,9 +22,9 @@ import "soacs"
 --   extension.
 --
 -- * Creating an integer from a floating point number is by numerical
---   truncation. If the floating-point number is infinity or NaN, then the
---   integer value is not meaningful. Use `to_bits` if you want to inspect the
---   bitwise representation of a float.
+--   truncation. If the floating-point number is infinity, NaN, or too large to
+--   be represented as an integer, then the integer value is not meaningful. Use
+--   `to_bits` if you want to inspect the bitwise representation of a float.
 --
 -- * Creating a floating-point number from an integer is by numerical conversion
 --   (which may introduce roundoff error). Use `from_bits` if you want to

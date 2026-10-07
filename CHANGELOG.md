@@ -18,11 +18,18 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * `futhark bench`: JSON files now contain metadata about the configuration and
   execution environment (#2381). Work by Yifan Chen.
 
+* New attribute: `cpu_function`.
+
+* Support for ISPC 1.31 (and that is now also the minimum version). (#2557)
+
 ### Removed
 
 ### Changed
 
 ### Fixed
+
+* Python input reading no longer hangs on an unsuffixed `0`, an unsuffixed
+  hexadecimal integer, or a line comment at EOF.
 
 * File names are now always encoded as UTF-8. Non-UTF-8 locales are not
   supported.
@@ -33,7 +40,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `reduce` and `reduce_comm` now produce alias-free results.
 
-* AD is now supposed for scans with array operators (#2208). Work by Yifan Chen.
+* AD is now supported for scans with array operators (#2208). Work by Yifan Chen.
 
 * AD operators now return alias-free results.
 
@@ -43,6 +50,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Tiling would produce invalid code in some cases.
 
 * Mishandling of abstract types could lead to compiler crash. (#2538)
+
+* Conversion of floating-point numbers to integers would trigger UB whenever the
+  number was too large to fit in the integer. (#2543)
+
+* Horizontal fusion of multi-dimensional histograms. (#2555)
+
+* Internalisation of reduce_by_index_3d with array-valued elements. (#2554)
 
 ## [0.27.1]
 
