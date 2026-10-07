@@ -177,7 +177,8 @@
                                   "values_raw": {"type": "string"},
                                   "new": {"type": "string"},
                                   "new_raw": {"type": "string"},
-                                  "index": {"type": "string"}
+                                  "index": {"type": "string"},
+                                  "set": {"type": "string"}
                               },
                               "additionalProperties": false
                           }

@@ -4,8 +4,8 @@
 }:
 mkDerivation {
   pname = "futhark-manifest";
-  version = "1.10.0.0";
-  sha256 = "1bf0e6b9ce759cbedb0260b9fa689c04e172bf54f3b5eedf6eeaae89ad80d9bd";
+  version = "1.11.0.0";
+  sha256 = "56982e85b6cfa3d360088a23142f82d1a4e511babb2d553767dfaa759ae9f682";
   libraryHaskellDepends = [ aeson base bytestring containers text ];
   testHaskellDepends = [
     base QuickCheck quickcheck-instances tasty tasty-hunit
@@ -13,5 +13,5 @@ mkDerivation {
   ];
   doCheck = false;
   description = "Definition and serialisation instances for Futhark manifests";
-  license = lib.licensesSpdx."ISC";
+  license = lib.meta.getLicenseFromSpdxId "ISC";
 }

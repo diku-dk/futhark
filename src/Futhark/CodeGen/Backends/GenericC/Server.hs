@@ -149,7 +149,7 @@ typeBoilerplate manifest (tname, TypeArray c_type_name et rank ops) =
       array_name = type_name <> "_array"
       info_name = et <> "_info"
       array_new_wrap = arrayNew ops <> "_wrap"
-      array_set = arrayNew ops <> "_set"
+      array_set_wrap = arraySet ops <> "_wrap"
       array_index_wrap = arrayIndex ops <> "_wrap"
       shape_args = [[C.cexp|shape[$int:i]|] | i <- [0 .. rank - 1]]
       is_args = [[C.cexp|is[$int:i]|] | i <- [0 .. rank - 1]]
@@ -164,18 +164,11 @@ typeBoilerplate manifest (tname, TypeArray c_type_name et rank ops) =
                 *out = $id:(arrayNew ops)(ctx, p, $args:shape_args);
                 return 0;
               }
-              int $id:array_set(struct futhark_context *ctx,
-                                typename $id:c_type_name arr,
-                                $ty:element_c_type *val,
-                                const typename int64_t *is) {
-                const typename int64_t *shape = $id:(arrayShape ops)(ctx, arr);
-                typename uint64_t idx = is[0];
-                for (int i = 1; i < $int:rank; ++i) {
-                  idx *= shape[i];
-                  idx += is[i];
-                }
-                (($ty:element_c_type*)$id:(arrayValuesRaw ops)(ctx, arr))[idx] = *val;
-                return 0;
+              int $id:array_set_wrap(struct futhark_context *ctx,
+                                     typename $id:c_type_name arr,
+                                     $ty:element_c_type *val,
+                                     const typename int64_t *is) {
+                return $id:(arraySet ops)(ctx, arr, *val, $args:is_args);
               }
               int $id:array_index_wrap(struct futhark_context *ctx,
                                        void *dest,
@@ -191,7 +184,7 @@ typeBoilerplate manifest (tname, TypeArray c_type_name et rank ops) =
                 .num_fields = 0,
                 .fields = NULL,
                 .new = (typename array_new_fn)$id:array_new_wrap,
-                .set = (typename array_set_fn)$id:array_set,
+                .set = (typename array_set_fn)$id:array_set_wrap,
                 .shape = (typename array_shape_fn)$id:(arrayShape ops),
                 .index = (typename array_index_fn)$id:array_index_wrap,
                 .values = (typename array_values_fn)$id:(arrayValues ops),

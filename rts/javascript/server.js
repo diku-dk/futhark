@@ -490,19 +490,10 @@ class Server {
     var a = this._array_type(arr.type);
     var val = this._get_typed_var(this._get_arg(args, 1), a.elemtype);
     var is = this._parse_ints(args.slice(2), a.rank);
-    var shape = this._shape(a, arr.value);
-    this._check_bounds(shape, is);
-    if (a.ops) {
-      var i = 0n;
-      for (var j = 0; j < a.rank; j++) {
-        i = i * shape[j] + is[j];
-      }
-      var p = this._c(a.ops.values_raw, arr.value);
-      this._poke(a.elemtype, p + Number(i) * this._sizeof(a.elemtype), val);
-    } else {
-      this._check(this._c(a.set, arr.value, val, ...is));
-      this._sync();
-    }
+    this._check_bounds(this._shape(a, arr.value), is);
+    var fset = a.ops ? a.ops.set : a.set;
+    this._check(this._c(fset, arr.value, val, ...is));
+    this._sync();
   }
 
   _cmd_index(args) {
