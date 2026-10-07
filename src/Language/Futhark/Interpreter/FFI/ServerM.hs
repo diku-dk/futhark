@@ -310,7 +310,7 @@ mkRecord tn vrm = do
   vns <-
     mapM
       ( \fn ->
-          throwNothing ("Mising field " ++ nameToString fn ++ " when constructing record of type " ++ T.unpack tn ++ ".") (M.lookup fn vrm)
+          throwNothing ("Missing field " ++ nameToString fn ++ " when constructing record of type " ++ T.unpack tn ++ ".") (M.lookup fn vrm)
             >>= varName
       )
       fns
