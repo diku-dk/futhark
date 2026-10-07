@@ -19,11 +19,13 @@ module Futhark.CodeGen.Backends.GenericWASM
 where
 
 import Data.List (intercalate)
+import Data.Map qualified as M
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.SimpleRep (isValidCName, opaqueName)
 import Futhark.CodeGen.ImpCode.Sequential qualified as Imp
 import Futhark.CodeGen.RTS.JavaScript
+import Futhark.Manifest
 import Futhark.Util (nubOrd, showText, zEncodeText)
 import Language.Futhark.Core (nameToText)
 import Language.Futhark.Primitive
@@ -118,16 +120,12 @@ entryTypeToJSString (Imp.TypeTransparent (Imp.ValueType sign (Imp.Rank rank) pt)
     primToJSString _ Bool = "bool"
     primToJSString _ Unit = error "entryTypeToJSString: Unit"
 
-emccExportNames :: [JSEntryPoint] -> [(String, JSOpaqueType)] -> [String]
-emccExportNames jses opaqueTypes =
-  map (\jse -> "'_futhark_entry_" ++ T.unpack (GC.escapeName (T.pack (name jse))) ++ "'") jses
-    ++ map (\arg -> "'" ++ gfn "new" arg ++ "'") arrays
-    ++ map (\arg -> "'" ++ gfn "free" arg ++ "'") arrays
-    ++ map (\arg -> "'" ++ gfn "shape" arg ++ "'") arrays
-    ++ map (\arg -> "'" ++ gfn "values_raw" arg ++ "'") arrays
-    ++ map (\arg -> "'" ++ gfn "values" arg ++ "'") arrays
-    ++ map (\arg -> "'" ++ "_futhark_free_" ++ arg ++ "'") opaques
-    ++ map (\rf -> "'_futhark_" ++ jsrfProjectFn rf ++ "'") allRecordFields
+-- | The names of the C functions that must be exported from the WebAssembly
+-- module. This is every function named in the manifest, as the server calls
+-- these directly, as well as the context management functions.
+emccExportNames :: Manifest -> [String]
+emccExportNames manifest =
+  map (\f -> "'_" ++ T.unpack f ++ "'") (nubOrd $ manifestFunctions manifest)
     ++ [ "_futhark_context_config_new",
          "_futhark_context_config_free",
          "_futhark_context_new",
@@ -139,15 +137,45 @@ emccExportNames jses opaqueTypes =
          "_futhark_context_pause_profiling",
          "_futhark_context_unpause_profiling"
        ]
+
+manifestFunctions :: Manifest -> [CFuncName]
+manifestFunctions manifest =
+  map entryPointCFun (M.elems $ manifestEntryPoints manifest)
+    ++ concatMap typeFunctions (M.elems $ manifestTypes manifest)
   where
-    -- Include array types from both entry points and record fields.
-    arrays = nubOrd $ filter isArray (entryPointTypes ++ recordFieldTypes)
-    -- Include opaque types from both entry points and record fields.
-    opaques = nubOrd $ filter isOpaque (entryPointTypes ++ recordFieldTypes)
-    entryPointTypes = concatMap (\jse -> parameters jse ++ [ret jse]) jses
-    recordFieldTypes = [jsrfType rf | (_, JSOpaqueRecord fields) <- opaqueTypes, rf <- fields]
-    gfn typ str = "_futhark_" ++ typ ++ "_" ++ baseType str ++ "_" ++ show (dim str) ++ "d"
-    allRecordFields = [rf | (_, JSOpaqueRecord fields) <- opaqueTypes, rf <- fields]
+    typeFunctions (TypeArray _ _ _ ops) =
+      [ arrayFree ops,
+        arrayShape ops,
+        arrayValues ops,
+        arrayNew ops,
+        arrayNewRaw ops,
+        arrayValuesRaw ops,
+        arrayIndex ops
+      ]
+    typeFunctions (TypeOpaque _ ops extra_ops _) =
+      [opaqueFree ops, opaqueStore ops, opaqueRestore ops]
+        ++ maybe [] extraFunctions extra_ops
+
+    extraFunctions (OpaqueRecord ops) =
+      recordNew ops : map recordFieldProject (recordFields ops)
+    extraFunctions (OpaqueSum ops) =
+      sumVariant ops : concatMap variantFunctions (sumVariants ops)
+    extraFunctions (OpaqueArray ops) =
+      [ opaqueArrayIndex ops,
+        opaqueArrayShape ops,
+        opaqueArrayNew ops,
+        opaqueArraySet ops
+      ]
+    extraFunctions (OpaqueRecordArray ops) =
+      [ recordArrayZip ops,
+        recordArrayIndex ops,
+        recordArrayShape ops,
+        recordArrayNew ops,
+        recordArraySet ops
+      ]
+        ++ map recordFieldProject (recordArrayFields ops)
+
+    variantFunctions v = [sumVariantConstruct v, sumVariantDestruct v]
 
 javascriptWrapper :: [JSEntryPoint] -> [(String, JSOpaqueType)] -> T.Text
 javascriptWrapper entryPoints opaqueTypes =
@@ -592,14 +620,16 @@ toFutharkArray typ =
 
 -- | Javascript code that can be appended to the generated module to
 -- run a Futhark server instance on startup.
-runServer :: T.Text
-runServer =
+runServer :: Manifest -> T.Text
+runServer manifest =
   [text|
    Module.onRuntimeInitialized = () => {
      var context = new FutharkContext(Module);
-     var server = new Server(context);
+     var server = new Server(context, ${manifest_json});
      server.run();
    }|]
+  where
+    manifest_json = manifestToJSON manifest
 
 -- | The names exported by the generated module.
 libraryExports :: T.Text
