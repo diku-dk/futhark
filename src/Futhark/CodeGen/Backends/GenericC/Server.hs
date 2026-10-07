@@ -171,7 +171,7 @@ typeBoilerplate manifest (tname, TypeArray c_type_name et rank ops) =
                 const typename int64_t *shape = $id:(arrayShape ops)(ctx, arr);
                 typename uint64_t idx = is[0];
                 for (int i = 1; i < $int:rank; ++i) {
-                  idx *= shape[i-1];
+                  idx *= shape[i];
                   idx += is[i];
                 }
                 (($ty:element_c_type*)$id:(arrayValuesRaw ops)(ctx, arr))[idx] = *val;
