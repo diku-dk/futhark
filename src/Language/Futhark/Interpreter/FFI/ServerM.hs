@@ -324,7 +324,7 @@ project src fn = do
   nsrc <- varName src
   ndst <- uniqueName
   liftIO (FS.cmdProject s ndst nsrc $ nameToText fn)
-    >>= throwServerJust ("cmdKind failed on source " ++ T.unpack nsrc ++ ", destination " ++ T.unpack ndst ++ ", and field " ++ nameToString fn ++ ".")
+    >>= throwServerJust ("cmdProject failed on source " ++ T.unpack nsrc ++ ", destination " ++ T.unpack ndst ++ ", and field " ++ nameToString fn ++ ".")
   mkValueRef ndst
 
 -- Sums
