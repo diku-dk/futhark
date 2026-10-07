@@ -209,12 +209,14 @@ ioRelativeTo dir (LoadValue t f) = LoadValue t $ dir </> f
 
 -- | Turn a loaded value into an interpreter value. Arrays are put on the server,
 -- if there is one, as they are very expensive to represent in the interpreter,
--- and are often just passed on to entry points.
+-- and are often just passed on to entry points. If the server cannot hold the
+-- array, which happens when no entry point uses its type, it is kept in the
+-- interpreter instead.
 fromData :: Maybe FFI.Server -> V.Value -> IO (Value m)
 fromData (Just s) v
   | dims@(_ : _) <- V.valueShape v = do
       let shape = foldr (ShapeDim . fromIntegral) ShapeLeaf dims
-      either fail (\ref -> pure $ ValueLazyFFI shape ref [])
+      either (const $ pure $ fromDataValue v) (\ref -> pure $ ValueLazyFFI shape ref [])
         =<< FFI.runServerM s (FFI.putData v)
 fromData _ v = pure $ fromDataValue v
 

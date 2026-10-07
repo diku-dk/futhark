@@ -238,6 +238,19 @@ struct server_state {
   struct variable *variables;
 };
 
+// Print the command-done marker, indicating that we are ready for
+// more input.
+void ok(void) {
+  printf("%%%%%% OK\n");
+  fflush(stdout);
+}
+
+// Print the failure marker.  Output is now an error message until the
+// next ok().
+void failure(void) {
+  printf("%%%%%% FAILURE\n");
+}
+
 struct variable* get_variable(struct server_state *s,
                               const char *name) {
   for (struct variable *v = s->variables; v != NULL; v = v->next) {
@@ -296,6 +309,8 @@ const char* get_arg(const char *args[], int i) {
   return args[i];
 }
 
+// Look up a type by name. If there is no such type, a failure is reported and
+// NULL is returned.
 const struct type* get_type(struct server_state *s, const char *name) {
   for (int i = 0; s->prog.types[i]; i++) {
     if (strcmp(s->prog.types[i]->name, name) == 0) {
@@ -303,7 +318,8 @@ const struct type* get_type(struct server_state *s, const char *name) {
     }
   }
 
-  futhark_panic(1, "Unknown type %s\n", name);
+  failure();
+  printf("Unknown type: %s\n", name);
   return NULL;
 }
 
@@ -315,19 +331,6 @@ struct entry_point* get_entry_point(struct server_state *s, const char *name) {
   }
 
   return NULL;
-}
-
-// Print the command-done marker, indicating that we are ready for
-// more input.
-void ok(void) {
-  printf("%%%%%% OK\n");
-  fflush(stdout);
-}
-
-// Print the failure marker.  Output is now an error message until the
-// next ok().
-void failure(void) {
-  printf("%%%%%% FAILURE\n");
 }
 
 void error_check(struct server_state *s, int err) {
@@ -419,6 +422,10 @@ void cmd_restore(struct server_state *s, const char *args[]) {
     const char *type = get_arg(args, i+1);
 
     const struct type *t = get_type(s, type);
+    if (t == NULL) {
+      bad = 1;
+      break;
+    }
     struct variable *v = create_variable(s, vname, t);
 
     if (v == NULL) {
@@ -662,6 +669,9 @@ void cmd_attributes(struct server_state *s, const char *args[]) {
 void cmd_kind(struct server_state *s, const char *args[]) {
   const char *type = get_arg(args, 0);
   const struct type *t = get_type(s, type);
+  if (t == NULL) {
+    return;
+  }
 
   switch (t->kind) {
     case PRIMITIVE: printf("primitive\n"); return;
@@ -713,6 +723,9 @@ void cmd_shape(struct server_state *s, const char *args[]) {
 void cmd_elemtype(struct server_state *s, const char *args[]) {
   const char *type = get_arg(args, 0);
   const struct type *t = get_type(s, type);
+  if (t == NULL) {
+    return;
+  }
 
   if (t->kind != ARRAY) {
     failure();
@@ -728,6 +741,9 @@ void cmd_elemtype(struct server_state *s, const char *args[]) {
 void cmd_rank(struct server_state *s, const char *args[]) {
   const char *type = get_arg(args, 0);
   const struct type *t = get_type(s, type);
+  if (t == NULL) {
+    return;
+  }
 
   if (t->kind != ARRAY) {
     failure();
@@ -743,6 +759,9 @@ void cmd_new_array(struct server_state *s, const char *args[]) {
   const char *to_name = get_arg(args, 0);
   const char *type_name = get_arg(args, 1);
   const struct type *type = get_type(s, type_name);
+  if (type == NULL) {
+    return;
+  }
   struct variable *to = create_variable(s, to_name, type);
 
   if (to == NULL) {
@@ -987,6 +1006,9 @@ void cmd_zip(struct server_state *s, const char *args[]) {
   const char *to_name = get_arg(args, 0);
   const char *type_name = get_arg(args, 1);
   const struct type *type = get_type(s, type_name);
+  if (type == NULL) {
+    return;
+  }
 
   if (type->kind != ARRAY) {
     failure();
@@ -1114,6 +1136,9 @@ void cmd_unzip(struct server_state *s, const char *args[]) {
 void cmd_fields(struct server_state *s, const char *args[]) {
   const char *type = get_arg(args, 0);
   const struct type *t = get_type(s, type);
+  if (t == NULL) {
+    return;
+  }
 
   if (t->kind != RECORD) {
     failure();
@@ -1132,6 +1157,9 @@ void cmd_fields(struct server_state *s, const char *args[]) {
 void cmd_variants(struct server_state *s, const char *args[]) {
   const char *type = get_arg(args, 0);
   const struct type *t = get_type(s, type);
+  if (t == NULL) {
+    return;
+  }
 
   if (t->kind != SUM) {
     failure();
@@ -1227,6 +1255,9 @@ void cmd_new(struct server_state *s, const char *args[]) {
   const char *to_name = get_arg(args, 0);
   const char *type_name = get_arg(args, 1);
   const struct type *type = get_type(s, type_name);
+  if (type == NULL) {
+    return;
+  }
   struct variable *to = create_variable(s, to_name, type);
 
   if (to == NULL) {
@@ -1283,6 +1314,9 @@ void cmd_construct(struct server_state *s, const char *args[]) {
   const char *type_name = get_arg(args, 1);
   const char *variant_name = get_arg(args, 2);
   const struct type *type = get_type(s, type_name);
+  if (type == NULL) {
+    return;
+  }
   struct variable *to = create_variable(s, to_name, type);
 
   if (to == NULL) {
