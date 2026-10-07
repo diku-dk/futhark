@@ -335,7 +335,7 @@ fromDataValue (V.F64Value shape vector) =
 fromDataValue (V.BoolValue shape vector) =
   fromDataValueWith BoolValue shape vector
 
--- | If the value represents an array of type @[]i8@, then return those bytes.
+-- | If the value represents an array of type @[]u8@, then return those bytes.
 asByteString :: Value m -> Maybe BS.ByteString
 asByteString (ValueArray _ vals) = BS.pack <$> mapM asU8 (elems vals)
   where
