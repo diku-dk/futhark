@@ -180,7 +180,7 @@ loadAudio audiofile = do
         let pcmfile = dir </> takeBaseName audiofile `replaceExtension` "pcm"
         void $ system "ffmpeg" ["-i", audiofile, "-c:a", "pcm_f64le", "-map", "0", "-f", "data", pcmfile] mempty
         loadPCM num_channels pcmfile
-    _ -> fail "$loadImg failed to detect the number of channels in the audio input"
+    _ -> fail "io.loadaudio failed to detect the number of channels in the audio input"
 
 tryIO :: (MonadIO m) => IO a -> m (Either T.Text a)
 tryIO =
