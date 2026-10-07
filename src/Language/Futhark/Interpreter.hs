@@ -2438,7 +2438,7 @@ initialCtx =
       | nameFromText fname `M.member` namesToPrimTypes = Nothing
       | Just op <- determineIO fname =
           Just $ TermPoly Nothing $ \t ->
-            pure $ ValueFun $ doIO <=< op (evalTypeFully t)
+            pure $ ValueFun $ doIO <=< op (evalTypeFully t) <=< force
     def s = error $ "Missing intrinsic: " ++ T.unpack s
 
     tdef :: Name -> Maybe TypeBinding
