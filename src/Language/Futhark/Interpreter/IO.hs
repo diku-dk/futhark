@@ -216,8 +216,10 @@ fromData :: Maybe FFI.Server -> V.Value -> IO (Value m)
 fromData (Just s) v
   | dims@(_ : _) <- V.valueShape v = do
       let shape = foldr (ShapeDim . fromIntegral) ShapeLeaf dims
+      -- We run the FFI GC just as if we call an entry point, to avoid building
+      -- up too much data.
       either (const $ pure $ fromDataValue v) (\ref -> pure $ ValueLazyFFI shape ref [])
-        =<< FFI.runServerM s (FFI.putData v)
+        =<< FFI.runServerM s (FFI.gc >> FFI.putData v)
 fromData _ v = pure $ fromDataValue v
 
 -- | Run an IO operation. Arrays are put on the server, if one is given.
