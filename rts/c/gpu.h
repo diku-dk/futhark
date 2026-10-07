@@ -304,6 +304,11 @@ static int gpu_alloc(struct futhark_context *ctx, FILE *log,
     error = gpu_alloc_actual(ctx, min_size, mem_out);
   }
 
+  if (error == FUTHARK_OUT_OF_MEMORY) {
+    set_error(ctx, msgprintf("Failed to allocate %lld bytes of GPU memory.\n",
+                             (long long)min_size));
+  }
+
   return error;
 }
 
