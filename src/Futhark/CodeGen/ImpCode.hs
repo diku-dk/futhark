@@ -128,6 +128,8 @@ import Futhark.IR.Syntax.Core
     SubExp (..),
     ValueType (..),
     errorMsgArgTypes,
+    lookupOpaqueType,
+    opaquePayload,
   )
 import Futhark.Util (nubByOrd)
 import Futhark.Util.Pretty hiding (space)
