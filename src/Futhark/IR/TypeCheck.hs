@@ -1058,6 +1058,10 @@ checkExp (Loop merge form loopbody) = do
 
   checkLoopArgs
 
+  -- The loop consumes the initial values of its consuming parameters when it
+  -- starts, so neither its body nor anything after it may use them.
+  consumeArgs (map paramDeclType mergepat) =<< mapM (checkArg . snd) merge
+
   binding (scopeOfLoopForm form) $ do
     checkForm form
 
