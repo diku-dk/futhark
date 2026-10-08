@@ -184,7 +184,7 @@ insertSelfAliases v = mapLeaves $ aliasLeaf . AliasBound . (v,)
 -- | The aliases of a use of the global @v@, given its declared type and type
 -- parameters and the type it is used at. A use of a global name aliases that
 -- name, except where parametricity rules it out. In particular, a non-function
--- component whose declared type mentions one of the type parameters cannot be
+-- component whose declared type contains one of the type parameters cannot be
 -- (part of) a global, and a function can only yield a value aliasing a global
 -- if some nonfresh component of its result is not of that kind. See Note
 -- [Parametric results].
@@ -192,8 +192,16 @@ globalAliases :: VName -> [TypeParam] -> StructType -> StructType -> TypeAliases
 globalAliases v tparams decl = mapLeaves onLeaf . second (const mempty)
   where
     tparams' = S.fromList [p | TypeParamType _ p _ <- tparams]
+
+    -- A type parameter counts only where it is itself a type, not where it is
+    -- an argument to an abstract type, which may ignore it.
     parametric :: TypeBase Size u -> Bool
-    parametric = not . S.disjoint tparams' . typeVars
+    parametric (Array _ _ et) = parametric $ Scalar et
+    parametric (Scalar (TypeVar _ tn _)) = qualLeaf tn `S.member` tparams'
+    parametric (Scalar (Record fs)) = any parametric fs
+    parametric (Scalar (Sum cs)) = any (any parametric) cs
+    parametric _ = False
+
     decl_leaves = leaves decl
 
     onLeaf p t =
@@ -1600,10 +1608,16 @@ checkValDef globals (fname, tparams, params, body, RetType ext ret, retdecl, loc
 -- @()@, so that each use computes it anew, just as a size-polymorphic value is
 -- a function of its sizes. Hence:
 --
--- - A component that is not a function, and whose declared type mentions one of
+-- - A component that is not a function, and whose declared type contains one of
 --   the global's type parameters, does not alias the global. So @empty 'a :
 --   []a@ aliases nothing, while the first component of @pv 'a : ([]i32, []a)@
---   aliases @pv@.
+--   aliases @pv@. An array such as @[](a, i32)@ also counts: it has elements
+--   only if it was handed some, and the only way of pairing them with other
+--   data, @zip@, constructs its result freshly.
+--
+-- - A type parameter that is an argument to an abstract type does not count.
+--   The module defining @M.t@ may well have @type t 'a = i32@, and so a value
+--   of type @M.t a@ or @[](M.t a)@ may be a global.
 --
 -- - A function aliases the global exactly when some nonfresh component of its
 --   (curried) result is not of that kind. So @transpose@, @reverse@ and @|>@
