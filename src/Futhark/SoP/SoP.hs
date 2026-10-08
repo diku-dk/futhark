@@ -31,6 +31,8 @@ module Futhark.SoP.SoP
     (~*~),
     (~/~),
     signumSoP,
+    sop2poly,
+    polyDivRem,
     factorSoP,
     sopFactors,
     numTerms,
@@ -384,6 +386,116 @@ divSoPInt x y =
 -- | Sign of a constant 'SoP'.
 signumSoP :: (Ord u) => SoP u -> Maybe (SoP u)
 signumSoP = fmap (int2SoP . signum) . justConstant
+
+--------------------------------------------------------------------------------
+-- Conversion of an SoP to a polynomial in given unknwons and
+-- Polynomial division with reminder
+--------------------------------------------------------------------------------
+
+-- | Arguments:
+--     @ordered_syms@: an ordered sequence of symbols, represented as a list
+--     @sop@: a sum-of-products (SoP)
+--   Semantics:
+--     it interprets @sop@ as a polynomial in variables @ordered_syms@; the
+--     rest of SoP symbols belong to the coefficients.
+--   The result type is @[(SoP u, Term u)]@, i.e., a list of terms in which
+--     @SoP u@ denotes the symbolic coefficient and @Term u@ the monomial of
+--     each term, i.e., the monomial is a direct multiplication of some symbols
+--     in @ordered_syms@ and the symbols belonging to the coefficient are *not*
+--     in @ordered_syms@.
+sop2poly :: (Ord u) => [u] -> SoP u -> [(SoP u, Term u)]
+sop2poly ordered_syms sop =
+  [ (coefficient, toTerm $ concat $ zipWith replicate powers ordered_syms)
+    | (powers, coefficient) <- M.toDescList grouped
+  ]
+  where
+    symbols = S.fromList ordered_syms
+    grouped =
+      M.fromListWith (.+.)
+        [ (powers, term2SoP coefficient_syms n)
+          | (Term term, n) <- sopToList sop,
+            let occurrences = MS.toOccurList term,
+            let powers =
+                  [ maybe 0 id $ lookup sym occurrences
+                    | sym <- ordered_syms
+                  ],
+            let coefficient_syms =
+                  concat
+                    [ replicate count sym
+                      | (sym, count) <- occurrences,
+                        sym `S.notMember` symbols
+                    ]
+        ]
+
+-- | Arguments:
+--     @ordered_syms@: an ordered sequence of symbols, represented as a list
+--     @sop1@ and @sop2@ are semantically two polynomials in the variables of @ordered_syms@
+--   Semantics:
+--     computes the polynomial division with reminder: @(s_quot, s_rem) = sop1 / sop2@
+--   Result:
+--     @Nothing@ means failed, due to constant coefs not dividing evenly in @divSoPs@
+--     @Just (s_quot, s_rem)@ otherwise   
+--   Hint: use sop2poly to interpret @sop1@ and @sop2@ to a poly representation,
+--         then apply the classical algorithm for polynomial division.
+polyDivRem :: (Ord u) => [u] -> SoP u -> SoP u -> Maybe (SoP u, SoP u)
+polyDivRem ordered_syms sop1 sop2 =
+  fmap (\(quotient, remainder) -> (polyToSoP quotient, polyToSoP remainder)) $
+    divide dividend M.empty M.empty
+  where
+    divisor = polyMap $ sop2poly ordered_syms sop2
+    dividend = polyMap $ sop2poly ordered_syms sop1
+
+    polyMap = M.fromList . map (\(c, t) -> (powersOf t, c))
+    powersOf (Term term) =
+      [ maybe 0 id $ lookup sym $ MS.toOccurList term
+        | sym <- ordered_syms
+      ]
+
+    divide current quot remainder
+      | M.null current = Just (quot, remainder)
+      | M.null divisor = Nothing
+      | otherwise =
+          let (leadMonomial, leadCoefficient) = M.findMax current
+              (divisorMonomial, divisorCoefficient) = M.findMax divisor
+           in case subtractPowers leadMonomial divisorMonomial of
+                Just monomial ->
+                  case leadCoefficient `divSoPs` divisorCoefficient of
+                    Nothing -> Nothing
+                    Just coefficient ->
+                      let factor = M.singleton monomial coefficient
+                          nextQuot = M.insertWith (.+.) monomial coefficient quot
+                          nextCurrent = polySubtract current (polyMultiply factor divisor)
+                       in divide nextCurrent nextQuot remainder
+                Nothing ->
+                  let nextCurrent = M.delete leadMonomial current
+                   in divide nextCurrent quot $ M.insert leadMonomial leadCoefficient remainder
+
+    subtractPowers xs ys
+      | and $ zipWith (>=) xs ys = Just $ zipWith (-) xs ys
+      | otherwise = Nothing
+
+    polyMultiply a b =
+      M.filter (/= int2SoP 0) $
+        M.fromListWith (.+.)
+          [ (zipWith (+) x y, c .*. d)
+            | (x, c) <- M.toList a,
+              (y, d) <- M.toList b
+          ]
+
+    polySubtract a b =
+      M.filter (/= int2SoP 0) $ M.unionWith (.-.) a b
+
+    polyToSoP =
+      foldr
+        (\(powers, coefficient) acc ->
+           coefficient
+             .*. term2SoP
+               (concat $ zipWith replicate powers ordered_syms)
+               1
+             .+. acc
+        )
+        (int2SoP 0)
+        . M.toList
 
 --------------------------------------------------------------------------------
 -- SoP queries

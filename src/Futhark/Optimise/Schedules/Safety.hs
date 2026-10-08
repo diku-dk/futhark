@@ -23,7 +23,7 @@ import Futhark.Optimise.Schedules.SchedUtils
 --        the associative and commutatuive binary-operator of the
 --        accumulator and its neutral element, otherwise Nothing.
 --  ToDo:
---    1. check that the target code does not contain in-place updates or scatterns
+--    1. check that the target code does not contain in-place updates or scatters
 --    2. check whether the code uses accumulators:
 --         - in the case when maps are padded then support them by encompassing
 --           accumulations inside an if statement, i.e., @if i < M then accumulate@,

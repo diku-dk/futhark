@@ -555,6 +555,7 @@ library futhark-testing
       Futhark.Optimise.ArrayLayoutTests
       Futhark.Pkg.SolveTests
       Futhark.ProfileTests
+      Futhark.SoP.SoPTests
       Language.Futhark.CoreTests
       Language.Futhark.PrettyTests
       Language.Futhark.ParserBenchmarks

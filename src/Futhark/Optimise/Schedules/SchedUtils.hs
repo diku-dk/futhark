@@ -58,9 +58,9 @@ data HLSched = HLS
   , signals :: [Int]
   , virthds :: [PrimExp VName]
   , whatres :: AdjustRes
-  , permres :: [Int]
-  , padinner:: [PrimExp VName]
-  , fuselevs:: [Int]
+--  , permres :: [Int]
+--  , padinner:: [PrimExp VName]
+--  , fuselevs:: [Int]
   }
 
 data BotEnv = BotEnv
@@ -84,13 +84,13 @@ splitAtSched k sched =
       (origids', origids'') = splitAt k (origids sched)
       (signals', signals'') = splitAt k (signals sched)
       (sigma',   sigma''  ) = splitAt k (sigma   sched)
-      (permres', permres'') = splitAt k (permres sched)
-  in ( mkSched dimlens'  origids'  sigma'  strides'  signals'  permres'
-     , mkSched dimlens'' origids'' sigma'' strides'' signals'' permres'' 
+--      (permres', permres'') = splitAt k (permres sched)
+  in ( mkSched dimlens'  origids'  sigma'  strides'  signals'  -- permres'
+     , mkSched dimlens'' origids'' sigma'' strides'' signals'' -- permres'' 
      )
   where
-    mkSched d o prm strd sign r =
-      sched { dimlens = d, origids = o, sigma = prm, strides = strd, signals = sign, permres = r }
+    mkSched d o prm strd sign = -- r =
+      sched { dimlens = d, origids = o, sigma = prm, strides = strd, signals = sign } -- , permres = r }
 
 instance Pretty HLSched where
   pretty sched =
@@ -101,8 +101,8 @@ instance Pretty HLSched where
      "\n\tStrides: " <+> pretty (strides sched) <>
      "\n\tVirtThds: "<+> pretty (virthds sched) <>
      "\n\tWhatRes: " <+> pretty (whatres sched) <>
-     "\n\tPadInner: "<+> pretty (padinner sched) <>
-     "\n\tFuseLevs: "<+> pretty (fuselevs sched) <>
+--     "\n\tPadInner: "<+> pretty (padinner sched) <>
+--     "\n\tFuseLevs: "<+> pretty (fuselevs sched) <>
      "   }"
 
 data ParMode = Par | Macc | Seq | Flip deriving Eq
@@ -137,7 +137,8 @@ parseSchedule :: Name -> TopEnv -> [SubExp] -> Pat (LetDec SOACS) ->
 parseSchedule _fnm td_env args pat
   | [pat_el] <- patElems pat,
     Array _ptp shp _ <- patElemDec pat_el,
-    arr : fus : pad : fps : ms_res : virt : strds : sigs : perm : oinds : ns : _ <- L.reverse args =
+--    arr : fus : pad : fps : ms_res : virt : strds : sigs : perm : oinds : ns : _ <- L.reverse args =
+    arr : ms_res : virt : strds : sigs : perm : oinds : ns : _ <- L.reverse args =
   let sched =
           HLS { dimlens = getPrimExpLit ns
               , origids = getIntegerLit oinds
@@ -146,9 +147,9 @@ parseSchedule _fnm td_env args pat
               , strides = getPrimExpLit strds
               , virthds = getPrimExpLit virt
               , whatres = getAdjustRes ms_res
-              , permres = getIntegerLit fps
-              , padinner= getPrimExpLit pad
-              , fuselevs= getIntegerLit fus
+--              , permres = getIntegerLit fps
+--              , padinner= getPrimExpLit pad
+--              , fuselevs= getIntegerLit fus
               }
       shp_pes = map (isInt64 . peFromSe td_env (IntType Int64)) $ shapeDims shp 
       lmad = LMAD.iotaStrided (isInt64 pe0) (isInt64 pe1) shp_pes
