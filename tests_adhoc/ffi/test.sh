@@ -261,4 +261,8 @@ check 'vjp (\(x: [2][3]f64) -> map (map (*2)) x) fa2[0:2] fa2[0:2]'
 check_error 'oob pa1 10' 'Index [10] out of bounds for array of shape [3].'
 check_error 'positive (-1)' 'Assertion is false: (x > 0)'
 
+# Loading a value of a type that cannot be loaded. The type is rejected before
+# the file is read, so the file need not exist.
+check_error '(io.loadvalue "nonexistent" : {x: i32})' 'Cannot load a value of type {x: i32}'
+
 exit $failed

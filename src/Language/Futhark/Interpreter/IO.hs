@@ -47,8 +47,8 @@ data IOOp
   = LoadBytes FilePath
   | LoadImg FilePath
   | LoadAudio FilePath
-  | -- | One value of each type. More than one value is represented as a tuple.
-    LoadValue [V.ValueType] FilePath
+  | -- | Load a value of this type.
+    LoadValue ValueType FilePath
 
 load ::
   (m ValueType -> FilePath -> m IOOp) ->
@@ -82,10 +82,8 @@ typeToValueTypes t = mapM onValue $ fromMaybe [t] $ isTupleRecord t
       Just $ V.ValueType (map fromIntegral ds) $ primTypeToValueType pt
     onValue _ = Nothing
 
-loadResType :: ValueType -> [V.ValueType]
-loadResType (Scalar (Arrow _ _ _ _ (RetType _ rt)))
-  | Just rt' <- typeToValueTypes $ toStruct rt =
-      rt'
+loadResType :: ValueType -> ValueType
+loadResType (Scalar (Arrow _ _ _ _ (RetType _ rt))) = toStruct rt
 loadResType t =
   error $ "loadResType: invalid type " <> prettyString t
 
@@ -230,7 +228,18 @@ doIOOp s (LoadImg fname) =
   tryIO $ fromData s =<< loadImage fname
 doIOOp s (LoadAudio fname) =
   tryIO $ fromData s =<< loadAudio fname
-doIOOp s (LoadValue ts fname) = tryIO $ do
+doIOOp s (LoadValue t fname) =
+  case typeToValueTypes t of
+    Nothing ->
+      pure . Left . T.pack $
+        "Cannot load a value of type "
+          <> prettyString t
+          <> ": only primitives, arrays of primitives, and tuples of these can be loaded."
+    Just ts -> doLoadValue s ts fname
+{-# NOINLINE doIOOp #-}
+
+doLoadValue :: Maybe FFI.Server -> [V.ValueType] -> FilePath -> IO (Either T.Text (Value m))
+doLoadValue s ts fname = tryIO $ do
   vs <- loadValues fname
   let vs_ts = map V.valueType vs
   when (vs_ts /= ts) . fail $
@@ -244,4 +253,3 @@ doIOOp s (LoadValue ts fname) = tryIO $ do
   where
     asValue [v] = v
     asValue vs = toTuple vs
-{-# NOINLINE doIOOp #-}
