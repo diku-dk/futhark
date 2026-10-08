@@ -898,6 +898,16 @@ returnType appres (Scalar (Arrow _ v pd t1 (RetType dims t2))) Observe arg =
 returnType appres (Scalar (Sum cs)) d arg =
   Scalar $ Sum $ (fmap . fmap) (\et -> returnType appres et d arg) cs
 
+-- | Check the argument that an operator section supplies for a parameter of the
+-- given type.  The section is a function that captures the argument, so, just as
+-- a lambda cannot consume what it captures, the parameter cannot be consuming.
+checkSectionArg :: ParamType -> Exp -> CheckM (Exp, TypeAliases)
+checkSectionArg p_t e = do
+  when (diet p_t == Consume) $
+    addError (locOf e) mempty $
+      textwrap "Operator sections may not supply an argument for a consuming parameter."
+  checkExp e
+
 applyArg :: TypeAliases -> TypeAliases -> TypeAliases
 applyArg (Scalar (Arrow closure_als _ d _ (RetType _ rettype))) arg_als =
   returnType closure_als rettype d arg_als
@@ -1361,19 +1371,19 @@ checkExp (OpSection v (Info t) loc) = do
   checkIfConsumed (locOf loc) (aliases als)
   pure (OpSection v (Info t) loc, als)
 checkExp (OpSectionLeft op ftype arg arginfo retinfo loc) = do
-  let (_, Info (pn, pt2)) = arginfo
+  let (Info (_, arg_t, _), Info (pn, pt2)) = arginfo
       (Info ret, _) = retinfo
   als <- observeVar (locOf loc) op (unInfo ftype)
-  (arg', arg_als) <- checkExp arg
+  (arg', arg_als) <- checkSectionArg arg_t arg
   pure
     ( OpSectionLeft op ftype arg' arginfo retinfo loc,
       Scalar $ Arrow (aliases arg_als <> aliases als) pn (diet pt2) (toStruct pt2) ret
     )
 checkExp (OpSectionRight op ftype arg arginfo retinfo loc) = do
-  let (Info (pn, pt2), _) = arginfo
+  let (Info (pn, pt2), Info (_, arg_t, _)) = arginfo
       Info ret = retinfo
   als <- observeVar (locOf loc) op (unInfo ftype)
-  (arg', arg_als) <- checkExp arg
+  (arg', arg_als) <- checkSectionArg arg_t arg
   pure
     ( OpSectionRight op ftype arg' arginfo retinfo loc,
       Scalar $ Arrow (aliases arg_als <> aliases als) pn (diet pt2) (toStruct pt2) ret
