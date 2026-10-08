@@ -43,9 +43,9 @@ get (I.ShapeRecord sm) vr =
   I.ValueRecord
     <$> sequence (M.mapWithKey (\fn cshp -> project vr fn >>= get cshp) sm)
 get shp@(I.ShapeSum sm) vr = do
-  vn <- variant vr
+  (vn, vrs) <- destruct vr
   shps <- throwNothing ("Invalid variant " ++ nameToString vn ++ " in shape " ++ show sm ++ ".") $ M.lookup vn sm
-  I.ValueSum shp vn <$> (destruct vr >>= zipWithM get shps)
+  I.ValueSum shp vn <$> zipWithM get shps vrs
 
 -- | Does this value contain any references to values residing on a server?
 hasLazy :: I.Value m -> Bool
@@ -125,6 +125,10 @@ data ResShape
     ResArray ResShape
   | -- | A record, whose fields are described individually.
     ResRecord (M.Map Name ResShape)
+  | -- | A sum type, whose constructor payloads are described individually.
+    -- Only the payload of the constructor that is actually present can be
+    -- inspected, so the resulting shape describes only that constructor.
+    ResSum (M.Map Name [ResShape])
   | -- | Determined by the type alone.
     ResKnown I.ValueShape
 
@@ -134,6 +138,10 @@ resultShape :: ResShape -> ValueRef -> ServerM I.ValueShape
 resultShape (ResKnown shp) _ = pure shp
 resultShape (ResRecord fs) vr =
   I.ShapeRecord <$> M.traverseWithKey (\f shp -> resultShape shp =<< project vr f) fs
+resultShape (ResSum cs) vr = do
+  (c, vrs) <- destruct vr
+  payload <- throwNothing ("Unexpected variant " ++ nameToString c ++ ".") $ M.lookup c cs
+  I.ShapeSum . M.singleton c <$> zipWithM resultShape payload vrs
 resultShape (ResArray eshp) vr = do
   dims <- shape vr
   foldr I.ShapeDim <$> elemShape (length dims) eshp vr <*> pure dims
@@ -156,6 +164,10 @@ elemShape k (ResRecord fs) arr = do
       pure (f, dropDims k shp)
     unknownField f =
       throwError $ "Unzipping produced unexpected field " ++ nameToString f ++ "."
+elemShape _ (ResSum _) _ =
+  -- Unlike records, an array of sums cannot be split into arrays that have a
+  -- shape even when empty.
+  throwError "Cannot determine the sizes of an array of sum types."
 elemShape _ (ResArray _) _ =
   -- 'ResArray' covers every dimension at once, so it never describes the
   -- elements of an array.

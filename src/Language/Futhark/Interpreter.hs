@@ -1351,28 +1351,56 @@ evalModExp env (ModApply f e (Info psubst) (Info rsubst) _) = do
       pure (f_env <> e_env <> res_env <> env_substs, res_mod)
     _ -> error "Expected ModuleFun."
 
-extCall :: Name -> [Value] -> FFI.ResShape -> EvalM Value
-extCall n ps resshp = liftF $ ExtOpFFI call id
+-- | Call an external function with the given return type.
+extCall :: Name -> ResRetType -> Env -> [Value] -> EvalM Value
+extCall n ret env ps = do
+  v <- liftF . (`ExtOpFFI` id) . call =<< resShapeOf ext env t
+  -- An existential size that the server cannot reveal is one that occurs only
+  -- in the payload of an absent constructor. It is observable by binding it in
+  -- a size pattern, so this differs from the interpreter, which knows the
+  -- actual size. Like the C API, we use 0 for the arrays of an absent
+  -- constructor.
+  let ext_env =
+        i64Env $
+          resolveExistentials ext t (valueShape v) <> M.fromList (map (,0) ext)
+  completeSums (ext_env <> env) t v
   where
-    call = do
+    ext = retDims ret
+    t = toStruct $ snd $ unfoldFunType $ retType ret
+    call resshp = do
       FFI.gc
       vr <- FFI.call n =<< FFI.putArgs n ps
       shp <- FFI.resultShape resshp vr
       FFI.lazyGet shp vr
 
--- | Describe a result type for 'FFI.resultShape'. Arrays and records are
--- merely described, never evaluated, as they may contain existential sizes;
--- only what is neither has its shape taken from the type.
-resShapeOf :: Env -> StructType -> EvalM FFI.ResShape
-resShapeOf env t
+-- | Describe a result type for 'FFI.resultShape'. Arrays, records, and sums
+-- with existential sizes are merely described, never evaluated; only what is
+-- none of these has its shape taken from the type.
+resShapeOf :: [VName] -> Env -> StructType -> EvalM FFI.ResShape
+resShapeOf ext env t
   | rank > 0 =
-      FFI.ResArray <$> resShapeOf env (stripArray rank t)
+      FFI.ResArray <$> resShapeOf ext env (stripArray rank t)
   | Scalar (Record fs) <- t =
-      FFI.ResRecord <$> traverse (resShapeOf env) fs
+      FFI.ResRecord <$> traverse (resShapeOf ext env) fs
+  | Scalar (Sum cs) <- t,
+    any (`S.member` fvVars (freeInType t)) ext =
+      FFI.ResSum <$> traverse (traverse (resShapeOf ext env)) cs
   | otherwise =
       FFI.ResKnown . typeShape <$> evalTypeFully (structToEval env t)
   where
     rank = arrayRank t
+
+-- | The shape of a sum produced by 'FFI.resultShape' describes only the
+-- constructor that is present. Add the others, whose shapes are determined by
+-- the type in the given environment.
+completeSums :: Env -> StructType -> Value -> EvalM Value
+completeSums env (Scalar (Record ts)) (ValueRecord vs) =
+  ValueRecord <$> sequence (M.intersectionWith (completeSums env) ts vs)
+completeSums env t@(Scalar (Sum cs)) (ValueSum _ c vs) = do
+  vs' <- maybe (pure vs) (\ts -> zipWithM (completeSums env) ts vs) $ M.lookup c cs
+  shape <- sumValueShape env t c vs'
+  pure $ ValueSum shape c vs'
+completeSums _ _ v = pure v
 
 -- | The parameters of an external binding, represented as functions that
 -- bind an argument in the environment.
@@ -1393,34 +1421,31 @@ extFun ::
   Name ->
   Env ->
   [Env -> Value -> EvalM Env] ->
-  (Env -> EvalM FFI.ResShape) ->
+  ResRetType ->
   EvalM Value
 extFun n = extFun' []
   where
-    extFun' vs env [] resShape = extCall n (reverse vs) =<< resShape env
-    extFun' vs env (bind : binds) resShape = pure . ValueFun $ \v -> do
+    extFun' vs env [] ret = extCall n ret env $ reverse vs
+    extFun' vs env (bind : binds) ret = pure . ValueFun $ \v -> do
       env' <- bind env v
-      extFun' (v : vs) env' binds resShape
+      extFun' (v : vs) env' binds ret
 
 evalDec :: Env -> Dec -> EvalM Env
 evalDec env (ValDec vb@(ValBind (Just _) vn@(VName n _) _ _ (Info ret) tparams ps _ _ _ _)) | "$external" `elem` valBindAttrs vb = localExts $ do
   let ftype = evalToStruct $ expandType env $ funType ps ret
       bv = Just $ T.BoundV [] ftype
       params = extParams ps ret
-      -- Evaluated in the environment where the parameters have been bound
-      -- to the actual arguments, as the type may refer to them.
-      resShape env' = resShapeOf env' $ snd $ unfoldFunType $ retType ret
   sizes <- extEnv
   if null tparams
     then do
-      f <- extFun n env params resShape
+      f <- extFun n env params ret
       pure $ mempty {envTerm = M.singleton vn $ TermValue bv f} <> sizes
     else
       -- TODO: Add missing sizes?
       let pfn ftype' = do
             tparam_env <-
               evalResolved $ resolveTypeParams (map typeParamName tparams) ftype ftype'
-            extFun n (tparam_env <> env) params resShape
+            extFun n (tparam_env <> env) params ret
        in pure $ mempty {envTerm = M.singleton vn $ TermPoly bv pfn} <> sizes
 evalDec env (ValDec (ValBind _ v _ _ (Info ret) tparams ps fbody _ _ _)) = localExts $ do
   binding <- evalValBinding env v tparams ps ret fbody

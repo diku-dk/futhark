@@ -62,8 +62,42 @@ entry ca6 (x: []i32) = ((filter (> 0) x, 2i32), 3i32)
 -- An array whose elements are records with a field of unknown size. The
 -- elements cannot be inspected to find that size - there may not be any -
 -- so the array has to be unzipped instead.
-entry ca7 (x: []i32) (n: i64) : [] {a: []i32, b: i32} =
+entry ca7 (x: []i32) (n: i64) : []{a: []i32, b: i32} =
   replicate n {a = filter (> 0) x, b = 1}
+
+-- A sum type whose payload has an unknown size.
+entry ca8 (x: []i32) : #foo ([]i32) =
+  #foo (filter (> 0) x)
+
+entry ca8f (x: #foo ([]i32)) : i64 =
+  match x
+  case #foo v -> length v
+
+-- Only the payload of the constructor that is present can be inspected, so
+-- the shapes of the others must be determined some other way.
+entry ca9 (b: bool) (x: []i32) : #foo ([]i32) | #bar ([]i32) =
+  let y = filter (> 0) x
+  let z = filter (< 0) x
+  in if b then #foo y else #bar z
+
+-- A sum type with a payload of unknown size need not be the entire result.
+entry ca10 (x: []i32) : {a: #foo ([]i32) | #none, b: i32} =
+  {a = #foo (filter (> 0) x), b = 2}
+
+entry ca11 (x: []i32) : #outer (#inner ([]i32) | #nope) =
+  #outer (#inner (filter (> 0) x))
+
+-- The sizes in an absent constructor may be determined by the type, or by
+-- another part of the result.
+entry ca12 (x: []i32) : #foo ([3]i32) | #bar ([]i32) =
+  #bar (filter (> 0) x)
+
+entry ca13 (n: i64) (x: []i32) : #foo ([n]i32) | #bar ([]i32) =
+  #bar (filter (> 0) x)
+
+entry ca14 (b: bool) (x: []i32) : ?[n].(#foo ([n]i32) | #bar i32, [n]i32) =
+  let y = filter (> 0) x
+  in (if b then #foo y else #bar 0, y)
 
 -- Entry points that fail at run time, to check how such failures are
 -- reported when they happen in compiled code rather than in the interpreter.

@@ -184,6 +184,20 @@ check 'ca6 [1,-2,3]'
 check 'ca7 [1,-2,3] 2'
 check 'ca7 [1,-2,3] 0'
 check '(ca7 [1,-2,3] 2)[0].a'
+check '(ca8 [1,-2,3])'
+check 'ca8 [-1,-2]'
+check 'ca8f (ca8 [1,-2,3])'
+check 'ca9 true [1,-2,3]'
+check 'ca9 false [1,-2,3]'
+check 'ca10 [1,-2,3]'
+check 'match (ca10 [1,-2,3]).a case #foo v -> length v case #none -> 0'
+check 'ca11 [1,-2,3]'
+# The sizes in an absent constructor are observable by binding them in a
+# pattern.
+check 'let [k] (_: #outer (#inner ([k]i32) | #nope)) = ca11 [1,-2,3] in k'
+check 'let [k] (_: #foo ([k]i32) | #bar ([]i32)) = ca12 [1,-2,3] in k'
+check 'let [k] (_: #foo ([k]i32) | #bar ([]i32)) = ca13 4 [1,-2,3] in k'
+check 'let [n] (_: #foo ([n]i32) | #bar i32) = (ca14 false [1,-2,3]).0 in n'
 
 # Primitive array functions
 check 'pa1f [1,2,3]'

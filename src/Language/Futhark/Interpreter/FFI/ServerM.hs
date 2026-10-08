@@ -35,7 +35,6 @@ module Language.Futhark.Interpreter.FFI.ServerM
     variants,
     mkSum,
     destruct,
-    variant,
     -- Error handling convenience
     throwNothing,
   )
@@ -343,7 +342,8 @@ mkSum tn vn vrs = do
     >>= throwServerJust ("cmdConstruct failed on type " ++ T.unpack tn ++ ", variant " ++ nameToString vn ++ " with variables " ++ csList (map T.unpack vns) ++ ".")
   mkValueRef dst
 
-destruct :: ValueRef -> ServerM [ValueRef]
+-- | The variant of a sum, and its payload.
+destruct :: ValueRef -> ServerM (Name, [ValueRef])
 destruct src = do
   vn <- variant src
   tn <- vtype src
@@ -354,7 +354,7 @@ destruct src = do
     ndsts <- mapM (const uniqueName) vts
     liftIO (FS.cmdDestruct s nsrc ndsts)
       >>= throwServerJust ("cmdVariants failed on source " ++ T.unpack nsrc ++ ", destinations " ++ csList (map T.unpack ndsts) ++ ".")
-    mapM mkValueRef ndsts
+    (vn,) <$> mapM mkValueRef ndsts
 
 variant :: ValueRef -> ServerM Name
 variant src = do
