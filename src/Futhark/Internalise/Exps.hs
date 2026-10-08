@@ -571,7 +571,18 @@ internaliseAppExp desc _ (E.Loop sparams mergepat loopinit form loopbody _) = do
 
           -- Careful not to clobber anything.
           loop_end_cond_body <- renameBody <=< buildBody_ $ do
-            forM_ (zip shapepat shapeargs) $ \(p, se) ->
+            -- Shape arguments may refer to other shape parameters, which
+            -- must not be clobbered before they are read.
+            let shapepat_names = map I.paramName shapepat
+            shapeargs' <- forM (zip shapepat shapeargs) $ \case
+              (p, I.Var v)
+                | v /= I.paramName p,
+                  v `elem` shapepat_names -> do
+                    v' <- newVName $ baseName v <> "_tmp"
+                    letBindNames [v'] $ I.BasicOp $ I.SubExp $ I.Var v
+                    pure $ I.Var v'
+              (_, se) -> pure se
+            forM_ (zip shapepat shapeargs') $ \(p, se) ->
               unless (se == I.Var (I.paramName p)) $
                 letBindNames [I.paramName p] $
                   BasicOp $
