@@ -987,17 +987,25 @@ checkLoopResult loop_loc param body_als =
       addError loop_loc mempty $
         what v <+> "may have internal aliases."
 
--- | Check a loop form, returning the aliases of the array a for-in loop
--- iterates over.
-checkLoopForm :: LoopFormBase Info VName -> CheckM (LoopFormBase Info VName, Aliases)
-checkLoopForm (ForIn pat e) = do
+-- | Check the form of a loop with the given parameter, returning the aliases of
+-- the array a for-in loop iterates over.  The condition of a while loop is
+-- evaluated before every iteration, with the loop parameter in scope, so it may
+-- consume nothing but its own local variables.
+checkLoopForm :: Pat ParamType -> LoopFormBase Info VName -> CheckM (LoopFormBase Info VName, Aliases)
+checkLoopForm _ (ForIn pat e) = do
   (e', e_als) <- checkExp e
   pure (ForIn pat e', aliases e_als)
-checkLoopForm form = (,mempty) <$> checkSubExps form
+checkLoopForm param (While cond) = do
+  -- Throw away the consumption - it can refer only to local variables anyway.
+  ((cond', _), _) <-
+    contain . noConsumable . bindingParam (fmap (second (const Observe)) param) $
+      checkExp cond
+  pure (While cond', mempty)
+checkLoopForm _ form = (,mempty) <$> checkSubExps form
 
 checkLoop :: Loc -> Loop -> CheckM (Loop, TypeAliases)
 checkLoop loop_loc (param, arg, form, body) = do
-  (form', arr_als) <- checkLoopForm form
+  (form', arr_als) <- checkLoopForm param form
   -- We pretend that every part of the loop parameter has a consuming
   -- diet, as we need to allow consumption in the body, which we then
   -- use to infer the proper diet of the parameter.
