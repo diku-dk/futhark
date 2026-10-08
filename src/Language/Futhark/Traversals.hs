@@ -22,6 +22,7 @@ module Language.Futhark.Traversals
   ( ASTMapper (..),
     ASTMappable (..),
     identityMapper,
+    traversePat,
     bareExp,
   )
 where
@@ -338,6 +339,8 @@ instance ASTMappable (IdentBase Info VName StructType) where
   astMap tv (Ident name (Info t) loc) =
     Ident name <$> (Info <$> mapOnStructType tv t) <*> pure loc
 
+-- | Traverse the types of a pattern, and the expressions in its type
+-- ascriptions.
 traversePat ::
   (Monad m) =>
   (t1 -> m t2) ->

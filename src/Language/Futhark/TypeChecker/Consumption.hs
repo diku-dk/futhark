@@ -443,12 +443,19 @@ matchPat Wildcard {} _ = mempty
 matchPat PatLit {} _ = mempty
 matchPat (PatAttr _ p _) t = matchPat p t
 
+-- | Check the size expressions in a type.  A size expression may be evaluated
+-- before the expression or binding it appears in, so it may consume nothing.
+checkSizes :: (Bifoldable t) => t Exp a -> CheckM ()
+checkSizes = noConsumable . bitraverse_ checkExp pure
+
 bindingPat ::
   Pat StructType ->
   TypeAliases ->
   CheckM (a, TypeAliases) ->
   CheckM (a, TypeAliases)
-bindingPat p t = fmap (second (second (unscope (patNames p)))) . local bind
+bindingPat p t m = do
+  void . noConsumable $ traversePat pure (fmap fst . checkExp) p
+  second (second (unscope (patNames p))) <$> local bind m
   where
     bind env =
       env
@@ -465,7 +472,7 @@ bindingParam = bindingParamAliasing mempty
 -- given aliases.
 bindingParamAliasing :: Aliases -> Pat ParamType -> CheckM (a, TypeAliases) -> CheckM (a, TypeAliases)
 bindingParamAliasing als p m = do
-  mapM_ (noConsumable . bitraverse_ checkExp pure) p
+  mapM_ checkSizes p
   second (second (unscope (patNames p))) <$> local bind m
   where
     bind env =
@@ -1299,6 +1306,7 @@ checkExp (AppExp (Match cond cs loc) appres) = do
 --
 checkExp (AppExp (LetFun fname (typarams, params, retdecl, Info (RetType ext ret), funbody) letbody loc) appres) = do
   ((ret', funbody'), ftype) <- bindingParams params $ do
+    mapM_ checkSizes retdecl
     -- Throw away the consumption - it can refer only to the parameters
     -- anyway.
     ((funbody', funbody_als), _body_cons) <- contain $ checkExp funbody
@@ -1330,6 +1338,7 @@ checkExp (AppExp (BinOp (op, oploc) (Info op_t) (x, xp) (y, yp) loc) appres) = d
 --
 checkExp e@(Lambda params body te (Info (RetType ext ret)) loc) =
   bindingParams params $ do
+    mapM_ checkSizes te
     -- Throw away the consumption - it can refer only to the parameters
     -- anyway.
     ((body', body_als), _body_cons) <- contain $ checkExp body
@@ -1366,6 +1375,7 @@ checkExp (Update src steps ve t loc) = do
   steps' <- mapM checkStep steps
   (ve', ve_als) <- checkExp ve
   (src', src_als) <- checkExp src
+  checkIfConsumed (locOf loc) $ aliases ve_als
   let hasIndex = any isIndex steps
   res_als <-
     if hasIndex
@@ -1416,9 +1426,11 @@ checkExp (UpdateSection steps t loc) = do
     checkStep (UpdateStepSlice slice) = UpdateStepSlice <$> checkSubExps slice
 checkExp (Coerce e te t loc) = do
   (e', e_als) <- checkExp e
+  checkSizes te
   pure (Coerce e' te t loc, e_als)
 checkExp (Ascript e te loc) = do
   (e', e_als) <- checkExp e
+  checkSizes te
   pure (Ascript e' te loc, e_als)
 checkExp (AppExp (Index v slice loc) appres) = do
   (v', v_als) <- checkExp v
@@ -1502,6 +1514,7 @@ checkValDef ::
   ((Exp, ResRetType), [TypeError])
 checkValDef globals (fname, tparams, params, body, RetType ext ret, retdecl, loc) = runCheckM globals' (locOf loc) $ do
   fmap fst . bindingParams params $ do
+    mapM_ checkSizes retdecl
     (body', body_als) <- checkExp body
     checkReturnAlias loc params ret body_als
     -- If the user did not provide an annotation (meaning the return
