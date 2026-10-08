@@ -459,7 +459,12 @@ bindingPat p t = fmap (second (second (unscope (patNames p)))) . local bind
         f (v, (_, als)) = (v, Consumable $ insertSelfAliases v als)
 
 bindingParam :: Pat ParamType -> CheckM (a, TypeAliases) -> CheckM (a, TypeAliases)
-bindingParam p m = do
+bindingParam = bindingParamAliasing mempty
+
+-- | Like 'bindingParam', but every component of the parameter also aliases the
+-- given aliases.
+bindingParamAliasing :: Aliases -> Pat ParamType -> CheckM (a, TypeAliases) -> CheckM (a, TypeAliases)
+bindingParamAliasing als p m = do
   mapM_ (noConsumable . bitraverse_ checkExp pure) p
   second (second (unscope (patNames p))) <$> local bind m
   where
@@ -469,8 +474,10 @@ bindingParam p m = do
             foldr (uncurry M.insert . f) (envVtable env) (patternMap p)
         }
     f (v, t)
-      | diet t == Consume = (v, Consumable $ selfAliasType v t)
-      | otherwise = (v, Nonconsumable $ selfAliasType v t)
+      | diet t == Consume = (v, Consumable t_als)
+      | otherwise = (v, Nonconsumable t_als)
+      where
+        t_als = second (<> als) $ selfAliasType v t
 
 bindingIdent :: Diet -> Ident StructType -> CheckM (a, TypeAliases) -> CheckM (a, TypeAliases)
 bindingIdent d (Ident v (Info t) _) =
@@ -488,12 +495,14 @@ bindingParams params m =
     second (second (unscope (foldMap patNames params)))
       <$> foldr bindingParam m params
 
-bindingLoopForm :: LoopFormBase Info VName -> CheckM (a, TypeAliases) -> CheckM (a, TypeAliases)
-bindingLoopForm (For ident _) m = bindingIdent Observe ident m
-bindingLoopForm (ForIn pat _) m = bindingParam pat' m
+-- | Bind the names of a loop form, given the aliases of the array a for-in loop
+-- iterates over.  An element of that array aliases it, as indexing does.
+bindingLoopForm :: Aliases -> LoopFormBase Info VName -> CheckM (a, TypeAliases) -> CheckM (a, TypeAliases)
+bindingLoopForm _ (For ident _) m = bindingIdent Observe ident m
+bindingLoopForm arr_als (ForIn pat _) m = bindingParamAliasing arr_als pat' m
   where
     pat' = fmap (second (const Observe)) pat
-bindingLoopForm While {} m = m
+bindingLoopForm _ While {} m = m
 
 bindingFun :: VName -> TypeAliases -> CheckM a -> CheckM a
 bindingFun v t = local $ \env ->
@@ -978,16 +987,24 @@ checkLoopResult loop_loc param body_als =
       addError loop_loc mempty $
         what v <+> "may have internal aliases."
 
+-- | Check a loop form, returning the aliases of the array a for-in loop
+-- iterates over.
+checkLoopForm :: LoopFormBase Info VName -> CheckM (LoopFormBase Info VName, Aliases)
+checkLoopForm (ForIn pat e) = do
+  (e', e_als) <- checkExp e
+  pure (ForIn pat e', aliases e_als)
+checkLoopForm form = (,mempty) <$> checkSubExps form
+
 checkLoop :: Loc -> Loop -> CheckM (Loop, TypeAliases)
 checkLoop loop_loc (param, arg, form, body) = do
-  form' <- checkSubExps form
+  (form', arr_als) <- checkLoopForm form
   -- We pretend that every part of the loop parameter has a consuming
   -- diet, as we need to allow consumption in the body, which we then
   -- use to infer the proper diet of the parameter.
   ((body', body_cons), body_als) <-
     noConsumable
       . bindingParam (updateParamDiet (const True) param)
-      . bindingLoopForm form'
+      . bindingLoopForm arr_als form'
       $ do
         ((body', body_als), body_cons) <- contain $ checkExp body
         pure ((body', body_cons), body_als)
