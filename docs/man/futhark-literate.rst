@@ -31,6 +31,10 @@ programming techniques.
 
 **Warning:** Do not run untrusted programs.  See SAFETY below.
 
+Top level functions declared as ``entry`` will run as compiled code, functions
+declared with ``def`` will run in the interpreter. Make sure any significant
+computation happens inside ``entry`` functions.
+
 Image directives and IO functions shell out to ``convert`` (from ImageMagick).
 Video and audio directives and functions uses ``ffmpeg``.
 

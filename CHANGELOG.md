@@ -22,6 +22,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Support for ISPC 1.31 (and that is now also the minimum version). (#2557)
 
+* `futhark repl` and `futhark eval` can now run code available via a compiled
+  server executable.
+
+* `futhark test`: `auto output` now works with `script input`.
+
 ### Removed
 
 * The `futhark script` command has been removed.
