@@ -807,7 +807,7 @@ passArgs loc f_als args = do
     when (diet p_t == Consume) $ do
       noSelfAliases (locOf e) e_als
       let cons_als = consumedAliasesOf p_t e_als
-          others = [arg | (j, (_, arg)) <- zip [0 ..] args, j /= i]
+          others = map (snd . snd) . filter ((/= i) . fst) $ zip [0 ..] args
       when (cons_als `overlaps` f_als) . addError (locOf e) mempty $
         "Argument is consumed, but aliases the function being applied."
       case find ((cons_als `overlaps`) . aliases . snd) others of
@@ -822,7 +822,11 @@ passArgs loc f_als args = do
               </> "at"
               <+> pretty (locTextRel (locOf e) (locOf other))
               <> "."
-      consumeAliases (locOf e) cons_als
+      -- Passing an argument for a consuming parameter is consumption even
+      -- when the argument aliases nothing, as what the call returns may hold
+      -- it (see 'checkBound').  A fresh name records that.
+      passed <- internalAlias "internal_consumed_arg" $ NameAppRes Nothing $ srclocOf e
+      consumeAliases (locOf e) $ S.insert passed cons_als
   where
     -- Name a variable the programmer wrote if there is one.
     describeShared locs = do
@@ -929,6 +933,13 @@ applyArg :: TypeAliases -> TypeAliases -> TypeAliases
 applyArg (Scalar (Arrow closure_als _ d _ (RetType _ rettype))) arg_als =
   returnType closure_als rettype d arg_als
 applyArg _ arg_als = arg_als
+
+-- | The aliases of the components of a value passed for a parameter of this
+-- type that the parameter observes.
+observedAliasesOf :: ParamType -> TypeAliases -> Aliases
+observedAliasesOf p_t t_als =
+  foldMap (aliases . snd . snd) . filter ((== Observe) . diet . snd . fst) $
+    zip (leaves p_t) (leaves t_als)
 
 applyLoopArg :: Aliases -> ParamType -> TypeAliases -> ResType -> TypeAliases
 applyLoopArg appres (Scalar (Record pfs)) (Scalar (Record afs)) (Scalar (Record rfs)) =
@@ -1062,7 +1073,7 @@ checkLoop loop_loc (param, arg, form, body) = do
   (_, entry_cons) <-
     contain . passArgs loop_loc mempty $
       (param_t, (arg_e, arg_als))
-        : [(toParam Observe (typeOf e), (e, e_als)) | (e, e_als) <- maybeToList iterated]
+        : map (\(e, e_als) -> (toParam Observe (typeOf e), (e, e_als))) (maybeToList iterated)
   consumed entry_cons
   let arg_cons = init_cons <> entry_cons
 
@@ -1087,9 +1098,11 @@ checkLoop loop_loc (param, arg, form, body) = do
 
   loop_al <- internalAlias "internal_loop_result" $ NameLoopRes $ srclocOf loop_loc
 
+  -- As for a function call, the value of an observed parameter may come from
+  -- any observed part of the initial value, as the loop may permute them.
   let loop_als =
         applyLoopArg
-          (S.singleton loop_al)
+          (S.insert loop_al $ observedAliasesOf param_t arg_als)
           param_t
           arg_als
           (paramToRes param_t)
@@ -1221,6 +1234,23 @@ joinBranches what loc all_cons branches = do
       else S.insert <$> internalAlias "internal_branch_result" (NameBranchRes what (srclocOf loc))
   pure $ second (tie . S.filter keep) t
 
+-- | Check an expression whose value is bound to names (described by the
+-- string).  A value of higher-order type may hold what was consumed in
+-- computing it, and a name can be used any number of times, so such an
+-- expression may not consume anything.
+checkBound :: Doc () -> Exp -> CheckM (Exp, TypeAliases)
+checkBound what e = do
+  ((e', e_als), e_cons) <- contain $ checkExp e
+  consumed e_cons
+  let e_t = typeOf e'
+  when (e_cons /= mempty && not (orderZero e_t)) $
+    addError (locOf e) mempty . withIndexLink "contains-consumption" $
+      what
+        <+> "of higher-order type"
+        </> indent 2 (pretty e_t)
+        </> "contains consumption, which is not allowed."
+  pure (e', e_als)
+
 checkExp :: Exp -> CheckM (Exp, TypeAliases)
 -- First we have the complicated cases.
 
@@ -1261,14 +1291,7 @@ checkExp (AppExp (Loop sparams pat loopinit form body loc) appres) = do
 
 --
 checkExp (AppExp (LetPat sizes p e body loc) appres) = do
-  ((e', e_als), e_cons) <- contain $ checkExp e
-  consumed e_cons
-  let e_t = typeOf e'
-  when (e_cons /= mempty && not (orderZero e_t)) $
-    addError (locOf e) mempty . withIndexLink "contains-consumption" $
-      "Let-bound expression of higher-order type"
-        </> indent 2 (pretty e_t)
-        </> "contains consumption, which is not allowed."
+  (e', e_als) <- checkBound "Let-bound expression" e
   bindingPat p e_als $ do
     (body', body_als) <- checkExp body
     pure
@@ -1289,7 +1312,7 @@ checkExp (AppExp (If cond te fe loc) appres) = do
 
 --
 checkExp (AppExp (Match cond cs loc) appres) = do
-  (cond', cond_als) <- checkExp cond
+  (cond', cond_als) <- checkBound "Matched expression" cond
   ((cs', cs_als), cs_cons) <-
     first NE.unzip . NE.unzip <$> mapM (checkCase cond_als) cs
   comb_als <- joinBranches "match-expression" (locOf loc) (fold cs_cons) cs_als
@@ -1515,7 +1538,9 @@ checkValDef ::
 checkValDef globals (fname, tparams, params, body, RetType ext ret, retdecl, loc) = runCheckM globals' (locOf loc) $ do
   fmap fst . bindingParams params $ do
     mapM_ checkSizes retdecl
-    (body', body_als) <- checkExp body
+    -- A top-level constant is a name like any other.
+    (body', body_als) <-
+      if null params then checkBound "Top-level constant" body else checkExp body
     checkReturnAlias loc params ret body_als
     -- If the user did not provide an annotation (meaning the return
     -- type is fully inferred), we infer the freshness.  Otherwise,

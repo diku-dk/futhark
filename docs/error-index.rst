@@ -334,9 +334,9 @@ A (contrived) example of this error is the following:
 "Let-bound expression of higher-order type *t* contains consumption"
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-This occurs when ``let``-binding an expression that contains consumption and
-returns a function. The most common case is partial application of a consuming
-function::
+This occurs when ``let``, ``def``, or ``case``-binding an expression that
+contains consumption and returns a function. The most common case is partial
+application of a consuming function::
 
   def update (xs: *[]i32) (i: i32) (y: i32) =
     xs with [i] = y
