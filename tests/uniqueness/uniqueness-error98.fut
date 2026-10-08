@@ -1,7 +1,7 @@
 -- An operator section captures its operand, as a lambda captures a free
 -- variable, so it cannot supply an argument for a consuming parameter.
 -- ==
--- error: section cannot consume what it captures
+-- error: Operator sections may not supply an argument for a consuming parameter.
 
 def (<-<) (xs: *[]i32) (i: i32) : *[]i32 = xs with [0] = i
 

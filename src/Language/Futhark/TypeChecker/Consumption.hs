@@ -776,11 +776,10 @@ consumedAliasesOf p_t t_als
   | diet p_t == Consume = aliases t_als
   | otherwise = mempty
 
--- | Check an argument, given the aliases of the function being applied and the
--- arguments evaluated before this one.  What the argument consumes may alias
--- neither.
-checkArg :: Aliases -> [(Exp, TypeAliases)] -> ParamType -> Exp -> CheckM (Exp, TypeAliases)
-checkArg f_als prev p_t e = do
+-- | Check an expression passed as an argument.  This does not pass it; see
+-- 'passArgs'.
+checkArg :: Exp -> CheckM (Exp, TypeAliases)
+checkArg e = do
   ((e', e_als), e_cons) <- contain $ checkExp e
   consumed e_cons
   let e_t = typeOf e'
@@ -789,25 +788,34 @@ checkArg f_als prev p_t e = do
       "Argument of functional type"
         </> indent 2 (pretty e_t)
         </> "contains consumption, which is not allowed."
-  when (diet p_t == Consume) $ do
-    noSelfAliases (locOf e) e_als
-    let cons_als = consumedAliasesOf p_t e_als
-    consumeAliases (locOf e) cons_als
-    when (cons_als `overlaps` f_als) . addError (locOf e) mempty $
-      "Argument is consumed, but aliases the function being applied."
-    case find ((cons_als `overlaps`) . aliases . snd) prev of
-      Nothing -> pure ()
-      Just (prev_arg, prev_als) -> do
-        shared <- describeShared $ aliasLocs $ cons_als `S.intersection` aliases prev_als
-        addError (locOf e) mempty $
-          "Argument is consumed, but aliases"
-            </> indent 2 shared
-            </> "which is also aliased by other argument"
-            </> indent 2 (pretty prev_arg)
-            </> "at"
-            <+> pretty (locTextRel (locOf e) (locOf prev_arg))
-            <> "."
   pure (e', e_als)
+
+-- | Pass checked arguments, each with the type of its parameter, to a function
+-- with the given aliases.  The call uses the function and every argument, and
+-- then consumes what the parameters consume.  See Note [Locations].
+passArgs :: Loc -> Aliases -> [(ParamType, (Exp, TypeAliases))] -> CheckM ()
+passArgs loc f_als args = do
+  checkIfConsumed loc $ f_als <> foldMap (aliases . snd . snd) args
+  forM_ (zip [0 :: Int ..] args) $ \(i, (p_t, (e, e_als))) ->
+    when (diet p_t == Consume) $ do
+      noSelfAliases (locOf e) e_als
+      let cons_als = consumedAliasesOf p_t e_als
+          others = [arg | (j, (_, arg)) <- zip [0 ..] args, j /= i]
+      when (cons_als `overlaps` f_als) . addError (locOf e) mempty $
+        "Argument is consumed, but aliases the function being applied."
+      case find ((cons_als `overlaps`) . aliases . snd) others of
+        Nothing -> pure ()
+        Just (other, other_als) -> do
+          shared <- describeShared $ aliasLocs $ cons_als `S.intersection` aliases other_als
+          addError (locOf e) mempty $
+            "Argument is consumed, but aliases"
+              </> indent 2 shared
+              </> "which is also aliased by other argument"
+              </> indent 2 (pretty other)
+              </> "at"
+              <+> pretty (locTextRel (locOf e) (locOf other))
+              <> "."
+      consumeAliases (locOf e) cons_als
   where
     -- Name a variable the programmer wrote if there is one.
     describeShared locs = do
@@ -901,12 +909,14 @@ returnType appres (Scalar (Sum cs)) d arg =
 -- | Check the argument that an operator section supplies for a parameter of the
 -- given type.  The section is a function that captures the argument, so, just as
 -- a lambda cannot consume what it captures, the parameter cannot be consuming.
-checkSectionArg :: ParamType -> Exp -> CheckM (Exp, TypeAliases)
-checkSectionArg p_t e = do
+checkSectionArg :: TypeAliases -> ParamType -> Exp -> CheckM (Exp, TypeAliases)
+checkSectionArg op_als p_t e = do
   when (diet p_t == Consume) $
     addError (locOf e) mempty $
       textwrap "Operator sections may not supply an argument for a consuming parameter."
-  checkExp e
+  (e', e_als) <- checkExp e
+  checkIfConsumed (locOf e) $ aliases op_als
+  pure (e', e_als)
 
 applyArg :: TypeAliases -> TypeAliases -> TypeAliases
 applyArg (Scalar (Arrow closure_als _ d _ (RetType _ rettype))) arg_als =
@@ -997,28 +1007,41 @@ checkLoopResult loop_loc param body_als =
       addError loop_loc mempty $
         what v <+> "may have internal aliases."
 
--- | Check the form of a loop with the given parameter, returning the aliases of
--- the array a for-in loop iterates over.  The condition of a while loop is
--- evaluated before every iteration, with the loop parameter in scope, so it may
--- consume nothing but its own local variables.
-checkLoopForm :: Pat ParamType -> LoopFormBase Info VName -> CheckM (LoopFormBase Info VName, Aliases)
+-- | Check the form of a loop with the given parameter, returning the array a
+-- for-in loop iterates over.
+checkLoopForm ::
+  Pat ParamType ->
+  LoopFormBase Info VName ->
+  CheckM (LoopFormBase Info VName, Maybe (Exp, TypeAliases))
 checkLoopForm _ (ForIn pat e) = do
   (e', e_als) <- checkExp e
-  pure (ForIn pat e', aliases e_als)
+  pure (ForIn pat e', Just (e', e_als))
 checkLoopForm param (While cond) = do
-  -- Throw away the consumption - it can refer only to local variables anyway.
+  -- A condition is evaluated repeatedly and may not consume anything.
   ((cond', _), _) <-
     contain . noConsumable . bindingParam (fmap (second (const Observe)) param) $
       checkExp cond
-  pure (While cond', mempty)
-checkLoopForm _ form = (,mempty) <$> checkSubExps form
+  pure (While cond', Nothing)
+checkLoopForm _ form = (,Nothing) <$> checkSubExps form
 
+-- | A loop evaluates its initial value and then its form, and then passes the
+-- initial value to the first iteration, as if calling a function that also
+-- observes the array a for-in loop iterates over.  See Note [Locations].
 checkLoop :: Loc -> Loop -> CheckM (Loop, TypeAliases)
 checkLoop loop_loc (param, arg, form, body) = do
-  (form', arr_als) <- checkLoopForm param form
-  -- We pretend that every part of the loop parameter has a consuming
-  -- diet, as we need to allow consumption in the body, which we then
-  -- use to infer the proper diet of the parameter.
+  ((arg', (arg_e, arg_als)), init_cons) <- contain $ case arg of
+    LoopInitImplicit (Info e) -> do
+      (e', e_als) <- checkArg e
+      pure (LoopInitImplicit (Info e'), (e', e_als))
+    LoopInitExplicit e -> do
+      (e', e_als) <- checkArg e
+      pure (LoopInitExplicit e', (e', e_als))
+  consumed init_cons
+  (form', iterated) <- checkLoopForm param form
+  let arr_als = foldMap (aliases . snd) iterated
+  -- We pretend that every part of the loop parameter has a consuming diet, as
+  -- we need to allow consumption in the body, which we then use to infer the
+  -- proper diet of the parameter.
   ((body', body_cons), body_als) <-
     noConsumable
       . bindingParam (updateParamDiet (const True) param)
@@ -1029,12 +1052,12 @@ checkLoop loop_loc (param, arg, form, body) = do
   param' <- convergeLoopParam loop_loc param (S.map fst (M.keysSet body_cons)) body_als
 
   let param_t = patternType param'
-  ((arg', arg_als), arg_cons) <- case arg of
-    LoopInitImplicit (Info e) ->
-      contain $ first (LoopInitImplicit . Info) <$> checkArg mempty [] param_t e
-    LoopInitExplicit e ->
-      contain $ first LoopInitExplicit <$> checkArg mempty [] param_t e
-  consumed arg_cons
+  (_, entry_cons) <-
+    contain . passArgs loop_loc mempty $
+      (param_t, (arg_e, arg_als))
+        : [(toParam Observe (typeOf e), (e, e_als)) | (e, e_als) <- maybeToList iterated]
+  consumed entry_cons
+  let arg_cons = init_cons <> entry_cons
 
   let checkFree what e = do
         free_bound <- boundFreeInExp e
@@ -1201,28 +1224,24 @@ checkExp (AppExp (Apply f args loc) appres) = do
       t' <- parametricFreshness qn t $ map (typeOf . snd) $ NE.toList args
       pure $ Var qn (Info t') floc
     _ -> pure f
+  -- Futhark evaluates the arguments of an application from right to left, and
+  -- then the function.
+  args' <- NE.reverse <$> traverse (traverse checkArg) (NE.reverse args)
   (f', f_als) <- checkExp f_fresh
-  (args', args_als) <- NE.unzip <$> checkArgs (aliases f_als) (diets $ toRes Nonfresh f_als) args
-  res_als <- checkFuncall loc (fname f) f_als args_als
-  pure (AppExp (Apply f' args' loc) appres, res_als)
+  passArgs (locOf loc) (aliases f_als) $
+    zipWith withParam (diets $ toRes Nonfresh f_als) (map snd $ NE.toList args')
+  res_als <- checkFuncall loc (fname f) f_als $ fmap (snd . snd) args'
+  pure (AppExp (Apply f' (fmap (second fst) args') loc) appres, res_als)
   where
     fname (Var v _ _) = Just v
     fname (AppExp (Apply e _ _) _) = fname e
     fname _ = Nothing
-    checkArg' f_als prev d (Info p, e) = do
-      (e', e_als) <- checkArg f_als prev (second (const d) (typeOf e)) e
-      pure ((Info p, e'), e_als)
+
+    withParam d (e, e_als) = (second (const d) (typeOf e), (e, e_als))
 
     diets (Scalar (Arrow _ _ d _ (RetType _ rt))) =
       d : diets rt
     diets _ = repeat Observe
-
-    checkArgs f_als ds (x NE.:| args') = do
-      let (d, ds') = fromMaybe (Observe, []) $ L.uncons ds
-      -- Note Futhark uses right-to-left evaluation of applications.
-      args'' <- maybe (pure []) (fmap NE.toList . checkArgs f_als ds') $ NE.nonEmpty args'
-      (x', x_als) <- checkArg' f_als (map (first snd) args'') d x
-      pure $ (x', x_als) NE.:| args''
 
 --
 checkExp (AppExp (Loop sparams pat loopinit form body loc) appres) = do
@@ -1299,8 +1318,9 @@ checkExp (AppExp (BinOp (op, oploc) (Info op_t) (x, xp) (y, yp) loc) appres) = d
   op_t' <- parametricFreshness op op_t [typeOf x, typeOf y]
   op_als <- observeVar (locOf oploc) op op_t'
   let (_, at1) : (_, at2) : _ = fst $ unfoldFunType op_als
-  (x', x_als) <- checkArg (aliases op_als) [] at1 x
-  (y', y_als) <- checkArg (aliases op_als) [(x', x_als)] at2 y
+  (x', x_als) <- checkArg x
+  (y', y_als) <- checkArg y
+  passArgs (locOf loc) (aliases op_als) [(at1, (x', x_als)), (at2, (y', y_als))]
   res_als <- checkFuncall loc (Just op) op_als [x_als, y_als]
   pure
     ( AppExp (BinOp (op, oploc) (Info op_t') (x', xp) (y', yp) loc) appres,
@@ -1374,7 +1394,7 @@ checkExp (OpSectionLeft op ftype arg arginfo retinfo loc) = do
   let (Info (_, arg_t, _), Info (pn, pt2)) = arginfo
       (Info ret, _) = retinfo
   als <- observeVar (locOf loc) op (unInfo ftype)
-  (arg', arg_als) <- checkSectionArg arg_t arg
+  (arg', arg_als) <- checkSectionArg als arg_t arg
   pure
     ( OpSectionLeft op ftype arg' arginfo retinfo loc,
       Scalar $ Arrow (aliases arg_als <> aliases als) pn (diet pt2) (toStruct pt2) ret
@@ -1383,7 +1403,7 @@ checkExp (OpSectionRight op ftype arg arginfo retinfo loc) = do
   let (Info (pn, pt2), Info (_, arg_t, _)) = arginfo
       Info ret = retinfo
   als <- observeVar (locOf loc) op (unInfo ftype)
-  (arg', arg_als) <- checkSectionArg arg_t arg
+  (arg', arg_als) <- checkSectionArg als arg_t arg
   pure
     ( OpSectionRight op ftype arg' arginfo retinfo loc,
       Scalar $ Arrow (aliases arg_als <> aliases als) pn (diet pt2) (toStruct pt2) ret
@@ -1403,6 +1423,7 @@ checkExp (Ascript e te loc) = do
 checkExp (AppExp (Index v slice loc) appres) = do
   (v', v_als) <- checkExp v
   slice' <- checkSubExps slice
+  checkIfConsumed (locOf loc) $ aliases v_als
   pure
     ( AppExp (Index v' slice' loc) appres,
       appResType (unInfo appres) `setAliases` aliases v_als
@@ -1431,9 +1452,11 @@ checkExp (Project name e t loc) = do
     )
 checkExp (TupLit es loc) = do
   (es', es_als) <- mapAndUnzipM checkExp es
+  checkIfConsumed (locOf loc) $ foldMap aliases es_als
   pure (TupLit es' loc, Scalar $ tupleRecord es_als)
 checkExp (Constr name es t loc) = do
   (es', es_als) <- mapAndUnzipM checkExp es
+  checkIfConsumed (locOf loc) $ foldMap aliases es_als
   pure
     ( Constr name es' t loc,
       case unInfo t of
@@ -1444,6 +1467,7 @@ checkExp (Constr name es t loc) = do
     )
 checkExp (RecordLit fs loc) = do
   (fs', fs_als) <- mapAndUnzipM checkField fs
+  checkIfConsumed (locOf loc) $ foldMap (aliases . snd) fs_als
   pure (RecordLit fs' loc, Scalar $ Record $ M.fromList fs_als)
   where
     checkField (RecordFieldExplicit name e floc) = do
@@ -1460,7 +1484,10 @@ checkExp e@FloatLit {} = noAliases e
 checkExp e@Literal {} = noAliases e
 checkExp e@StringLit {} = noAliases e
 checkExp e@ArrayVal {} = noAliases e
-checkExp e@ArrayLit {} = noAliases e
+checkExp (ArrayLit es t loc) = do
+  (es', es_als) <- mapAndUnzipM checkExp es
+  checkIfConsumed (locOf loc) $ foldMap aliases es_als
+  pure (ArrayLit es' t loc, unknownAliases (unInfo t))
 checkExp e@Negate {} = noAliases e
 checkExp e@Not {} = noAliases e
 checkExp e@Hole {} = noAliases e
@@ -1721,9 +1748,15 @@ checkValDef globals (fname, tparams, params, body, RetType ext ret, retdecl, loc
 -- combined result.  Being fresh, it is alive after the branches, and as it is
 -- consumed along with any component, consuming @r0@ kills @r1@.
 --
--- A consumed argument must have separate components ('noSelfAliases'), must not
--- alias anything consumed, and must not overlap the function being applied or
--- any argument evaluated before it ('checkArg').
+-- Futhark is not in A-normal form, but an expression that builds a value from
+-- operands behaves as if it were: it evaluates all of its operands, and then
+-- uses their values. This covers tuples, records, constructors and arrays,
+-- indexing, operator sections, and function application (which evaluates its
+-- arguments from right to left, and then the function). So the value of an
+-- operand must not alias anything that a later operand consumes. A function
+-- application then consumes what its parameters consume. A consumed argument
+-- must have separate components ('noSelfAliases'), and must not overlap the
+-- function being applied or any other argument ('passArgs').
 --
 -- A loop is checked as a recursive call whose arguments are what its body
 -- returns ('checkLoopResult').  The value returned for a consumed loop
