@@ -849,9 +849,13 @@ void cmd_new_array(struct server_state *s, const char *args[]) {
     }
   }
 
-  a->new(s->ctx, value_ptr(&to->value), a->info != NULL ? (void*)values : value_ptrs, dims);
+  // The copy from 'values' may be asynchronous, so we must synchronise
+  // before freeing it.
+  int err = a->new(s->ctx, value_ptr(&to->value), a->info != NULL ? (void*)values : value_ptrs, dims);
+  err |= futhark_context_sync(s->ctx);
   free(value_ptrs);
   free(values);
+  error_check(s, err);
 }
 
 void cmd_set(struct server_state *s, const char *args[]) {
@@ -915,7 +919,9 @@ void cmd_set(struct server_state *s, const char *args[]) {
     indices[i] = idx;
   }
 
-  a->set(s->ctx, arr->value.value.v_ptr, value_ptr(&val->value), indices);
+  int err = a->set(s->ctx, arr->value.value.v_ptr, value_ptr(&val->value), indices);
+  err |= futhark_context_sync(s->ctx);
+  error_check(s, err);
 }
 
 void cmd_index(struct server_state *s, const char *args[]) {
