@@ -42,9 +42,9 @@ def break 't (x: t) : t =
   #[break] x
 
 -- | These operations only work in interpreted code. Trying to use them in a
--- compiled program will fail. All of these terminate execution in uncatchable
--- ways on failure - they are intended for use in `futhark literate`, test input
--- generation, etc.
+-- compiled program will cause the compiler to halt. All of these terminate
+-- execution in uncatchable ways on failure - they are intended for use in
+-- `futhark literate`, test input generation, etc.
 module io
   : {
       -- | Return the contents of the given file as a byte array.

@@ -16,6 +16,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Set qualified as S
 import Data.Text qualified as T
+import Futhark.Error (compilerLimitation)
 import Futhark.IR.SOACS as I hiding (stmPat)
 import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.Bindings
@@ -1869,6 +1870,7 @@ isIntrinsicFunction qname args = do
           handleSOACs,
           handleAccs,
           handleAD,
+          handleIO,
           handleRest
         ]
   msum [h args $ baseName $ qualLeaf qname | h <- handlers]
@@ -2076,6 +2078,11 @@ isIntrinsicFunction qname args = do
     handleRest [arr1, offset, s1, s2, s3, s4, arr2] "flat_update_4d" = Just $ \desc -> do
       flatUpdateHelper desc arr1 offset [s1, s2, s3, s4] arr2
     handleRest _ _ = Nothing
+
+    handleIO _ s
+      | Just f <- T.stripPrefix "io_" (nameToText s) = Just $ \_ ->
+          compilerLimitation $ "io." <> f <> " is only supported in interpreted code."
+    handleIO _ _ = Nothing
 
     toSigned int_to e desc = do
       e' <- internaliseExp1 "trunc_arg" e
