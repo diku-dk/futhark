@@ -1104,7 +1104,13 @@ freshenAsType
         RetType ext (freshenAs ir r)
 freshenAsType _ t = t
 
-freshenAs :: TypeBase d1 Freshness -> TypeBase d2 Freshness -> TypeBase d2 Freshness
+freshenAs :: TypeBase d Freshness -> ResType -> ResType
+freshenAs
+  (Scalar (Arrow _ _ _ ia (RetType _ ir)))
+  (Scalar (Arrow u pn d a (RetType ext r))) =
+    Scalar $
+      Arrow u pn d (freshenAsType (second (const Nonfresh) ia) a) $
+        RetType ext (freshenAs ir r)
 freshenAs (Scalar (Record ifs)) (Scalar (Record fs))
   | M.keys ifs == M.keys fs =
       Scalar $ Record $ M.intersectionWith freshenAs ifs fs
@@ -1141,6 +1147,18 @@ freshenFromInst (Scalar (Arrow _ _ _ ia (RetType _ ir))) (p : ps) rt =
    in (fmap (freshenAsType (second (const Nonfresh) ia)) p : ps', rt')
 freshenFromInst it [] (RetType ext t) = ([], RetType ext (freshenAs it t))
 freshenFromInst _ ps rt = (ps, rt)
+
+-- | Recursion is monomorphic, so a recursive reference in the body of an
+-- instance is to that same instance. Its type is the declared one, however,
+-- without the freshness that 'freshenFromInst' copied into the instance, and
+-- would otherwise give rise to a second instance that does not justify it.
+freshenRecursive :: VName -> MonoType -> Exp -> Exp
+freshenRecursive name inst_t = onExp
+  where
+    onExp (Var v (Info t) loc)
+      | qualLeaf v == name =
+          Var v (Info $ freshenAsType (second (const Nonfresh) inst_t) t) loc
+    onExp e = runIdentity $ astMap identityMapper {mapOnExp = pure . onExp} e
 
 -- Monomorphises the body of the function as well. Returns the fresh name of the
 -- generated monomorphic function as well a function for constructing additional
@@ -1207,7 +1225,7 @@ monomorphiseBinding (PolyBinding (entry, name, tparams, params0, rettype0, body,
 
   addLifted name inst_t (name', infer)
 
-  body' <- updateExpTypes (`M.lookup` substs') body
+  body' <- freshenRecursive name inst_t <$> updateExpTypes (`M.lookup` substs') body
   body'' <- withParams exp_naming' $ withArgs (shape_names <> args) $ transformExp body'
   scope' <- S.union (shape_names <> args) <$> askScope'
   body''' <-
