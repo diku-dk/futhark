@@ -1278,11 +1278,14 @@ checkTyInstLiftedness solution = do
           "When instantiating type parameter of" <+> dquotes (pretty qn) <> "."
 
 -- | Check a potentially recursive function body. The function is bound to a
--- fresh monomorphic type variable while its body is checked; that variable is
--- then constrained to the actual function type, and the constraint solver ties
--- the knot. A parameterless binding cannot be recursive (see 'resolveValBind'),
--- so it is checked with no self-reference in scope. See Note [Checking recursive
--- functions] in Language.Futhark.TypeChecker.Terms.
+-- monomorphic type with its actual parameters, which are known, and a fresh
+-- type variable as its return type; that variable is then constrained to the
+-- type of the body, and the constraint solver ties the knot. The parameters must
+-- be known up front, as unification would otherwise give the function the diets
+-- of its first recursive application. A parameterless binding cannot be
+-- recursive (see 'resolveValBind'), so it is checked with no self-reference in
+-- scope. See Note [Checking recursive functions] in
+-- Language.Futhark.TypeChecker.Terms.
 checkRecursive ::
   VName ->
   SrcLoc ->
@@ -1291,16 +1294,13 @@ checkRecursive ::
   TermM (ExpBase Info VName)
 checkRecursive _ _ [] body = checkExp body
 checkRecursive fname loc params' body = do
-  ftype <- newType loc Lifted (baseName fname) NoMode
-  let bindF scope =
+  ret <- newType loc Lifted (baseName fname) Nonfresh
+  let ftype = foldFunType (map (first (const ()) . patternType) params') (RetType [] ret)
+      bindF scope =
         scope {scopeVtable = M.insert fname (BoundV [] ftype) $ scopeVtable scope}
   body' <- localScope bindF $ checkExp body
   body_t <- expType body'
-  let fun_t =
-        foldFunType
-          (map (first (const ()) . patternType) params')
-          (RetType [] $ bimap (const ()) (const Nonfresh) body_t)
-  ctEq (Reason (locOf loc)) ftype fun_t
+  ctEq (Reason (locOf loc)) (toStruct ret) (bimap (const ()) (const NoMode) body_t)
   pure body'
 
 -- | Replace artificial variables with the types they denote, so that no
