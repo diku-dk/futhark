@@ -220,14 +220,11 @@ globalAliases v tparams decl = mapLeaves onLeaf . second (const mempty)
 updateAliases :: TypeAliases -> [UpdateStep Info VName] -> TypeAliases -> TypeAliases
 updateAliases _ [] ve_als =
   ve_als
-updateAliases src_als (UpdateStepField f : rest) ve_als =
-  case src_als of
-    Scalar (Record fs)
-      | Just sub <- M.lookup f fs ->
-          Scalar $ Record $ M.insert f (updateAliases sub rest ve_als) fs
-    _ ->
-      src_als
+updateAliases (Scalar (Record fs)) (UpdateStepField f : rest) ve_als
+  | Just sub <- M.lookup f fs =
+      Scalar $ Record $ M.insert f (updateAliases sub rest ve_als) fs
 updateAliases src_als (UpdateStepSlice _ : _) _ = second (const mempty) src_als
+updateAliases src_als _ _ = error $ "updateAliases: no such field in " <> prettyString src_als
 
 data Entry a
   = Consumable {entryAliases :: a}
@@ -436,12 +433,10 @@ matchPat (Id v (Info t) _) als = DL.singleton (v, (t, als))
 matchPat (PatAscription p _ _) t = matchPat p t
 matchPat (PatConstr v _ ps _) (Scalar (Sum cs))
   | Just ts <- M.lookup v cs = mconcat $ zipWith matchPat ps ts
-matchPat TuplePat {} _ = mempty
-matchPat RecordPat {} _ = mempty
-matchPat PatConstr {} _ = mempty
 matchPat Wildcard {} _ = mempty
 matchPat PatLit {} _ = mempty
 matchPat (PatAttr _ p _) t = matchPat p t
+matchPat _ t = error $ "matchPat: pattern does not match " <> prettyString t
 
 -- | Check the size expressions in a type.  A size expression may be evaluated
 -- before the expression or binding it appears in, so it may consume nothing.
@@ -568,7 +563,7 @@ observeVar :: Loc -> QualName VName -> StructType -> CheckM TypeAliases
 observeVar loc qv t = do
   als <-
     asks $ \env ->
-      maybe (isGlobal env) entryAliases $
+      maybe (isGlobal env) (instantiateAliases t . entryAliases) $
         M.lookup v (envVtable env)
   checkIfConsumed loc (aliases als)
   pure als
@@ -584,6 +579,34 @@ observeVar loc qv t = do
       | otherwise =
           let (tparams, decl) = fromMaybe ([], t) $ envGlobal env qv
            in notedAliases tparams decl $ globalAliases v tparams decl t
+
+-- | Instantiate the aliases of a local binding at the type of an occurrence,
+-- just as the type of a global is instantiated. The binding's type is that of
+-- its definition, which for a local function may be polymorphic: where it has
+-- a type parameter, every part of what the occurrence instantiates it with gets
+-- the aliases, or in a return type the freshness, of that type parameter.
+instantiateAliases :: TypeBase Size u -> TypeAliases -> TypeAliases
+instantiateAliases
+  (Scalar (Arrow _ _ _ t_p (RetType _ t_r)))
+  (Scalar (Arrow als pn d _ (RetType ext r))) =
+    Scalar $ Arrow als pn d t_p $ RetType ext $ instantiateFreshness t_r r
+instantiateAliases (Scalar (Record ts)) (Scalar (Record als)) =
+  Scalar $ Record $ M.intersectionWith instantiateAliases ts als
+instantiateAliases (Scalar (Sum ts)) (Scalar (Sum als)) =
+  Scalar $ Sum $ M.intersectionWith (zipWith instantiateAliases) ts als
+instantiateAliases t als = t `setAliases` aliases als
+
+-- | Like 'instantiateAliases', but for the freshness of a return type.
+instantiateFreshness :: TypeBase Size u -> ResType -> ResType
+instantiateFreshness
+  (Scalar (Arrow _ _ _ t_p (RetType _ t_r)))
+  (Scalar (Arrow u pn d _ (RetType ext r))) =
+    Scalar $ Arrow u pn d t_p $ RetType ext $ instantiateFreshness t_r r
+instantiateFreshness (Scalar (Record ts)) (Scalar (Record rs)) =
+  Scalar $ Record $ M.intersectionWith instantiateFreshness ts rs
+instantiateFreshness (Scalar (Sum ts)) (Scalar (Sum rs)) =
+  Scalar $ Sum $ M.intersectionWith (zipWith instantiateFreshness) ts rs
+instantiateFreshness t r = t `setMode` freshness r
 
 -- Capture any newly consumed locations that occur during the provided action.
 contain :: CheckM a -> CheckM (a, Consumed)
@@ -602,20 +625,14 @@ combineAliases (Array als1 et1 shape1) t2 =
   Array (als1 <> aliases t2) et1 shape1
 combineAliases (Scalar (TypeVar als1 tv1 targs1)) t2 =
   Scalar $ TypeVar (als1 <> aliases t2) tv1 targs1
-combineAliases t1 (Scalar (TypeVar als2 tv2 targs2)) =
-  Scalar $ TypeVar (als2 <> aliases t1) tv2 targs2
-combineAliases (Scalar (Record ts1)) (Scalar (Record ts2))
-  | length ts1 == length ts2,
-    L.sort (M.keys ts1) == L.sort (M.keys ts2) =
-      Scalar $ Record $ M.intersectionWith combineAliases ts1 ts2
+combineAliases (Scalar (Record ts1)) (Scalar (Record ts2)) =
+  Scalar $ Record $ M.intersectionWith combineAliases ts1 ts2
 combineAliases
   (Scalar (Arrow als1 mn1 d1 pt1 (RetType dims1 rt1)))
   (Scalar (Arrow als2 _ _ _ (RetType _ _))) =
     Scalar (Arrow (als1 <> als2) mn1 d1 pt1 (RetType dims1 rt1))
-combineAliases (Scalar (Sum cs1)) (Scalar (Sum cs2))
-  | length cs1 == length cs2,
-    L.sort (M.keys cs1) == L.sort (M.keys cs2) =
-      Scalar $ Sum $ M.intersectionWith (zipWith combineAliases) cs1 cs2
+combineAliases (Scalar (Sum cs1)) (Scalar (Sum cs2)) =
+  Scalar $ Sum $ M.intersectionWith (zipWith combineAliases) cs1 cs2
 combineAliases (Scalar (Prim t)) _ = Scalar $ Prim t
 combineAliases t1 t2 =
   error $ "combineAliases invalid args: " ++ show (t1, t2)
@@ -678,12 +695,14 @@ arrayAliases (Scalar Arrow {}) = mempty
 arrayAliases (Scalar (Sum fs)) =
   mconcat $ concatMap (map arrayAliases) $ M.elems fs
 
--- | The aliases of the free local variables captured by a closure, plus any
--- globals that its result aliases, which it may return.
-closureAliases :: Exp -> TypeAliases -> CheckM Aliases
-closureAliases e body_als = do
+-- | The aliases of the free local variables captured by a closure with the given
+-- parameters and body, plus any globals that its result aliases, which it may
+-- return.
+closureAliases :: [Pat ParamType] -> Exp -> TypeAliases -> CheckM Aliases
+closureAliases params body body_als = do
   vtable <- asks envVtable
-  free_bound <- boundFreeInExp e
+  free_bound <-
+    (`M.withoutKeys` S.fromList (foldMap patNames params)) <$> boundFreeInExp body
   -- A function's own note comes from its body; 'AliasSelf' is not an alias of
   -- anything, so the usual global/local distinction does not apply to it.
   let isGlobal AliasFree {} = False
@@ -1352,7 +1371,7 @@ checkExp (AppExp (LetFun fname (typarams, params, retdecl, Info (RetType ext ret
     -- anyway.
     ((funbody', funbody_als), _body_cons) <- contain $ checkExp funbody
     checkReturnAlias loc params ret funbody_als
-    als <- closureAliases funbody funbody_als
+    als <- closureAliases params funbody funbody_als
     let ret' = maybe (inferReturnFreshness params ret funbody_als) (const ret) retdecl
         ftype = funType params (RetType ext ret') `setAliases` als
     pure ((ret', funbody'), ftype)
@@ -1377,14 +1396,14 @@ checkExp (AppExp (BinOp (op, oploc) (Info op_t) (x, xp) (y, yp) loc) appres) = d
     )
 
 --
-checkExp e@(Lambda params body te (Info (RetType ext ret)) loc) =
+checkExp (Lambda params body te (Info (RetType ext ret)) loc) =
   bindingParams params $ do
     mapM_ checkSizes te
     -- Throw away the consumption - it can refer only to the parameters
     -- anyway.
     ((body', body_als), _body_cons) <- contain $ checkExp body
     checkReturnAlias loc params ret body_als
-    als <- closureAliases e body_als
+    als <- closureAliases params body body_als
     let ret' = maybe (inferReturnFreshness params ret body_als) (const ret) te
         ftype = funType params (RetType ext ret') `setAliases` als
     pure
