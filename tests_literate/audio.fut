@@ -77,6 +77,6 @@ entry surround =
 
 -- > :audio surround
 
--- > $loadaudio "mono.wav"
+-- > io.loadaudio "mono.wav"
 
--- > $loadaudio "stereo.wav"
+-- > io.loadaudio "stereo.wav"
