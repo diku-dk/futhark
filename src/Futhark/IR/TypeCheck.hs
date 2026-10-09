@@ -892,14 +892,15 @@ checkBasicOp (Index ident slice) = do
 checkBasicOp (Update _ src slice se) = do
   (src_shape, src_pt) <- checkArrIdent src
 
+  src_aliases <- lookupAliases src
   se_aliases <- subExpAliasesM se
-  when (src `nameIn` se_aliases) $
+  when (src_aliases `namesIntersect` se_aliases) $
     bad $
       TypeError "The target of an Update must not alias the value to be written."
 
   checkSlice (arrayOf (Prim src_pt) src_shape NoMode) slice
   require (arrayOf (Prim src_pt) (sliceShape slice) NoMode) se
-  consume =<< lookupAliases src
+  consume src_aliases
 checkBasicOp (FlatIndex ident slice) = do
   vt <- lookupType ident
   observe ident
@@ -909,14 +910,15 @@ checkBasicOp (FlatUpdate src slice v) = do
   (src_shape, src_pt) <- checkArrIdent src
   when (shapeRank src_shape /= 1) $ bad $ SlicingError src_shape 1
 
+  src_aliases <- lookupAliases src
   v_aliases <- lookupAliases v
-  when (src `nameIn` v_aliases) $
+  when (src_aliases `namesIntersect` v_aliases) $
     bad $
       TypeError "The target of an Update must not alias the value to be written."
 
   checkFlatSlice slice
   requireI (arrayOf (Prim src_pt) (Shape (flatSliceDims slice)) NoMode) v
-  consume =<< lookupAliases src
+  consume src_aliases
 checkBasicOp (Iota e x s et) = do
   require (Prim int64) e
   require (Prim $ IntType et) x
@@ -1057,6 +1059,10 @@ checkExp (Loop merge form loopbody) = do
   let mergepat = map fst merge
 
   checkLoopArgs
+
+  -- The loop consumes the initial values of its consuming parameters when it
+  -- starts, so neither its body nor anything after it may use them.
+  consumeArgs (map paramDeclType mergepat) =<< mapM (checkArg . snd) merge
 
   binding (scopeOfLoopForm form) $ do
     checkForm form
@@ -1361,16 +1367,26 @@ checkFuncall fname paramts args = do
         map argType args
   consumeArgs paramts args
 
+-- | Consume the arguments passed for consuming parameters. A consumed argument
+-- may not alias any other argument.
 consumeArgs ::
   [DeclType] ->
   [Arg] ->
   TypeM rep ()
-consumeArgs paramts args =
-  forM_ (zip (map diet paramts) args) $ \(d, (_, als)) ->
-    occur [consumption (consumeArg als d)]
+consumeArgs paramts args = do
+  forM_ (zip [0 :: Int ..] args_cons) $ \(i, (cons_als, _)) ->
+    forM_ [als | (j, (_, als)) <- zip [0 ..] args_cons, i /= j] $ \als ->
+      case namesToList $ cons_als `namesIntersection` als of
+        [] -> pure ()
+        v : _ ->
+          bad . TypeError $
+            "Consumed argument aliases another argument through " <> prettyText v <> "."
+  forM_ args_cons $ \(cons_als, _) ->
+    occur [consumption cons_als]
   where
-    consumeArg als Consume = als
-    consumeArg _ _ = mempty
+    args_cons = zipWith consumeArg (map diet paramts) args
+    consumeArg Consume (_, als) = (als, als)
+    consumeArg _ (_, als) = (mempty, als)
 
 -- The boolean indicates whether we only allow consumption of
 -- parameters.
