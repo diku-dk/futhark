@@ -75,6 +75,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * A compiler crash caused by size-polymorphic recursive functions. (#2569)
 
+* Overzealous copy removal in conjunction with AD could result in a compiler
+  crash. (#2567)
+
 ## [0.27.1]
 
 ### Added
