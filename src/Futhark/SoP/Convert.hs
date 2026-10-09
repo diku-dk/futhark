@@ -10,11 +10,11 @@ module Futhark.SoP.Convert
   )
 where
 
-import Control.Monad.State
+-- import Control.Monad.State
 import Data.List (find)
-import Data.Set (Set)
-import Data.Set qualified as S
-import Futhark.Analysis.PrimExp (PrimExp, PrimType, (~*~), (~+~), (~-~), (~/~), (~==~))
+-- import Data.Set (Set)
+-- import Data.Set qualified as S
+import Futhark.Analysis.PrimExp (PrimExp, PrimType) -- (PrimExp, PrimType, (~*~), (~+~), (~-~), (~/~), (~==~))
 import Futhark.Analysis.PrimExp qualified as PE
 import Futhark.SoP.Monad
 import Futhark.SoP.SoP
@@ -22,7 +22,7 @@ import Futhark.SoP.Util
 import Futhark.Util.Pretty
 import Language.Futhark.Core
 import Language.Futhark.Prop
-import Language.Futhark.Syntax (VName)
+--import Language.Futhark.Syntax (VName)
 import Language.Futhark.Syntax qualified as E
 
 toSoPNum_ :: (ToSoP u e, MonadSoP u e m) => e -> m (SoP u)
@@ -35,14 +35,15 @@ toSoPCmp_ e = snd <$> toSoPNum e
 class FromSoP u e where
   fromSoP :: (MonadSoP u e m) => SoP u -> m e
 
--- instance Ord u => FromSoP u (PrimExp u) where
---  fromSoP sop =
---    foldr ((~+~) . fromTerm) (PE.ValueExp $ PE.IntValue $ PE.intValue PE.Int64 (0 :: Integer)) (sopToLists sop)
---    where
---      fromTerm (term, n) =
---        foldl (~*~) (PE.ValueExp $ PE.IntValue $ PE.intValue PE.Int64 n) $
---          map fromSym term
---      fromSym sym = PE.LeafExp sym $ PE.IntType PE.Int64
+instance Ord u => FromSoP u (PrimExp u) where
+  -- fromSoP :: SoP u -> PrimExp u
+  fromSoP sop = pure $
+    foldr ((PE.~+~) . fromTerm) (PE.ValueExp $ PE.IntValue $ PE.intValue PE.Int64 (0 :: Integer)) (sopToLists sop)
+    where
+      fromTerm (term, n) =
+        foldl (PE.~*~) (PE.ValueExp $ PE.IntValue $ PE.intValue PE.Int64 n) $
+          map fromSym term
+      fromSym sym = PE.LeafExp sym $ PE.IntType PE.Int64
 
 -- | Conversion from some expressions to
 --   'SoP's. Monadic because it may involve look-ups in the
