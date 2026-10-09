@@ -490,19 +490,20 @@ evalBasicOp env (Index array_name slice_exp) = do
       error "cannot index a non-array value"
 evalBasicOp env (Reshape array_name reshape) = do
   array <- evalVar env array_name
+  dimensions <- evalShape env $ newShape reshape
   case array of
     ArrayValue old_shape values ->
       case reshapeKind reshape of
-        -- Not checked: the internaliser can produce coercions with an invalid
-        -- shape in dead code (see the while-loop condition in
-        -- tests/shapes/loop16.fut).
-        ReshapeCoerce ->
-          pure [ArrayValue old_shape values]
-        ReshapeArbitrary -> do
-          dimensions <- evalShape env $ newShape reshape
-          if product dimensions == arrayValuesLength values
-            then pure [ArrayValue dimensions values]
-            else error "reshape element count mismatch"
+        ReshapeCoerce
+          | dimensions == old_shape ->
+              pure [ArrayValue dimensions values]
+          | otherwise ->
+              error "coercion to a different shape"
+        ReshapeArbitrary
+          | product dimensions == arrayValuesLength values ->
+              pure [ArrayValue dimensions values]
+          | otherwise ->
+              error "reshape element count mismatch"
     _ ->
       error "cannot reshape a non-array value"
 evalBasicOp env (Opaque OpaqueNil se) =
