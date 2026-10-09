@@ -551,6 +551,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Invalid short-circuiting could result in compiler crashes and memory errors.
   (#2565)
 
+* Invalid copy removal could crash the compiler. (#2564)
+
 ## [0.25.29]
 
 ### Fixed
