@@ -548,6 +548,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Invalid simplification in conjunction with array updates, which could crash
   the compiler. (#2566)
 
+* Invalid short-circuiting could result in compiler crashes and memory errors.
+  (#2565)
+
 ## [0.25.29]
 
 ### Fixed
