@@ -625,10 +625,11 @@ fixPointCoalesce lutab fpar bdy topenv = do
       actv_tab = activeCoals buenv
       inhb_tab = inhibit buenv
       -- See Note [Short-circuiting function parameters].
-      handleFunctionParams (a, i, s, claimed) (_, o, MemBlock pt _ m ixf) =
+      handleFunctionParams (a, i, s, claimed) (p, o, MemBlock pt _ m ixf) =
         case (o, M.lookup m a) of
           (Consume, Just entry)
-            | dstind entry == ixf,
+            | Just (Coalesced _ (MemBlock _ _ _ p_ixf) _) <- M.lookup p $ vartab entry,
+              p_ixf == ixf,
               Set dst_uses <- dstrefs (memrefs entry),
               dst_uses == mempty,
               LMAD.isDirect ixf,
@@ -1862,7 +1863,7 @@ filterMapM1 f m = fmap M.fromAscList $ filterM (f . snd) $ M.toAscList m
 -- is the destination that moves into the memory of the parameter. This is how
 -- an in-place 'map' over a consumed parameter is obtained.
 --
--- This is only valid under three conditions, which 'fixPointCoalesce' checks:
+-- This is only valid under four conditions, which 'fixPointCoalesce' checks:
 --
 -- 1. The destination block is allocated at the top level of the function, as
 --    otherwise there is no allocation to remove. In particular, the
@@ -1876,6 +1877,13 @@ filterMapM1 f m = fmap M.fromAscList $ filterM (f . snd) $ M.toAscList m
 --
 -- 3. No other parameter is short-circuited into the same destination, as two
 --    parameters cannot be renamed to the same memory.
+--
+-- 4. The layout of the parameter in the destination block, as recorded in
+--    'vartab', is the layout it already has, as renaming the memory does not
+--    move any elements. It is not enough that the layout of the destination,
+--    'dstind', matches, because the parameter may reach the destination
+--    through a change of layout: in @copy (rearrange xs)@, the parameter @xs@
+--    would have to be stored transposed.
 --
 -- Note that it is the final destination that matters: if the destination is
 -- itself short-circuited into a larger block, then it is that block which must

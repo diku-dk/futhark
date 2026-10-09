@@ -78,6 +78,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Overzealous copy removal in conjunction with AD could result in a compiler
   crash. (#2567)
 
+* Short-circuiting of function parameters failed to take layout into account.
+  (#2568)
+
 ## [0.27.1]
 
 ### Added
