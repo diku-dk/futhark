@@ -375,17 +375,21 @@ manually added to the entry points parameter types.  The rules are
 essentially the same as in the language itself:
 
 1. Each entry point input parameter is either *consuming* or *observing* (the
-default). A value passed for a consuming parameter is considered *consumed*, now
-has an unspecified value, and may never be used again. It must still be manually
-freed, if applicable. Further, any *aliases* of that value are also considered
-consumed and may not be used.
+   default). A value passed for a consuming parameter is considered *consumed*,
+   now has an unspecified value, and may never be used again. It must still be
+   manually freed, if applicable. Further, any *aliases* of that value are also
+   considered consumed and may not be used.
 
 2. The entry point output is either *fresh* or *nonfresh*. A fresh output has no
-   aliases. A nonfresh output aliases *every* nonconsumed input parameter.
+   aliases. A nonfresh output aliases *every* nonconsumed input parameter. If
+   the nonfresh output is a compound value (e.g. a tuple), the components may
+   also alias each other.
 
 Note that these distinctions are currently usually not visible in the generated
 API, and so correct usage requires knowledge of the original types in the
-Futhark function. The safest strategy is to not consume inputs in entry points.
+Futhark function. The safest strategy is to not consume inputs in entry points,
+or to ensure that any value passed for a consuming input came from a fresh
+output.
 
 Generating C
 ^^^^^^^^^^^^
