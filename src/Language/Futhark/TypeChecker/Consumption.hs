@@ -1098,11 +1098,15 @@ checkLoop loop_loc (param, arg, form, body) = do
 
   loop_al <- internalAlias "internal_loop_result" $ NameLoopRes $ srclocOf loop_loc
 
-  -- As for a function call, the value of an observed parameter may come from
-  -- any observed part of the initial value, as the loop may permute them.
+  -- The value of an observed parameter may come from any observed part of the
+  -- initial value, or of what the body returns, as the loop may move values
+  -- between parameters from one iteration to the next.
   let loop_als =
         applyLoopArg
-          (S.insert loop_al $ observedAliasesOf param_t arg_als)
+          ( S.insert loop_al $
+              observedAliasesOf param_t arg_als
+                <> observedAliasesOf param_t body_als
+          )
           param_t
           arg_als
           (paramToRes param_t)
