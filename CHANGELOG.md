@@ -545,6 +545,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Reverse mode AD now handles sequential streams. (#2256)
 
+* Invalid simplification in conjunction with array updates, which could crash
+  the compiler. (#2566)
+
 ## [0.25.29]
 
 ### Fixed
