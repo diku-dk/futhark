@@ -73,6 +73,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Internalisation of reduce_by_index_3d with array-valued elements. (#2554)
 
+* A compiler crash caused by size-polymorphic recursive functions. (#2569)
+
 ## [0.27.1]
 
 ### Added
