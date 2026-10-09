@@ -693,6 +693,20 @@ closureAliases e body_als = do
     foldMap aliases (M.elems free_bound)
       <> S.filter isGlobal (aliases body_als)
 
+-- | An in-place update through record fields consumes the component at the
+-- end of that path, but its result keeps the other components, which must
+-- therefore not share memory with it.
+checkUpdatePath :: Loc -> [UpdateStep Info VName] -> TypeAliases -> CheckM ()
+checkUpdatePath loc steps src_als =
+  when (foldMap (aliases . snd) inside `overlaps` foldMap (aliases . snd) outside) $
+    addError loc mempty $
+      "In-place update of a component that shares memory with"
+        </> "other components of the same value."
+  where
+    (inside, outside) = L.partition ((fieldPath steps `L.isPrefixOf`) . fst) $ leaves src_als
+    fieldPath (UpdateStepField f : steps') = f : fieldPath steps'
+    fieldPath _ = []
+
 overlapCheck :: (Pretty src, Pretty ve) => Loc -> (src, TypeAliases) -> (ve, TypeAliases) -> CheckM ()
 overlapCheck loc (src, src_als) (ve, ve_als) =
   when (aliases src_als `overlaps` aliases ve_als) $
@@ -1388,6 +1402,7 @@ checkExp (AppExp (LetWith dst src steps ve body loc) appres) = do
 
   when hasIndex $ do
     overlapCheck (locOf ve) (src, src_als) (ve', ve_als)
+    checkUpdatePath (locOf loc) steps src_als
     consumeAliases (locOf loc) $ aliases src_als
 
   (body', body_als) <- bindingIdent Consume dst $ checkExp body
@@ -1408,6 +1423,7 @@ checkExp (Update src steps ve t loc) = do
     if hasIndex
       then do
         overlapCheck (locOf ve) (src', src_als) (ve', ve_als)
+        checkUpdatePath (locOf loc) steps src_als
         consumeAliases (locOf loc) $ aliases src_als
         pure $ second (const mempty) src_als
       else pure $ updateAliases src_als steps ve_als
