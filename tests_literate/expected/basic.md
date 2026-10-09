@@ -9,7 +9,7 @@ let main x = x + 2
 ```
 
 ```
-4i32
+4
 ```
 
 
@@ -19,10 +19,11 @@ let main x = x + 2
 
 **FAILED**
 ```
-Function "main" expects 1 argument(s) of types:
-i32
-But applied to 1 argument(s) of types:
-f32
+Error at basic.fut:6:11-15:
+Cannot apply "main" to "2.0f32" (invalid type).
+Expected: i32
+Actual:   f32
+
 ```
 
 

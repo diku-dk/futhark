@@ -22,9 +22,24 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Support for ISPC 1.31 (and that is now also the minimum version). (#2557)
 
+* `futhark repl` and `futhark eval` can now run code available via a compiled
+  server executable.
+
+* `futhark test`: `auto output` now works with `script input`.
+
 ### Removed
 
+* The `futhark script` command has been removed.
+
 ### Changed
+
+* FutharkScript has been replaced by ordinary Futhark. The magical builtins have
+  been replaced by magical functions, e.g., `$loadbytes` is now `io.loadbytes`.
+  Obviously only works in interpreted code. Futhark is not an exact
+  functionality match for FutharkScript, but most things should be able to work.
+
+* `futhark literate` no longer implicitly marks functions used in directives as
+  entry points. Use ``entry`` when you actually want compiled entry points.
 
 ### Fixed
 

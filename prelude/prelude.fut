@@ -40,3 +40,32 @@ def trace 't (x: t) : t =
 -- `futhark repl`.  Deprecated: use `#[break]` attribute instead.
 def break 't (x: t) : t =
   #[break] x
+
+-- | These operations only work in interpreted code. Trying to use them in a
+-- compiled program will cause the compiler to halt. All of these terminate
+-- execution in uncatchable ways on failure - they are intended for use in
+-- `futhark literate`, test input generation, etc.
+module io
+  : {
+      -- | Return the contents of the given file as a byte array.
+      val loadbytes [k] : [k]u8 -> ?[n].*[n]u8
+
+      -- | Reads an image from the given file and returns it as a row-major
+      -- array, with each pixel encoded as ARGB.
+      val loadimg [k] : [k]u8 -> ?[n][m].*[n][m]u32
+
+      -- | Read audio from the given file and returns it as a ``[][]f64``, where
+      -- each row corresponds to a channel of the original soundfile. Most common
+      -- audio-formats are supported, including mp3, ogg, wav, flac and opus.
+      val loadaudio [k] : [k]u8 -> ?[n][m].*[n][m]f64
+
+      -- | Load a Futhark value of known type (including size!) from the given
+      -- file. Only supports primitives, arrays of primitives, and tuples. If
+      -- the type is a tuple, the file must contain one value for each element.
+      val loadvalue 'a [k] : [k]u8 -> *a
+    } = {
+  def loadbytes = intrinsics.io_loadbytes
+  def loadimg = intrinsics.io_loadimg
+  def loadaudio = intrinsics.io_loadaudio
+  def loadvalue = intrinsics.io_loadvalue
+}
