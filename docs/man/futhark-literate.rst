@@ -36,7 +36,7 @@ declared with ``def`` will run in the interpreter. Make sure any significant
 computation happens inside ``entry`` functions.
 
 Image directives and IO functions shell out to ``convert`` (from ImageMagick).
-Video and audio directives and functions uses ``ffmpeg``.
+Video and audio directives and functions use ``ffmpeg``.
 
 For an input file ``foo.fut``, all generated files will be in a
 directory named ``foo-img``.  A ``file`` parameter passed to a
@@ -181,8 +181,7 @@ The following directives are supported:
   The two arrays must have the same length and are interpreted as
   ``x`` and ``y`` values, respectively.
 
-  The expression may also be a record expression (*not* merely the
-  name of a Futhark variable of record type), where each field will be
+  The expression may also be a record expression, where each field will be
   plotted separately and must have the type mentioned above.
 
 * ``> :gnuplot e; script...``
