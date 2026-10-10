@@ -1152,30 +1152,6 @@ funParts (Scalar (Arrow _ _ _ pt (RetType _ t))) = Just $ go [pt] t
     go ps t' = (reverse ps, t')
 funParts _ = Nothing
 
--- | The type of a global applied to arguments of the given types, with what
--- parametricity tells us about the freshness of the result recorded in it. Only
--- an application that supplies every parameter of the type is refined. See Note
--- [Parametric results].
-parametricFreshness ::
-  QualName VName ->
-  StructType ->
-  [StructType] ->
-  CheckM StructType
-parametricFreshness qn ftype argtypes = do
-  globals <- asks envGlobal
-  pure $ fromMaybe ftype $ do
-    BoundV tparams decl <- globals qn
-    (param_ts, res) <- funParts decl
-    guard $ length argtypes == length param_ts
-    i <- resultFromParam tparams param_ts res
-    -- TODO: we could handle more cases here, e.g. a tuple where all of the
-    -- components can be inferred fresh.
-    x <- case res of
-      Scalar (TypeVar _ v _) -> Just $ qualLeaf v
-      _ -> Nothing
-    guard $ constructsFresh $ argtypes !! i
-    Just $ freshenOccurrences x decl ftype
-
 -- | Does applying this function construct its result freshly?  That is so when
 -- every part of its (curried) result is fresh or primitive.  Requiring the
 -- result to be order zero keeps us from claiming that a closure over the other
@@ -1212,6 +1188,30 @@ freshenOccurrences x = onStruct
       (Scalar (Arrow u pn d ta (RetType ext tr))) =
         Scalar $ Arrow u pn d (onStruct sa ta) $ RetType ext (onRes sr tr)
     onRes _ tr = tr
+
+-- | The type of a global applied to arguments of the given types, with what
+-- parametricity tells us about the freshness of the result recorded in it. Only
+-- an application that supplies every parameter of the type is refined. See Note
+-- [Parametric results].
+parametricFreshness ::
+  QualName VName ->
+  StructType ->
+  [StructType] ->
+  CheckM StructType
+parametricFreshness qn ftype argtypes = do
+  globals <- asks envGlobal
+  pure $ fromMaybe ftype $ do
+    BoundV tparams decl <- globals qn
+    (param_ts, res) <- funParts decl
+    guard $ length argtypes == length param_ts
+    i <- resultFromParam tparams param_ts res
+    -- TODO: we could handle more cases here, e.g. a tuple where all of the
+    -- components can be inferred fresh.
+    x <- case res of
+      Scalar (TypeVar _ v _) -> Just $ qualLeaf v
+      _ -> Nothing
+    guard $ constructsFresh $ argtypes !! i
+    Just $ freshenOccurrences x decl ftype
 
 -- | Apply a function with the given aliases to checked arguments, returning the
 -- aliases of the result.
