@@ -977,13 +977,10 @@ updateParamDiet cons = recurse
       PatParens (recurse p) ploc
     recurse (PatAttr attr p ploc) =
       PatAttr attr (recurse p) ploc
-    recurse (Id name (Info t) iloc)
-      | cons name =
-          let t' = t `setMode` Consume
-           in Id name (Info t') iloc
-      | otherwise =
-          let t' = t `setMode` Observe
-           in Id name (Info t') iloc
+    recurse (Id name (Info t) iloc) =
+      Id name (Info $ t `setMode` m) iloc
+      where
+        m = if cons name then Consume else Observe
     recurse (TuplePat pats ploc) =
       TuplePat (map recurse pats) ploc
     recurse (RecordPat fs ploc) =
@@ -993,22 +990,6 @@ updateParamDiet cons = recurse
     recurse p@PatLit {} = p
     recurse (PatConstr n t ps ploc) =
       PatConstr n t (map recurse ps) ploc
-
--- | Infer which loop parameters are consumed, and check what the body returns
--- for them.  A parameter is consumed if the body consumes it, or if the value
--- returned for a consumed parameter aliases it, as that value is consumed in
--- the next iteration.  See Note [Locations].
-convergeLoopParam :: Loc -> Pat ParamType -> S.Set VName -> TypeAliases -> CheckM (Pat ParamType)
-convergeLoopParam loop_loc param body_cons body_als
-  | body_cons' /= body_cons = convergeLoopParam loop_loc param body_cons' body_als
-  | otherwise = do
-      checkLoopResult loop_loc param' body_als
-      pure param'
-  where
-    param' = updateParamDiet (`S.member` body_cons) param
-    returned = toList $ matchPat param' body_als
-    cons_als = foldMap (aliases . snd . snd) $ filter ((== Consume) . diet . fst . snd) returned
-    body_cons' = body_cons <> S.filter (`elem` patNames param) (aliasVars cons_als)
 
 -- | Check the values a loop body returns for its consumed parameters, as the
 -- arguments of a call that consumes them: each must be fresh, as the result of
@@ -1029,6 +1010,22 @@ checkLoopResult loop_loc param body_als =
     report v UnfreshSelf =
       addError loop_loc mempty $
         what v <+> "may have internal aliases."
+
+-- | Infer which loop parameters are consumed, and check what the body returns
+-- for them.  A parameter is consumed if the body consumes it, or if the value
+-- returned for a consumed parameter aliases it, as that value is consumed in
+-- the next iteration.  See Note [Locations].
+convergeLoopParam :: Loc -> Pat ParamType -> S.Set VName -> TypeAliases -> CheckM (Pat ParamType)
+convergeLoopParam loop_loc param body_cons body_als
+  | body_cons' /= body_cons = convergeLoopParam loop_loc param body_cons' body_als
+  | otherwise = do
+      checkLoopResult loop_loc param' body_als
+      pure param'
+  where
+    param' = updateParamDiet (`S.member` body_cons) param
+    returned = toList $ matchPat param' body_als
+    cons_als = foldMap (aliases . snd . snd) $ filter ((== Consume) . diet . fst . snd) returned
+    body_cons' = body_cons <> S.filter (`elem` patNames param) (aliasVars cons_als)
 
 -- | Check the form of a loop with the given parameter, returning the array a
 -- for-in loop iterates over.
