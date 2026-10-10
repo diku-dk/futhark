@@ -13,6 +13,10 @@
 // simply optimise the 64-bit version to make this distinction
 // unnecessary.  Fortunately these kernels are quite small.
 
+#ifdef __APPLE__
+#include <mach/mach_time.h>
+#endif
+
 // Forward declarations.
 struct opencl_device_option;
 // Invoked by setup_opencl() after the platform and device has been
@@ -646,8 +650,18 @@ static int opencl_event_report(struct str_builder* sb, cl_event* e) {
                                                &end_t,
                                                NULL));
 
+  double ticks = (double)(end_t - start_t);
+#ifdef __APPLE__
+  // Apple's OpenCL reports Mach absolute time units rather than
+  // nanoseconds; on Apple silicon a unit is 125/3 ns.
+  mach_timebase_info_data_t timebase;
+  if (mach_timebase_info(&timebase) == KERN_SUCCESS && timebase.denom != 0) {
+    ticks = ticks * timebase.numer / timebase.denom;
+  }
+#endif
+
   // OpenCL provides nanosecond resolution, but we want microseconds.
-  str_builder(sb, ",\"duration\":%f", (end_t - start_t)/1000.0);
+  str_builder(sb, ",\"duration\":%f", ticks/1000.0);
 
   OPENCL_SUCCEED_FATAL(clReleaseEvent(*e));
 

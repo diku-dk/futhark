@@ -71,6 +71,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Horizontal fusion of multi-dimensional histograms. (#2555)
 
+* OpenCL profiling reports on macOS no longer undercount event durations by
+  about 42x: Apple's OpenCL reports Mach time units, not nanoseconds.
+
 * Internalisation of reduce_by_index_3d with array-valued elements. (#2554)
 
 * A compiler crash caused by size-polymorphic recursive functions. (#2569)
