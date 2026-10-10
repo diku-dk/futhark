@@ -1072,10 +1072,10 @@ checkLoop loop_loc (param, arg, form, body) = do
   param' <- convergeLoopParam loop_loc param (S.map fst (M.keysSet body_cons)) body_als
 
   let param_t = patternType param'
+      iteratedArg (e, e_als) = (toParam Observe (typeOf e), (e, e_als))
   (_, entry_cons) <-
     contain . passArgs loop_loc mempty $
-      (param_t, (arg_e, arg_als))
-        : map (\(e, e_als) -> (toParam Observe (typeOf e), (e, e_als))) (maybeToList iterated)
+      (param_t, (arg_e, arg_als)) : maybeToList (iteratedArg <$> iterated)
   consumed entry_cons
   let arg_cons = init_cons <> entry_cons
 
