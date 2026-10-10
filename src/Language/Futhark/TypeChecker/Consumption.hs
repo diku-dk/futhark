@@ -1160,10 +1160,10 @@ callSources a = fmap concat . zipWithM onParam [0 ..]
     onComponent _ t = [] <$ guard (noNegative a False t)
 
 -- | The sources of the type parameters in the result of a function with this
--- declared type, if parametricity says that the result can only be made of
--- what calls of them return: every component of the result is primitive or a
--- type parameter, each type parameter occurs once, and each has a source and
--- no other negative occurrence. See Note [Parametric results].
+-- declared type, if parametricity says that the result can only be made of what
+-- calls of them return. This is the case when every component of the result is
+-- primitive or a type parameter, each type parameter occurs once, and each has
+-- a source and no other negative occurrence. See Note [Parametric results].
 resultSources :: [TypeParam] -> [StructType] -> ResType -> Maybe [(Int, Path)]
 resultSources tparams params res = do
   vs <- resultVars [v | TypeParamType _ v _ <- tparams] res
@@ -1243,10 +1243,10 @@ checkApply loc fname f_als args = do
     diets _ = repeat Observe
 
 -- | Join the results of the branches of a branching expression (described by
--- the string), given everything consumed by any of them.  An alias survives if it and everything it aliases
--- is still alive; the rest are consumed.  If the components of some branch's
--- result overlap, the components of the joined result are tied together by a
--- fresh name.  See Note [Locations].
+-- the string), given everything consumed by any of them. An alias survives if
+-- it and everything it aliases is still alive; the rest are consumed. If the
+-- components of some branch's result overlap, the components of the joined
+-- result are tied together by a fresh name. See Note [Locations].
 joinBranches :: T.Text -> Loc -> Consumed -> NE.NonEmpty TypeAliases -> CheckM TypeAliases
 joinBranches what loc all_cons branches = do
   vtable <- asks envVtable
