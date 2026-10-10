@@ -229,6 +229,34 @@ globalAliases v (BoundV tparams decl) = mapLeaves onLeaf . second (const mempty)
     maybeGlobal t@(Scalar (TypeVar Nonfresh _ _)) = not $ parametric t
     maybeGlobal _ = False
 
+-- | Instantiate the aliases of a local binding at the type of an occurrence,
+-- just as the type of a global is instantiated. The binding's type is that of
+-- its definition, which for a local function may be polymorphic: where it has a
+-- type parameter, every part of what the occurrence instantiates it with gets
+-- the aliases, or in a return type the freshness, of that type parameter.
+instantiateAliases :: TypeBase Size u -> TypeAliases -> TypeAliases
+instantiateAliases
+  (Scalar (Arrow _ _ _ t_p (RetType _ t_r)))
+  (Scalar (Arrow als pn d _ (RetType ext r))) =
+    Scalar $ Arrow als pn d t_p $ RetType ext $ instantiateFreshness t_r r
+instantiateAliases (Scalar (Record ts)) (Scalar (Record als)) =
+  Scalar $ Record $ M.intersectionWith instantiateAliases ts als
+instantiateAliases (Scalar (Sum ts)) (Scalar (Sum als)) =
+  Scalar $ Sum $ M.intersectionWith (zipWith instantiateAliases) ts als
+instantiateAliases t als = t `setAliases` aliases als
+
+-- | Like 'instantiateAliases', but for the freshness of a return type.
+instantiateFreshness :: TypeBase Size u -> ResType -> ResType
+instantiateFreshness
+  (Scalar (Arrow _ _ _ t_p (RetType _ t_r)))
+  (Scalar (Arrow u pn d _ (RetType ext r))) =
+    Scalar $ Arrow u pn d t_p $ RetType ext $ instantiateFreshness t_r r
+instantiateFreshness (Scalar (Record ts)) (Scalar (Record rs)) =
+  Scalar $ Record $ M.intersectionWith instantiateFreshness ts rs
+instantiateFreshness (Scalar (Sum ts)) (Scalar (Sum rs)) =
+  Scalar $ Sum $ M.intersectionWith (zipWith instantiateFreshness) ts rs
+instantiateFreshness t r = t `setMode` freshness r
+
 -- | Update the aliases at a given position. It is expected that the second
 -- 'TypeAliases' has the same type (modulo alias information) as the field at
 -- the given path.
@@ -593,6 +621,41 @@ consumeAliases loc als = do
   where
     als' = M.fromList $ map (,loc) $ aliasLocs als
 
+-- | Note on every function component of a type that applying it may yield a
+-- value with internal aliasing.  See Note [Parametric results].
+noteSelfAliases :: TypeAliases -> TypeAliases
+noteSelfAliases (Scalar (Arrow als mn d pt rt)) =
+  Scalar $ Arrow (S.insert AliasSelf als) mn d pt rt
+noteSelfAliases (Scalar (Record fs)) = Scalar $ Record $ fmap noteSelfAliases fs
+noteSelfAliases (Scalar (Sum cs)) = Scalar $ Sum $ (fmap . fmap) noteSelfAliases cs
+noteSelfAliases t = t
+
+-- | Can a function with this type scheme produce, when its function components
+-- are applied, a value whose internal aliasing we cannot see? That is so
+-- exactly when some component of what it produces is a nonfresh abstract type
+-- that is not one of the type parameters it is polymorphic in: it must then
+-- have manufactured that value, rather than been handed it. Intrinsic types
+-- (notably accumulators) are exempt, as the compiler does know their
+-- representation, and they have no components that could alias each other. See
+-- Note [Parametric results].
+manufacturesAbstract :: BoundV -> Bool
+manufacturesAbstract (BoundV tparams vt) = anyResultComponent manufactured . toRes Nonfresh $ vt
+  where
+    tparams' = [v | TypeParamType _ v _ <- tparams]
+    manufactured (Scalar (TypeVar u t _)) =
+      u == Nonfresh
+        && not (isIntrinsic (qualLeaf t))
+        && qualLeaf t `notElem` tparams'
+    manufactured _ = False
+
+-- | Note on the function components of a value that applying them may produce a
+-- value with internal aliasing, when the given declared type says they may.
+-- See Note [Parametric results].
+notedAliases :: BoundV -> TypeAliases -> TypeAliases
+notedAliases tscheme
+  | manufacturesAbstract tscheme = noteSelfAliases
+  | otherwise = id
+
 -- | Observe the given name here and return its aliases.
 observeVar :: Loc -> QualName VName -> StructType -> CheckM TypeAliases
 observeVar loc qv t = do
@@ -605,43 +668,15 @@ observeVar loc qv t = do
   where
     v = qualLeaf qv
 
-    -- The declared type of a global is what makes parametricity visible; if
-    -- we cannot find it, fall back to the instantiated type, which amounts to
-    -- assuming no parametricity at all.  An intrinsic aliases nothing.  See
-    -- Note [Parametric results].
+    -- The declared type of a global is what makes parametricity visible; if we
+    -- cannot find it, fall back to the instantiated type, which amounts to
+    -- assuming no parametricity at all. An intrinsic aliases nothing. See Note
+    -- [Parametric results].
     isGlobal env
       | isIntrinsic v = second (const mempty) t
       | otherwise =
-          let BoundV tparams decl = fromMaybe (BoundV [] t) $ envGlobal env qv
-           in notedAliases tparams decl $ globalAliases v (BoundV tparams decl) t
-
--- | Instantiate the aliases of a local binding at the type of an occurrence,
--- just as the type of a global is instantiated. The binding's type is that of
--- its definition, which for a local function may be polymorphic: where it has
--- a type parameter, every part of what the occurrence instantiates it with gets
--- the aliases, or in a return type the freshness, of that type parameter.
-instantiateAliases :: TypeBase Size u -> TypeAliases -> TypeAliases
-instantiateAliases
-  (Scalar (Arrow _ _ _ t_p (RetType _ t_r)))
-  (Scalar (Arrow als pn d _ (RetType ext r))) =
-    Scalar $ Arrow als pn d t_p $ RetType ext $ instantiateFreshness t_r r
-instantiateAliases (Scalar (Record ts)) (Scalar (Record als)) =
-  Scalar $ Record $ M.intersectionWith instantiateAliases ts als
-instantiateAliases (Scalar (Sum ts)) (Scalar (Sum als)) =
-  Scalar $ Sum $ M.intersectionWith (zipWith instantiateAliases) ts als
-instantiateAliases t als = t `setAliases` aliases als
-
--- | Like 'instantiateAliases', but for the freshness of a return type.
-instantiateFreshness :: TypeBase Size u -> ResType -> ResType
-instantiateFreshness
-  (Scalar (Arrow _ _ _ t_p (RetType _ t_r)))
-  (Scalar (Arrow u pn d _ (RetType ext r))) =
-    Scalar $ Arrow u pn d t_p $ RetType ext $ instantiateFreshness t_r r
-instantiateFreshness (Scalar (Record ts)) (Scalar (Record rs)) =
-  Scalar $ Record $ M.intersectionWith instantiateFreshness ts rs
-instantiateFreshness (Scalar (Sum ts)) (Scalar (Sum rs)) =
-  Scalar $ Sum $ M.intersectionWith (zipWith instantiateFreshness) ts rs
-instantiateFreshness t r = t `setMode` freshness r
+          let tscheme = fromMaybe (BoundV [] t) $ envGlobal env qv
+           in notedAliases tscheme $ globalAliases v tscheme t
 
 -- Capture any newly consumed locations that occur during the provided action.
 contain :: CheckM a -> CheckM (a, Consumed)
@@ -695,6 +730,14 @@ consumedParamLoc params (v, fs) =
     consumable (Scalar Arrow {}) = False
     consumable _ = True
 
+-- | Free variables and their aliases.
+boundFreeInExp :: Exp -> CheckM (M.Map VName TypeAliases)
+boundFreeInExp e = do
+  vtable <- asks envVtable
+  pure $
+    M.mapMaybe (fmap entryAliases) . M.fromSet (`M.lookup` vtable) $
+      fvVars (freeInExp e)
+
 -- | The aliases of the free local variables captured by a closure with the given
 -- parameters and body, plus any globals that its result aliases, which it may
 -- return.
@@ -703,8 +746,8 @@ closureAliases params body body_als = do
   vtable <- asks envVtable
   free_bound <-
     (`M.withoutKeys` S.fromList (foldMap patNames params)) <$> boundFreeInExp body
-  -- A function's own note comes from its body; 'AliasSelf' is not an alias of
-  -- anything, so the usual global/local distinction does not apply to it.
+  -- The closure may return aliases to globals, and if the body may have
+  -- internal aliasing ('AliasSelf'), so may the result of applying the closure.
   let isGlobal AliasFree {} = False
       isGlobal AliasSelf = True
       isGlobal a = maybe False (`M.notMember` vtable) $ aliasVar a
@@ -877,50 +920,15 @@ passArgs loc f_als args = do
         ([], l : _) -> describeLoc l
         ([], []) -> pure mempty
 
--- | Can a value of this declared type produce, when its function components
--- are applied, a value whose internal aliasing we cannot see?  That is so
--- exactly when some component of what it produces is a nonfresh abstract type
--- that is not one of the type parameters it is polymorphic in: it must then
--- have manufactured that value, rather than been handed it.  Intrinsic types
--- (notably accumulators) are exempt, as the compiler does know their
--- representation, and they have no components that could alias each other.  See
--- Note [Parametric results].
-manufacturesAbstract :: [TypeParam] -> TypeBase Size u -> Bool
-manufacturesAbstract tparams = anyResultComponent manufactured . toRes Nonfresh
-  where
-    tparams' = [v | TypeParamType _ v _ <- tparams]
-    manufactured (Scalar (TypeVar u t _)) =
-      u == Nonfresh
-        && not (isIntrinsic (qualLeaf t))
-        && qualLeaf t `notElem` tparams'
-    manufactured _ = False
-
--- | Note on every function component of a type that applying it may yield a
--- value with internal aliasing.  See Note [Parametric results].
-noteSelfAliases :: TypeAliases -> TypeAliases
-noteSelfAliases (Scalar (Arrow als mn d pt rt)) =
-  Scalar $ Arrow (S.insert AliasSelf als) mn d pt rt
-noteSelfAliases (Scalar (Record fs)) = Scalar $ Record $ fmap noteSelfAliases fs
-noteSelfAliases (Scalar (Sum cs)) = Scalar $ Sum $ (fmap . fmap) noteSelfAliases cs
-noteSelfAliases t = t
-
--- | Note on the function components of a value that applying them may produce a
--- value with internal aliasing, when the given declared type says they may.
--- See Note [Parametric results].
-notedAliases :: [TypeParam] -> TypeBase Size u -> TypeAliases -> TypeAliases
-notedAliases tparams decl
-  | manufacturesAbstract tparams decl = noteSelfAliases
-  | otherwise = id
-
 selfAliasType :: VName -> TypeBase Size o -> TypeAliases
 selfAliasType v = insertSelfAliases v . unknownAliases
 
 -- | The aliases to assume for a value whose provenance we know nothing about:
--- none at all, except what its own type says it may manufacture.  This is
--- 'notedAliases' with no type parameters to exploit.  See Note [Parametric
+-- none at all, except what its own type says it may manufacture. This is
+-- 'notedAliases' with no type parameters to exploit. See Note [Parametric
 -- results].
-unknownAliases :: TypeBase Size u -> TypeAliases
-unknownAliases t = notedAliases [] t $ second (const mempty) t
+unknownAliases :: TypeBase Size o -> TypeAliases
+unknownAliases t = notedAliases (BoundV [] $ toStruct t) $ second (const mempty) t
 
 -- | @returnType appres ret_type arg_diet arg_type@ gives result of applying
 -- an argument the given types to a function with the given return
@@ -981,13 +989,6 @@ applyLoopArg appres (Scalar (Record pfs)) (Scalar (Record afs)) (Scalar (Record 
       pfs
 applyLoopArg appres p_t arg_als rettype =
   returnType appres rettype (diet p_t) arg_als
-
-boundFreeInExp :: Exp -> CheckM (M.Map VName TypeAliases)
-boundFreeInExp e = do
-  vtable <- asks envVtable
-  pure $
-    M.mapMaybe (fmap entryAliases) . M.fromSet (`M.lookup` vtable) $
-      fvVars (freeInExp e)
 
 -- Loops are tricky because we want to infer the diets of their parameters.
 -- This is pretty unusual: we do not do this for ordinary functions.
