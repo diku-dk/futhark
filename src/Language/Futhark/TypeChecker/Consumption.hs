@@ -624,14 +624,15 @@ consumeAliases loc als = do
   where
     als' = M.fromList $ map (,loc) $ aliasLocs als
 
--- | Note on every function component of a type that applying it may yield a
--- value with internal aliasing.  See Note [Parametric results].
-noteSelfAliases :: TypeAliases -> TypeAliases
-noteSelfAliases (Scalar (Arrow als mn d pt rt)) =
+-- | Add 'AliasSelf' to every function component of a type, recording that
+-- applying it may yield a value with internal aliasing.  See Note [Parametric
+-- results].
+addSelfAliases :: TypeAliases -> TypeAliases
+addSelfAliases (Scalar (Arrow als mn d pt rt)) =
   Scalar $ Arrow (S.insert AliasSelf als) mn d pt rt
-noteSelfAliases (Scalar (Record fs)) = Scalar $ Record $ fmap noteSelfAliases fs
-noteSelfAliases (Scalar (Sum cs)) = Scalar $ Sum $ (fmap . fmap) noteSelfAliases cs
-noteSelfAliases t = t
+addSelfAliases (Scalar (Record fs)) = Scalar $ Record $ fmap addSelfAliases fs
+addSelfAliases (Scalar (Sum cs)) = Scalar $ Sum $ (fmap . fmap) addSelfAliases cs
+addSelfAliases t = t
 
 -- | Can a function with this type scheme produce, when its function components
 -- are applied, a value whose internal aliasing we cannot see? That is so
@@ -651,12 +652,12 @@ manufacturesAbstract (BoundV tparams vt) = anyResultComponent manufactured . toR
         && qualLeaf t `notElem` tparams'
     manufactured _ = False
 
--- | Note on the function components of a value that applying them may produce a
--- value with internal aliasing, when the given declared type says they may.
--- See Note [Parametric results].
-notedAliases :: BoundV -> TypeAliases -> TypeAliases
-notedAliases tscheme
-  | manufacturesAbstract tscheme = noteSelfAliases
+-- | Add 'AliasSelf' to the function components of a value, recording that
+-- applying them may produce a value with internal aliasing, when the given
+-- declared type says they may.  See Note [Parametric results].
+maybeAddSelfAliases :: BoundV -> TypeAliases -> TypeAliases
+maybeAddSelfAliases tscheme
+  | manufacturesAbstract tscheme = addSelfAliases
   | otherwise = id
 
 -- | Observe the given name here and return its aliases.
@@ -679,7 +680,7 @@ observeVar loc qv t = do
       | isIntrinsic v = second (const mempty) t
       | otherwise =
           let tscheme = fromMaybe (BoundV [] t) $ envGlobal env qv
-           in notedAliases tscheme $ globalAliases v tscheme t
+           in maybeAddSelfAliases tscheme $ globalAliases v tscheme t
 
 -- Capture any newly consumed locations that occur during the provided action.
 contain :: CheckM a -> CheckM (a, Consumed)
@@ -904,10 +905,10 @@ selfAliasType v = insertSelfAliases v . unknownAliases
 
 -- | The aliases to assume for a value whose provenance we know nothing about:
 -- none at all, except what its own type says it may manufacture. This is
--- 'notedAliases' with no type parameters to exploit. See Note [Parametric
--- results].
+-- 'maybeAddSelfAliases' with no type parameters to exploit. See Note
+-- [Parametric results].
 unknownAliases :: TypeBase Size o -> TypeAliases
-unknownAliases t = notedAliases (BoundV [] $ toStruct t) $ second (const mempty) t
+unknownAliases t = maybeAddSelfAliases (BoundV [] $ toStruct t) $ second (const mempty) t
 
 -- | @returnType appres ret_type arg_diet arg_type@ gives result of applying
 -- an argument the given types to a function with the given return
@@ -1566,11 +1567,10 @@ checkValDef globals (fname, tparams, params, body, RetType ext ret, retdecl, loc
     (body', body_als) <-
       if null params then checkBound "Top-level constant" body else checkExp body
     checkReturnAlias loc params ret body_als
-    -- If the user did not provide an annotation (meaning the return
-    -- type is fully inferred), we infer the freshness.  Otherwise,
-    -- we go with whatever they wanted.  This lets the user define
-    -- nonfresh return types even if the body actually has no
-    -- aliases.
+    -- If the user did not provide an annotation (meaning the return type is
+    -- fully inferred), we infer the freshness. Otherwise, we go with whatever
+    -- they wanted. This lets the user define nonfresh return types even if the
+    -- body actually has no aliases.
     ret' <- case retdecl of
       Just retdecl' -> do
         when (null params && fresh ret) $
@@ -1640,24 +1640,24 @@ checkValDef globals (fname, tparams, params, body, RetType ext ret, retdecl, loc
 -- Consumption checking sees only instantiated types, so the declared type is
 -- looked up when a name is mentioned ('envGlobal', consulted by 'observeVar')
 -- and the answer recorded in the type as an 'AliasSelf' on each function
--- component ('noteSelfAliases').  From there ordinary alias propagation carries
+-- component ('addSelfAliases').  From there ordinary alias propagation carries
 -- it: through binding, so @let my_mk = M.mk in my_mk n@ still manufactures;
 -- through 'returnType', so partial application does not lose it, and neither
 -- does passing the function as an argument, so @n |> M.mk@ manufactures even
--- though @|>@ itself does not.  No arity bookkeeping is needed, because the
--- note means the same thing at every arity: on a function, "applying this may
--- yield an internally-aliased value", and on a value, "this may have internal
--- aliasing".  'returnType' moves between the two readings for free as the
--- result stops being an arrow.
+-- though @|>@ itself does not.  No arity bookkeeping is needed, because
+-- 'AliasSelf' means the same thing at every arity: on a function, "applying
+-- this may yield an internally-aliased value", and on a value, "this may have
+-- internal aliasing".  'returnType' moves between the two readings for free as
+-- the result stops being an arrow.
 --
 -- This is a conservative over-approximation we use whenever we have no better
--- ifnormation available. Hence 'unknownAliases', used for parameters
+-- information available. Hence 'unknownAliases', used for parameters
 -- ('selfAliasType') and for any type we build out of thin air, and hence
--- 'closureAliases' keeping the note that a function defined here picked up from
--- its own body. Alias sets are combined by union, and a union of "may" is again
--- a "may"; the join of branches in Note [Locations] drops aliases,
--- but never 'AliasSelf'. In in some sense, 'AliasSelf' behaves a bit like the
--- top element of a lattice.
+-- 'closureAliases' keeping the 'AliasSelf' that a function defined here picked
+-- up from its own body. Alias sets are combined by union, and a union of "may"
+-- is again a "may"; the join of branches in Note [Locations] drops aliases, but
+-- never 'AliasSelf'. In some sense, 'AliasSelf' behaves a bit like the top
+-- element of a lattice.
 --
 -- ## Freshness
 --
