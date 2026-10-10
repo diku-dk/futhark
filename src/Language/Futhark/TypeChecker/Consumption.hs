@@ -229,6 +229,9 @@ globalAliases v (BoundV tparams decl) = mapLeaves onLeaf . second (const mempty)
     maybeGlobal t@(Scalar (TypeVar Nonfresh _ _)) = not $ parametric t
     maybeGlobal _ = False
 
+-- | Update the aliases at a given position. It is expected that the second
+-- 'TypeAliases' has the same type (modulo alias information) as the field at
+-- the given path.
 updateAliases :: TypeAliases -> [UpdateStep Info VName] -> TypeAliases -> TypeAliases
 updateAliases _ [] ve_als =
   ve_als
@@ -262,7 +265,8 @@ data CheckEnv = CheckEnv
 data NameReason
   = -- | Name is the result of a function application.
     NameAppRes (Maybe (QualName VName)) SrcLoc
-  | NameLoopRes SrcLoc
+  | -- | Name is a loop result.
+    NameLoopRes SrcLoc
   | -- | Name ties together the components of the result of the given kind
     -- of branching expression; see Note [Locations].
     NameBranchRes T.Text SrcLoc
@@ -281,18 +285,6 @@ nameReason loc (NameBranchRes what eloc) =
 
 -- | The locations consumed so far, each with where it was consumed.
 type Consumed = M.Map Location Loc
-
--- | Is this location dead because of something in the consumed set?  That is
--- the case if a location on the same variable has been consumed whose path is
--- a prefix of this one, or of which this one is a prefix.  The result is where
--- the killing consumption happened.
-deadIn :: Consumed -> Location -> Maybe Loc
-deadIn cons (v, p) = listToMaybe $ mapMaybe killing $ M.toList on_v
-  where
-    on_v = M.takeWhileAntitone ((== v) . fst) $ M.dropWhileAntitone ((< v) . fst) cons
-    killing ((_, q), loc)
-      | q `L.isPrefixOf` p || p `L.isPrefixOf` q = Just loc
-      | otherwise = Nothing
 
 data CheckState = CheckState
   { stateConsumed :: Consumed,
@@ -333,18 +325,15 @@ runCheckM globals loc (CheckM m) =
           stateCounter = 0
         }
 
-describeVar :: VName -> CheckM (Doc a)
-describeVar v = describeLoc (v, [])
+incCounter :: CheckM Int
+incCounter =
+  state $ \s -> (stateCounter s, s {stateCounter = stateCounter s + 1})
 
--- | Like 'describeVar', but naming a variable written by the programmer
--- without calling it one.
-describeName :: VName -> CheckM (Doc a)
-describeName v = do
-  loc <- asks envLoc
-  gets $
-    maybe (dquotes (prettyName v)) (nameReason (srclocOf loc))
-      . M.lookup v
-      . stateNames
+-- | The part of a path that steps only into records.
+recordPath :: Path -> TypeBase dim o -> Path
+recordPath (f : fs) (Scalar (Record ts))
+  | Just t <- M.lookup f ts = f : recordPath fs t
+recordPath _ _ = []
 
 -- | Describe a location for the user.  A path into a sum payload is not
 -- something the user can write, so the path is cut off at the first sum.
@@ -357,12 +346,21 @@ describeLoc (v, fs) = do
       . M.lookup v
       . stateNames
 
--- | The part of a path that steps only into records.
-recordPath :: Path -> TypeBase dim o -> Path
-recordPath (f : fs) (Scalar (Record ts))
-  | Just t <- M.lookup f ts = f : recordPath fs t
-recordPath _ _ = []
+-- | Describe a variable for the user.
+describeVar :: VName -> CheckM (Doc a)
+describeVar v = describeLoc (v, [])
 
+-- | Like 'describeVar', but naming a variable written by the programmer without
+-- calling it one.
+describeName :: VName -> CheckM (Doc a)
+describeName v = do
+  loc <- asks envLoc
+  gets $
+    maybe (dquotes (prettyName v)) (nameReason (srclocOf loc))
+      . M.lookup v
+      . stateNames
+
+-- | Mark everything as nonconsumable within this action.
 noConsumable :: CheckM a -> CheckM a
 noConsumable = local $ \env -> env {envVtable = M.map f $ envVtable env}
   where
@@ -371,18 +369,6 @@ noConsumable = local $ \env -> env {envVtable = M.map f $ envVtable env}
 addError :: (Located loc) => loc -> Notes -> Doc () -> CheckM ()
 addError loc notes e = modify $ \s ->
   s {stateErrors = DL.snoc (stateErrors s) (TypeError (locOf loc) notes e)}
-
-incCounter :: CheckM Int
-incCounter =
-  state $ \s -> (stateCounter s, s {stateCounter = stateCounter s + 1})
-
--- | An alias of a new internal name standing for an intermediate value, with
--- the reason it exists recorded for error messages.
-internalAlias :: Name -> NameReason -> CheckM Alias
-internalAlias desc reason = do
-  v <- VName desc <$> incCounter
-  modify $ \s -> s {stateNames = M.insert v reason $ stateNames s}
-  pure $ AliasFree (v, [])
 
 returnAliased :: Name -> SrcLoc -> CheckM ()
 returnAliased name loc =
@@ -403,6 +389,31 @@ freshReturnAliased :: SrcLoc -> CheckM ()
 freshReturnAliased loc =
   addError loc mempty . withIndexLink "fresh-return-aliased" $
     "A fresh-declared component of the return value is aliased to some other component."
+
+-- | A reason why a component of a function result cannot be fresh.
+data Unfresh
+  = -- | It aliases this variable, which is in scope and not a consumed
+    -- parameter.
+    UnfreshAliases VName
+  | -- | It aliases a location that some other component also aliases.
+    UnfreshShared
+  | -- | It may have internal aliasing.
+    UnfreshSelf
+
+-- | Why a component of the result of a function with these parameters cannot be
+-- fresh, given the 'sharedLocations' of the whole result. The component may be
+-- fresh exactly when there is no reason. See Note [Locations].
+unfreshness :: [Pat ParamType] -> S.Set Location -> TypeAliases -> [Unfresh]
+unfreshness params shared t_als =
+  [UnfreshShared | any (`S.member` shared) (aliasLocs (aliases t_als))]
+    <> [UnfreshSelf | selfAliased (aliases t_als)]
+    <> map (UnfreshAliases . fst) (filter (not . consumedParamLoc params) in_scope)
+  where
+    -- Mention the parameters before other variables.
+    in_scope =
+      L.sortOn ((`notElem` foldMap patNames params) . fst) . nubOrd . aliasLocs $
+        S.filter isBoundAlias $
+          aliases t_als
 
 -- | Check that every component of a function result declared fresh may be.
 checkReturnAlias :: SrcLoc -> [Pat ParamType] -> ResType -> TypeAliases -> CheckM ()
@@ -521,6 +532,18 @@ bindingLoopForm _ While {} m = m
 bindingFun :: VName -> TypeAliases -> CheckM a -> CheckM a
 bindingFun v t = local $ \env ->
   env {envVtable = M.insert v (Nonconsumable t) (envVtable env)}
+
+-- | Is this location dead because of something in the consumed set?  That is
+-- the case if a location on the same variable has been consumed whose path is
+-- a prefix of this one, or of which this one is a prefix.  The result is where
+-- the killing consumption happened.
+deadIn :: Consumed -> Location -> Maybe Loc
+deadIn cons (v, p) = listToMaybe $ mapMaybe killing $ M.toList on_v
+  where
+    on_v = M.takeWhileAntitone ((== v) . fst) $ M.dropWhileAntitone ((< v) . fst) cons
+    killing ((_, q), loc)
+      | q `L.isPrefixOf` p || p `L.isPrefixOf` q = Just loc
+      | otherwise = Nothing
 
 checkIfConsumed :: Loc -> Aliases -> CheckM ()
 checkIfConsumed rloc als = do
@@ -672,41 +695,6 @@ consumedParamLoc params (v, fs) =
     consumable (Scalar Arrow {}) = False
     consumable _ = True
 
--- | A reason why a component of a function result cannot be fresh.
-data Unfresh
-  = -- | It aliases this variable, which is in scope and not a consumed
-    -- parameter.
-    UnfreshAliases VName
-  | -- | It aliases a location that some other component also aliases.
-    UnfreshShared
-  | -- | It may have internal aliasing.
-    UnfreshSelf
-
--- | Why a component of the result of a function with these parameters cannot
--- be fresh, given the 'sharedLocations' of the whole result.  The component
--- may be fresh exactly when there is no reason.  See Note
--- [Locations].
-unfreshness :: [Pat ParamType] -> S.Set Location -> TypeAliases -> [Unfresh]
-unfreshness params shared t_als =
-  [UnfreshShared | any (`S.member` shared) (aliasLocs (aliases t_als))]
-    <> [UnfreshSelf | selfAliased (aliases t_als)]
-    <> map (UnfreshAliases . fst) (filter (not . consumedParamLoc params) in_scope)
-  where
-    -- Mention the parameters before other variables.
-    in_scope =
-      L.sortOn ((`notElem` foldMap patNames params) . fst) . nubOrd . aliasLocs $
-        S.filter isBoundAlias $
-          arrayAliases t_als
-
-arrayAliases :: TypeAliases -> Aliases
-arrayAliases (Array als _ _) = als
-arrayAliases (Scalar Prim {}) = mempty
-arrayAliases (Scalar (Record fs)) = foldMap arrayAliases fs
-arrayAliases (Scalar (TypeVar als _ _)) = als
-arrayAliases (Scalar Arrow {}) = mempty
-arrayAliases (Scalar (Sum fs)) =
-  mconcat $ concatMap (map arrayAliases) $ M.elems fs
-
 -- | The aliases of the free local variables captured by a closure with the given
 -- parameters and body, plus any globals that its result aliases, which it may
 -- return.
@@ -841,6 +829,14 @@ checkArg e = do
         </> indent 2 (pretty e_t)
         </> "contains consumption, which is not allowed."
   pure (e', e_als)
+
+-- | An alias of a new internal name standing for an intermediate value, with
+-- the reason it exists recorded for error messages.
+internalAlias :: Name -> NameReason -> CheckM Alias
+internalAlias desc reason = do
+  v <- VName desc <$> incCounter
+  modify $ \s -> s {stateNames = M.insert v reason $ stateNames s}
+  pure $ AliasFree (v, [])
 
 -- | Pass checked arguments, each with the type of its parameter, to a function
 -- with the given aliases.  The call uses the function and every argument, and
