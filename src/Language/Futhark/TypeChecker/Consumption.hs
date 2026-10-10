@@ -1264,9 +1264,9 @@ joinBranches what loc all_cons branches = do
   pure $ second (tie . S.filter keep) t
 
 -- | Check an expression whose value is bound to names (described by the
--- string).  A value of higher-order type may hold what was consumed in
--- computing it, and a name can be used any number of times, so such an
--- expression may not consume anything.
+-- string). If that expression is a higher-order type, then it may not have
+-- consumed anything. This is because we want to be able to duplicate the
+-- computation for defunctionalisation purposes.
 checkBound :: Doc () -> Exp -> CheckM (Exp, TypeAliases)
 checkBound what e = do
   ((e', e_als), e_cons) <- contain $ checkExp e
@@ -1280,6 +1280,8 @@ checkBound what e = do
         </> "contains consumption, which is not allowed."
   pure (e', e_als)
 
+-- Note that this may modify the type annotations inside the expression, which
+-- is why we return a new one.
 checkExp :: Exp -> CheckM (Exp, TypeAliases)
 -- First we have the complicated cases.
 
@@ -1288,9 +1290,10 @@ checkExp (AppExp (Apply f args loc) appres) = do
   -- Futhark evaluates the arguments of an application from right to left, and
   -- then the function.
   args' <- NE.reverse <$> traverse (traverse checkArg) (NE.reverse args)
-  -- The checked arguments, as checking infers the freshness of lambdas.
   f_fresh <- case f of
     Var qn (Info t) floc -> do
+      -- It is important to use the checked arguments here, as their refined
+      -- types can affect parametricFreshness.
       t' <- parametricFreshness qn t $ map (typeOf . fst . snd) $ NE.toList args'
       pure $ Var qn (Info t') floc
     _ -> pure f
@@ -1352,8 +1355,7 @@ checkExp (AppExp (Match cond cs loc) appres) = do
 checkExp (AppExp (LetFun fname (typarams, params, retdecl, Info (RetType ext ret), funbody) letbody loc) appres) = do
   ((ret', funbody'), ftype) <- bindingParams params $ do
     mapM_ checkSizes retdecl
-    -- Throw away the consumption - it can refer only to the parameters
-    -- anyway.
+    -- Throw away the consumption - it can refer only to the parameters anyway.
     ((funbody', funbody_als), _body_cons) <- contain $ checkExp funbody
     checkReturnAlias loc params ret funbody_als
     als <- closureAliases params funbody funbody_als
