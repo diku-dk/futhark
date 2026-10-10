@@ -601,7 +601,7 @@ static char* mk_compile_opts(struct futhark_context *ctx,
 
   for (int i = 0; i < num_macros; i++) {
     w += snprintf(compile_opts+w, compile_opts_size-w,
-                  "-D%s=%zu ", macro_names[i], macro_vals[i]);
+                  "-D%s=%lld ", macro_names[i], (long long)macro_vals[i]);
   }
 
   w += snprintf(compile_opts+w, compile_opts_size-w,
