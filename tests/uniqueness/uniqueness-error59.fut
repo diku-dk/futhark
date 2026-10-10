@@ -1,5 +1,5 @@
 -- ==
--- error: aliases the free variable "global"
+-- error: "return_global", which is not consumable
 
 def global = ([1, 2, 3], 0)
 

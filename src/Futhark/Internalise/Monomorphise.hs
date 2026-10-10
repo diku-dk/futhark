@@ -303,7 +303,8 @@ scoping :: S.Set VName -> MonoM Exp -> MonoM Exp
 scoping argset m =
   withArgs argset m >>= unscoping argset
 
--- Given instantiated type of function, produce size arguments.
+-- Given instantiated type of function, produce the arguments it must be
+-- applied to: its size arguments, and @()@ for a polymorphic value.
 type InferSizeArgs = StructType -> MonoM [Exp]
 
 -- | The integer encodes an equivalence class, so we can keep
@@ -430,35 +431,37 @@ transformFName loc fname ft = do
       case (maybe_fname, maybe_funbind) of
         -- The function has already been monomorphised.
         (Just (fname', infer), _) ->
-          applySizeArgs fname' (toRes Nonfresh t') <$> infer t'
+          applyArgs fname' (toRes Nonfresh t') <$> infer t'
         -- An intrinsic function.
         (Nothing, Nothing) -> pure $ var fname t'
         -- A polymorphic function.
         (Nothing, Just funbind) -> do
           (fname', infer) <- monomorphiseBinding funbind mono_t
-          applySizeArgs fname' (toRes Nonfresh t') <$> infer t'
+          applyArgs fname' (toRes Nonfresh t') <$> infer t'
   where
     var fname' t' = Var fname' (Info t') loc
 
-    applySizeArg t (i, f) size_arg =
-      ( i - 1,
+    argType = toParam Observe . typeOf
+
+    applyArg t (arg_ts, f) arg =
+      ( drop 1 arg_ts,
         mkApply
           f
-          [(Nothing, size_arg)]
-          (AppRes (foldFunType (replicate i i64) (RetType [] t)) [])
+          [(Nothing, arg)]
+          (AppRes (foldFunType (drop 1 arg_ts) (RetType [] t)) [])
       )
 
-    applySizeArgs fname' t size_args =
+    applyArgs fname' t args =
       setApplyLoc loc . snd $
         foldl'
-          (applySizeArg t)
-          ( length size_args - 1,
+          (applyArg t)
+          ( map argType args,
             Var
               (qualName fname')
-              (Info (foldFunType (map (const i64) size_args) (RetType [] t)))
+              (Info (foldFunType (map argType args) (RetType [] t)))
               loc
           )
-          size_args
+          args
 
 -- | General-purpose size transformation for a type, used everywhere except when
 -- reconstructing the type of a function reference (see 'transformFNameType').
@@ -1090,7 +1093,60 @@ removeEntryPoint :: PolyBinding -> PolyBinding
 removeEntryPoint (PolyBinding (_, name, tparams, params, rettype, body, attrs, loc)) =
   PolyBinding (Nothing, name, tparams, params, rettype, body, attrs, loc)
 
--- Monomorphise a polymorphic function at the types given in the instance list.
+-- | Copy freshness from the instantiated type into the result of the declared
+-- one. See 'freshenFromInst'.
+freshenAsType :: TypeBase d Freshness -> TypeBase Size u -> TypeBase Size u
+freshenAsType
+  (Scalar (Arrow _ _ _ _ (RetType _ ir)))
+  (Scalar (Arrow u pn d a (RetType ext r))) =
+    Scalar $ Arrow u pn d a $ RetType ext (freshenAs ir r)
+freshenAsType _ t = t
+
+freshenAs :: TypeBase d Freshness -> ResType -> ResType
+freshenAs it@(Scalar Arrow {}) t = freshenAsType it t
+freshenAs (Scalar (Record ifs)) (Scalar (Record fs))
+  | M.keys ifs == M.keys fs =
+      Scalar $ Record $ M.intersectionWith freshenAs ifs fs
+freshenAs (Scalar (Sum ics)) (Scalar (Sum cs))
+  | M.keys ics == M.keys cs =
+      Scalar $ Sum $ M.intersectionWith (zipWith freshenAs) ics cs
+freshenAs it t
+  -- 'setMode' writes every node, and 'freshness' of a record is Fresh
+  -- if *any* field is, so this must not be reached for compound types.
+  | compound it || compound t = t
+  | freshness it == Fresh = t `setMode` Fresh
+  | otherwise = t
+  where
+    compound (Scalar Record {}) = True
+    compound (Scalar Sum {}) = True
+    compound _ = False
+
+-- | Consumption checking may refine the instantiated type of a polymorphic name
+-- to say that its result is *fresh*, which the declared type cannot express.
+-- The instantiation can, so take the freshness of the result from there, past
+-- the given parameters. The declared return type must already have the type
+-- substitution applied: a type parameter has a single mode, so where it is
+-- instantiated at a record or sum, freshness can only be copied component by
+-- component once the parameter has been replaced. See Note [Parametric
+-- results] in Language.Futhark.TypeChecker.Consumption.
+freshenFromInst :: TypeBase d Freshness -> [Pat ParamType] -> ResRetType -> ResRetType
+freshenFromInst (Scalar (Arrow _ _ _ _ (RetType _ ir))) (_ : ps) rt =
+  freshenFromInst ir ps rt
+freshenFromInst it [] (RetType ext t) = RetType ext (freshenAs it t)
+freshenFromInst _ _ rt = rt
+
+-- | Recursion is monomorphic, so a recursive reference in the body of an
+-- instance is to that same instance. Its type is the declared one, however,
+-- without the freshness that 'freshenFromInst' copied into the instance, and
+-- would otherwise give rise to a second instance that does not justify it.
+freshenRecursive :: VName -> MonoType -> Exp -> Exp
+freshenRecursive name inst_t = onExp
+  where
+    onExp (Var v (Info t) loc)
+      | qualLeaf v == name =
+          Var v (Info $ freshenAsType (second (const Nonfresh) inst_t) t) loc
+    onExp e = runIdentity $ astMap identityMapper {mapOnExp = pure . onExp} e
+
 -- Monomorphises the body of the function as well. Returns the fresh name of the
 -- generated monomorphic function as well a function for constructing additional
 -- size arguments.
@@ -1098,25 +1154,30 @@ monomorphiseBinding ::
   PolyBinding ->
   MonoType ->
   MonoM (VName, InferSizeArgs)
-monomorphiseBinding (PolyBinding (entry, name, tparams, params, rettype, body, attrs, loc)) inst_t = isolateNormalisation $ do
-  let bind_t = funType params rettype
+monomorphiseBinding (PolyBinding (entry, name, tparams, params0, rettype0, body, attrs, loc)) inst_t = isolateNormalisation $ do
+  let bind_t = funType params0 rettype0
   (substs, t_shape_params) <-
     typeSubstsM loc bind_t $ noNamedParams inst_t
   let shape_names = S.fromList $ map typeParamName $ shape_params ++ t_shape_params
       substs' = M.map (Subst []) substs
       substStructType =
         substTypesAny (fmap (fmap (second (const mempty))) . (`M.lookup` substs'))
-      params' = map (substPat substStructType) params
+      params' = map (substPat substStructType) params0
+      rettype =
+        freshenFromInst
+          (second (const Nonfresh) inst_t)
+          params'
+          (applySubst (`M.lookup` substs') rettype0)
   params'' <- withArgs shape_names $ mapM transformPat params'
   exp_naming <- getExpReplacements <* putExpReplacements mempty
 
-  let args = S.fromList $ foldMap patNames params
+  let args = S.fromList $ foldMap patNames params0
       arg_params = map snd exp_naming
 
   rettype' <-
     withParams exp_naming $
       withArgs (args <> shape_names) $
-        hardTransformRetType (applySubst (`M.lookup` substs') rettype)
+        hardTransformRetType rettype
   extNaming <- getExpReplacements <* putExpReplacements mempty
   scope <- S.union shape_names <$> askScope'
   let (rettype'', new_params) = arrowArg scope args arg_params rettype'
@@ -1142,16 +1203,17 @@ monomorphiseBinding (PolyBinding (entry, name, tparams, params, rettype, body, a
       then pure name
       else newName name
 
-  let infer =
+  let infer
         -- If the function is an entry point, then it cannot possibly
         -- need any explicit size arguments (checked by type checker).
-        if isJust entry
-          then const $ pure []
-          else inferSizeArgs shape_params_explicit bind_t'' bind_r
+        | isJust entry = const $ pure []
+        | poly_value =
+            fmap (<> [TupLit [] loc]) . inferSizeArgs shape_params_explicit bind_t'' bind_r
+        | otherwise = inferSizeArgs shape_params_explicit bind_t'' bind_r
 
   addLifted name inst_t (name', infer)
 
-  body' <- updateExpTypes (`M.lookup` substs') body
+  body' <- freshenRecursive name inst_t <$> updateExpTypes (`M.lookup` substs') body
   body'' <- withParams exp_naming' $ withArgs (shape_names <> args) $ transformExp body'
   scope' <- S.union (shape_names <> args) <$> askScope'
   body''' <-
@@ -1170,15 +1232,21 @@ monomorphiseBinding (PolyBinding (entry, name, tparams, params, rettype, body, a
         toValBinding
           name'
           shape_params_implicit
-          (map shapeParam shape_params_explicit ++ params'')
+          (map shapeParam shape_params_explicit ++ params'' ++ unit_param)
           rettype''
           body'''
 
   pure (name', infer)
   where
-    askScope' = S.filter (`notElem` retDims rettype) <$> askScope
+    askScope' = S.filter (`notElem` retDims rettype0) <$> askScope
 
     shape_params = filter (not . isTypeParam) tparams
+
+    -- A polymorphic value becomes a function of @()@, so that each use computes
+    -- it anew, as a size-polymorphic value is a function of its sizes.
+    -- Consumption checking relies on this; see Note [Parametric results].
+    poly_value = null params0 && any isTypeParam tparams && isNothing entry
+    unit_param = [Wildcard (Info $ Scalar $ Record mempty) loc | poly_value]
 
     updateExpTypes substs = astMap (mapper substs)
 

@@ -34,6 +34,7 @@ module Language.Futhark.TypeChecker.Terms.Monad
     checkTypeExpNonrigid,
     lookupVar,
     lookupMod,
+    typeSchemes,
     lookupAbsTy,
 
     -- * Sizes
@@ -615,6 +616,19 @@ existentialResult = go mempty
               let new = filter (`S.notMember` bound') $ S.toList $ fvVars $ freeInType tr
                in (new, Scalar $ Arrow o pn d ta $ RetType (ext <> new) tr)
     go _ t = ([], t)
+
+-- | A pure function for looking up the type scheme of a global name. Used by
+-- consumption checking to exploit parametricity; see Note [Parametric results]
+-- in "Language.Futhark.TypeChecker.Consumption".
+typeSchemes :: TermTypeM (QualName VName -> Maybe TypeM.BoundV)
+typeSchemes = do
+  scope <- asks termScope
+  outer_env <- asks termOuterEnv
+  pure $ \qn@(QualName _ name) ->
+    case (M.lookup name . scopeVtable =<< Scope.lookupQualNameEnvMaybe id scope qn)
+      `mplus` Scope.lookupOuterVal id outer_env name of
+      Just (BoundV tparams t) -> Just (TypeM.BoundV tparams t)
+      _ -> Nothing
 
 -- | Look up the liftedness of an abstract type.
 lookupAbsTy :: QualName VName -> TermTypeM Liftedness

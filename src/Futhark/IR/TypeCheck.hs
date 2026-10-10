@@ -1375,7 +1375,7 @@ consumeArgs ::
   TypeM rep ()
 consumeArgs paramts args = do
   forM_ (zip [0 :: Int ..] args_cons) $ \(i, (cons_als, _)) ->
-    forM_ [als | (j, (_, als)) <- zip [0 ..] args_cons, i /= j] $ \als ->
+    forM_ (map (snd . snd) . filter ((/= i) . fst) $ zip [0 ..] args_cons) $ \als ->
       case namesToList $ cons_als `namesIntersection` als of
         [] -> pure ()
         v : _ ->
