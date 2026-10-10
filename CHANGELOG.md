@@ -41,6 +41,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * `futhark literate` no longer implicitly marks functions used in directives as
   entry points. Use ``entry`` when you actually want compiled entry points.
 
+* The consumption/aliasing system has been reimplemented. The main change is
+  that annotated freshness on functions now takes precedence even if a more
+  fresh type is inferred - some existing programs may need `*` added to their
+  return type. Beyond that, the system should generally just be more flexible.
+
 ### Fixed
 
 * Python input reading no longer hangs on an unsuffixed `0`, an unsuffixed
