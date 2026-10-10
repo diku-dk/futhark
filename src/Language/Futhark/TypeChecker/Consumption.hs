@@ -184,6 +184,15 @@ aliasLeaf _ t = t
 insertSelfAliases :: VName -> TypeAliases -> TypeAliases
 insertSelfAliases v = mapLeaves $ aliasLeaf . AliasBound . (v,)
 
+-- | Does any component of the value that this type ultimately produces satisfy
+-- the predicate? Function types are followed to their (curried) result, as the
+-- only way to obtain a value from a function is to apply it.
+anyResultComponent :: (ResType -> Bool) -> ResType -> Bool
+anyResultComponent p (Scalar (Arrow _ _ _ _ (RetType _ t))) = anyResultComponent p t
+anyResultComponent p (Scalar (Record fs)) = any (anyResultComponent p) fs
+anyResultComponent p (Scalar (Sum cs)) = any (any (anyResultComponent p)) cs
+anyResultComponent p t = p t
+
 -- | The aliases of a use of the global @v@, given its type scheme and the type
 -- it is used at. A use of a global name aliases that name, except where
 -- parametricity rules it out. In particular, a non-function component whose
@@ -871,15 +880,6 @@ passArgs loc f_als args = do
         ((v, fs) : _, _) -> pure $ prettyAlias v fs
         ([], l : _) -> describeLoc l
         ([], []) -> pure mempty
-
--- | Does any component of the value that this type ultimately produces satisfy
--- the predicate?  Function types are followed to their (curried) result, as the
--- only way to obtain a value from a function is to apply it.
-anyResultComponent :: (ResType -> Bool) -> ResType -> Bool
-anyResultComponent p (Scalar (Arrow _ _ _ _ (RetType _ t))) = anyResultComponent p t
-anyResultComponent p (Scalar (Record fs)) = any (anyResultComponent p) fs
-anyResultComponent p (Scalar (Sum cs)) = any (any (anyResultComponent p)) cs
-anyResultComponent p t = p t
 
 -- | Can a value of this declared type produce, when its function components
 -- are applied, a value whose internal aliasing we cannot see?  That is so
