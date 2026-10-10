@@ -1093,24 +1093,17 @@ removeEntryPoint :: PolyBinding -> PolyBinding
 removeEntryPoint (PolyBinding (_, name, tparams, params, rettype, body, attrs, loc)) =
   PolyBinding (Nothing, name, tparams, params, rettype, body, attrs, loc)
 
--- | Copy freshness from the instantiated type into the return slots of the
--- declared one. See 'freshenFromInst'.
+-- | Copy freshness from the instantiated type into the result of the declared
+-- one. See 'freshenFromInst'.
 freshenAsType :: TypeBase d Freshness -> TypeBase Size u -> TypeBase Size u
 freshenAsType
-  (Scalar (Arrow _ _ _ ia (RetType _ ir)))
+  (Scalar (Arrow _ _ _ _ (RetType _ ir)))
   (Scalar (Arrow u pn d a (RetType ext r))) =
-    Scalar $
-      Arrow u pn d (freshenAsType (second (const Nonfresh) ia) a) $
-        RetType ext (freshenAs ir r)
+    Scalar $ Arrow u pn d a $ RetType ext (freshenAs ir r)
 freshenAsType _ t = t
 
 freshenAs :: TypeBase d Freshness -> ResType -> ResType
-freshenAs
-  (Scalar (Arrow _ _ _ ia (RetType _ ir)))
-  (Scalar (Arrow u pn d a (RetType ext r))) =
-    Scalar $
-      Arrow u pn d (freshenAsType (second (const Nonfresh) ia) a) $
-        RetType ext (freshenAs ir r)
+freshenAs it@(Scalar Arrow {}) t = freshenAsType it t
 freshenAs (Scalar (Record ifs)) (Scalar (Record fs))
   | M.keys ifs == M.keys fs =
       Scalar $ Record $ M.intersectionWith freshenAs ifs fs
@@ -1129,24 +1122,18 @@ freshenAs it t
     compound _ = False
 
 -- | Consumption checking may refine the instantiated type of a polymorphic name
--- to say that a type parameter in result position is *fresh*, which the
--- declared type cannot express. The instantiation can, so take it from there -
--- for the return type and for the function-typed parameters alike, since the
--- body would otherwise not justify a fresh result. The declared types must
--- already have the type substitution applied: a type parameter has a single
--- mode, so where it is instantiated at a record or sum, freshness can only be
--- copied component by component once the parameter has been replaced. See Note
--- [Parametric results] in Language.Futhark.TypeChecker.Consumption.
-freshenFromInst ::
-  TypeBase d Freshness ->
-  [Pat ParamType] ->
-  ResRetType ->
-  ([Pat ParamType], ResRetType)
-freshenFromInst (Scalar (Arrow _ _ _ ia (RetType _ ir))) (p : ps) rt =
-  let (ps', rt') = freshenFromInst ir ps rt
-   in (fmap (freshenAsType (second (const Nonfresh) ia)) p : ps', rt')
-freshenFromInst it [] (RetType ext t) = ([], RetType ext (freshenAs it t))
-freshenFromInst _ ps rt = (ps, rt)
+-- to say that its result is *fresh*, which the declared type cannot express.
+-- The instantiation can, so take the freshness of the result from there, past
+-- the given parameters. The declared return type must already have the type
+-- substitution applied: a type parameter has a single mode, so where it is
+-- instantiated at a record or sum, freshness can only be copied component by
+-- component once the parameter has been replaced. See Note [Parametric
+-- results] in Language.Futhark.TypeChecker.Consumption.
+freshenFromInst :: TypeBase d Freshness -> [Pat ParamType] -> ResRetType -> ResRetType
+freshenFromInst (Scalar (Arrow _ _ _ _ (RetType _ ir))) (_ : ps) rt =
+  freshenFromInst ir ps rt
+freshenFromInst it [] (RetType ext t) = RetType ext (freshenAs it t)
+freshenFromInst _ _ rt = rt
 
 -- | Recursion is monomorphic, so a recursive reference in the body of an
 -- instance is to that same instance. Its type is the declared one, however,
@@ -1175,10 +1162,11 @@ monomorphiseBinding (PolyBinding (entry, name, tparams, params0, rettype0, body,
       substs' = M.map (Subst []) substs
       substStructType =
         substTypesAny (fmap (fmap (second (const mempty))) . (`M.lookup` substs'))
-      (params', rettype) =
+      params' = map (substPat substStructType) params0
+      rettype =
         freshenFromInst
           (second (const Nonfresh) inst_t)
-          (map (substPat substStructType) params0)
+          params'
           (applySubst (`M.lookup` substs') rettype0)
   params'' <- withArgs shape_names $ mapM transformPat params'
   exp_naming <- getExpReplacements <* putExpReplacements mempty

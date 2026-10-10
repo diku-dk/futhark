@@ -813,7 +813,7 @@ separated :: TypeAliases -> Bool
 separated = S.null . sharedLocations
 
 -- | The leaf at the given path, if there is one.
-componentAt :: Path -> TypeAliases -> Maybe TypeAliases
+componentAt :: Path -> TypeBase dim o -> Maybe (TypeBase dim o)
 componentAt fs = lookup fs . leaves
 
 -- | The locations in the alias set of a location: those of the leaf at that
@@ -1117,29 +1117,61 @@ checkLoop loop_loc (param, arg, form, body) = do
       loop_als `combineAliases` body_als
     )
 
--- | If the result of a function with this declared type can only be the result
--- of applying one of its own parameters, return the position of that parameter.
--- That case happens when the result is a type parameter which occurs in exactly
--- one of the parameters, and there only as the result of a function. Our
--- reasoning (by parametricity) is that the only way to obtain a value of a type
--- parameter is to be handed one, and no parameter but that one holds any.
---
--- This is a very crude rule, and a bit of a special case, but it really helps
--- the ergonomics of the language.
-resultFromParam :: [TypeParam] -> [StructType] -> ResType -> Maybe Int
-resultFromParam tparams params res
-  | Scalar (TypeVar Nonfresh v _) <- res,
-    qualLeaf v `elem` map typeParamName tparams,
-    [(i, pt)] <- filter (S.member (qualLeaf v) . typeVars . snd) $ zip [0 ..] params,
-    isFunResult (qualLeaf v) pt =
-      Just i
-  | otherwise = Nothing
+-- | The type parameters at the components of a result, if every component is
+-- either primitive or a type parameter.
+resultVars :: [VName] -> ResType -> Maybe [VName]
+resultVars tps (Scalar (Record fs)) = concat <$> mapM (resultVars tps) (M.elems fs)
+resultVars _ (Scalar Prim {}) = Just []
+resultVars tps (Scalar (TypeVar _ v []))
+  | qualLeaf v `elem` tps = Just [qualLeaf v]
+resultVars _ _ = Nothing
+
+-- | Does the type parameter occur at no negative position in the type, which
+-- is itself at a positive position if the flag is set?  An occurrence in the
+-- argument of an abstract type counts as negative, as we cannot see where it
+-- ends up.
+noNegative :: VName -> Bool -> TypeBase dim o -> Bool
+noNegative a pos (Array _ _ et) = noNegative a pos (Scalar et)
+noNegative _ _ (Scalar Prim {}) = True
+noNegative a pos (Scalar (TypeVar _ v targs)) =
+  (pos || qualLeaf v /= a) && all argOk targs
   where
-    isFunResult v (Scalar (Arrow _ _ _ _ (RetType _ t))) = isResult v t
-    isFunResult _ _ = False
-    isResult v (Scalar (Arrow _ _ _ _ (RetType _ t))) = isResult v t
-    isResult v (Scalar (TypeVar _ t _)) = qualLeaf t == v
-    isResult _ _ = False
+    argOk (TypeArgType t) = not $ a `S.member` typeVars t
+    argOk TypeArgDim {} = True
+noNegative a pos (Scalar (Record fs)) = all (noNegative a pos) fs
+noNegative a pos (Scalar (Sum cs)) = all (all (noNegative a pos)) cs
+noNegative a pos (Scalar (Arrow _ _ _ pt (RetType _ rt))) =
+  noNegative a (not pos) pt && noNegative a pos rt
+
+-- | The sources of a type parameter among the parameters of a function, as
+-- parameter positions and paths through records: the components that are
+-- functions which observe their argument and return the type parameter.
+-- 'Nothing' if the type parameter occurs at a negative position that is not a
+-- source. See Note [Parametric results].
+callSources :: VName -> [StructType] -> Maybe [(Int, Path)]
+callSources a = fmap concat . zipWithM onParam [0 ..]
+  where
+    onParam i = fmap (map (i,)) . onComponent []
+
+    onComponent p (Scalar (Record fs)) =
+      concat <$> mapM (\(k, t) -> onComponent (p ++ [k]) t) (M.toList fs)
+    onComponent p (Scalar (Arrow _ _ Observe pt (RetType _ (Scalar (TypeVar _ v [])))))
+      | qualLeaf v == a = [p] <$ guard (noNegative a True pt)
+    onComponent _ t = [] <$ guard (noNegative a False t)
+
+-- | The sources of the type parameters in the result of a function with this
+-- declared type, if parametricity says that the result can only be made of
+-- what calls of them return: every component of the result is primitive or a
+-- type parameter, each type parameter occurs once, and each has a source and
+-- no other negative occurrence. See Note [Parametric results].
+resultSources :: [TypeParam] -> [StructType] -> ResType -> Maybe [(Int, Path)]
+resultSources tparams params res = do
+  vs <- resultVars [v | TypeParamType _ v _ <- tparams] res
+  guard $ length (nubOrd vs) == length vs
+  fmap concat . forM vs $ \v -> do
+    srcs <- callSources v params
+    guard $ not $ null srcs
+    pure srcs
 
 -- | Peel the parameters off a function type, returning their types (in order)
 -- and the type of the final result. 'Nothing' for a non-function type. This is
@@ -1168,26 +1200,12 @@ constructsFresh t
     allFresh (Array u _ _) = u == Fresh
     allFresh (Scalar Arrow {}) = False
 
--- | Mark as fresh every return-type slot that the declared type fills with the
--- given type parameter.  Both the result of the function and the result of the
--- parameter it came from must say so, or the instantiation would not be
--- well-typed.
-freshenOccurrences :: VName -> StructType -> StructType -> StructType
-freshenOccurrences x = onStruct
-  where
-    onStruct
-      (Scalar (Arrow _ _ _ sa (RetType _ sr)))
-      (Scalar (Arrow u pn d ta (RetType ext tr))) =
-        Scalar $ Arrow u pn d (onStruct sa ta) $ RetType ext (onRes sr tr)
-    onStruct _ t = t
-
-    onRes (Scalar (TypeVar _ v _)) tr
-      | qualLeaf v == x = tr `setMode` Fresh
-    onRes
-      (Scalar (Arrow _ _ _ sa (RetType _ sr)))
-      (Scalar (Arrow u pn d ta (RetType ext tr))) =
-        Scalar $ Arrow u pn d (onStruct sa ta) $ RetType ext (onRes sr tr)
-    onRes _ tr = tr
+-- | Mark as fresh the result of a function with this many parameters.
+freshenResult :: Int -> TypeBase Size o -> TypeBase Size o
+freshenResult n (Scalar (Arrow u pn d pt (RetType ext rt))) =
+  Scalar . Arrow u pn d pt . RetType ext $
+    if n == 1 then rt `setMode` Fresh else freshenResult (n - 1) rt
+freshenResult _ t = t
 
 -- | The type of a global applied to arguments of the given types, with what
 -- parametricity tells us about the freshness of the result recorded in it. Only
@@ -1204,14 +1222,11 @@ parametricFreshness qn ftype argtypes = do
     BoundV tparams decl <- globals qn
     (param_ts, res) <- funParts decl
     guard $ length argtypes == length param_ts
-    i <- resultFromParam tparams param_ts res
-    -- TODO: we could handle more cases here, e.g. a tuple where all of the
-    -- components can be inferred fresh.
-    x <- case res of
-      Scalar (TypeVar _ v _) -> Just $ qualLeaf v
-      _ -> Nothing
-    guard $ constructsFresh $ argtypes !! i
-    Just $ freshenOccurrences x decl ftype
+    srcs <- resultSources tparams param_ts res
+    guard $ all (maybe False constructsFresh . argAt) srcs
+    Just $ freshenResult (length param_ts) ftype
+  where
+    argAt (i, p) = componentAt p $ argtypes !! i
 
 -- | Apply a function with the given aliases to checked arguments, returning the
 -- aliases of the result.
@@ -1270,14 +1285,15 @@ checkExp :: Exp -> CheckM (Exp, TypeAliases)
 
 --
 checkExp (AppExp (Apply f args loc) appres) = do
-  f_fresh <- case f of
-    Var qn (Info t) floc -> do
-      t' <- parametricFreshness qn t $ map (typeOf . snd) $ NE.toList args
-      pure $ Var qn (Info t') floc
-    _ -> pure f
   -- Futhark evaluates the arguments of an application from right to left, and
   -- then the function.
   args' <- NE.reverse <$> traverse (traverse checkArg) (NE.reverse args)
+  -- The checked arguments, as checking infers the freshness of lambdas.
+  f_fresh <- case f of
+    Var qn (Info t) floc -> do
+      t' <- parametricFreshness qn t $ map (typeOf . fst . snd) $ NE.toList args'
+      pure $ Var qn (Info t') floc
+    _ -> pure f
   (f', f_als) <- checkExp f_fresh
   res_als <- checkApply loc (fname f) f_als $ map snd $ NE.toList args'
   pure (AppExp (Apply f' (fmap (second fst) args') loc) appres, res_als)
@@ -1352,10 +1368,10 @@ checkExp (AppExp (LetFun fname (typarams, params, retdecl, Info (RetType ext ret
 
 --
 checkExp (AppExp (BinOp (op, oploc) (Info op_t) (x, xp) (y, yp) loc) appres) = do
-  op_t' <- parametricFreshness op op_t [typeOf x, typeOf y]
-  op_als <- observeVar (locOf oploc) op op_t'
   (x', x_als) <- checkArg x
   (y', y_als) <- checkArg y
+  op_t' <- parametricFreshness op op_t [typeOf x', typeOf y']
+  op_als <- observeVar (locOf oploc) op op_t'
   res_als <- checkApply loc (Just op) op_als [(x', x_als), (y', y_als)]
   pure
     ( AppExp (BinOp (op, oploc) (Info op_t') (x', xp) (y', yp) loc) appres,
@@ -1648,12 +1664,39 @@ checkValDef globals (fname, tparams, params, body, RetType ext ret, retdecl, loc
 --
 --   def (|>) 'a '^b (x: a) (f: a -> b) : b = f x
 --
--- The result of @|>@ is a type parameter that occurs in exactly one of the
--- parameters, and there only as the result of a function. The only way to
--- obtain a value of a type parameter is to be handed one, and no parameter but
--- @f@ holds any, so the result of @|>@ is necessarily the result of applying
--- @f@ ('resultFromParam'). When @f@ in addition constructs its result freshly -
--- as @copy: t -> *t@ does - so does the application.
+-- The only way for a function to obtain a value of one of its type parameters
+-- is to be handed one. Here @b@ occurs among the parameters only as the result
+-- of @f@, so the result of @|>@ is necessarily the result of calling @f@. When
+-- @f@ in addition constructs its result freshly - as @copy: t -> *t@ does - so
+-- does the application.
+--
+-- In general, a *source* of a type parameter @b@ is a component of a parameter
+-- (reached through records) that is a function @t -> b@ observing its argument
+-- ('callSources'). The result of an application is fresh when
+-- ('resultSources'):
+--
+-- - every component of the result is either primitive or a type parameter,
+--   and each type parameter occurs in it once;
+--
+-- - each of these type parameters has a source, and occurs at no negative
+--   position among the parameters other than its sources; and
+--
+-- - the argument given for each source constructs its result freshly.
+--
+-- A negative occurrence that is not a source, such as a parameter of type @b@
+-- or @[]b@, or @b@ in the parameter of a source, is a way for the function to
+-- be handed values of @b@ other than by calling a source, and the result may
+-- then be one of those. An occurrence in the argument of an abstract type
+-- counts, as we cannot see where it ends up. A source must also take a single
+-- argument and observe it. We know of no program that goes wrong without this
+-- restriction, but the argument above has not been made for curried or
+-- consuming functions, so they are not sources. The single occurrence is needed
+-- because the function may return the result of one call twice:
+--
+--   def dup 'a 'b (f: a -> b) (x: a) : (b, b) = let r = f x in (r, r)
+--
+-- Each component of @dup mk_new x@ is fresh on its own, but they are the same
+-- array (tests/uniqueness/uniqueness-error118.fut).
 --
 -- This is a property of the application, not of @|>@ or of its instantiation:
 -- @xs |> copy@ is fresh and @xs |> id@ is not, at the very same instantiation.
@@ -1668,9 +1711,11 @@ checkValDef globals (fname, tparams, params, body, RetType ext ret, retdecl, loc
 -- type does the rest, and later passes get it for free: the monomorphiser keys
 -- instances on the type, so @xs |> copy@ and @xs |> id@ become distinct
 -- instances, and 'freshenFromInst' in Futhark.Internalise.Monomorphise carries
--- the freshness into the generated definition. Both slots must be marked, not
--- just the result: that definition has body @f x@, which would not justify a
--- fresh result if @f@ were still declared to return a nonfresh one.
+-- the freshness into the generated definition. Only the result is marked. The
+-- body of that definition is @f x@, with @f@ still declared to return a
+-- nonfresh value, but nothing checks the one against the other:
+-- defunctionalisation replaces @f@ by the function it is applied to, and the
+-- call then has the return type of that function.
 --
 -- A core restriction is that only an application that supplies every parameter
 -- of the function's *type* is refined. A partial application may already have
