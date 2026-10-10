@@ -812,12 +812,6 @@ aliasParts = map (aliases . snd) . leaves
 separated :: TypeAliases -> Bool
 separated = S.null . sharedLocations
 
-noSelfAliases :: Loc -> TypeAliases -> CheckM ()
-noSelfAliases loc t =
-  unless (separated t) $
-    addError loc mempty . withIndexLink "self-aliasing-arg" $
-      "Argument passed for consuming parameter is self-aliased."
-
 -- | The leaf at the given path, if there is one.
 componentAt :: Path -> TypeAliases -> Maybe TypeAliases
 componentAt fs = lookup fs . leaves
@@ -829,14 +823,12 @@ aliasOf :: M.Map VName (Entry TypeAliases) -> Location -> [Location]
 aliasOf vtable (v, fs) =
   maybe [] (aliasLocs . aliases) $ componentAt fs . entryAliases =<< M.lookup v vtable
 
--- | The aliases of the components of an argument that a parameter of this type
--- consumes.
-consumedAliasesOf :: ParamType -> TypeAliases -> Aliases
-consumedAliasesOf (Scalar (Record fs1)) (Scalar (Record fs2)) =
-  mconcat $ M.elems $ M.intersectionWith consumedAliasesOf fs1 fs2
-consumedAliasesOf p_t t_als
-  | diet p_t == Consume = aliases t_als
-  | otherwise = mempty
+-- | The aliases of the components of a value passed for a parameter of this
+-- type that the parameter treats with the given diet.
+aliasesWithDiet :: Diet -> ParamType -> TypeAliases -> Aliases
+aliasesWithDiet d p_t t_als =
+  foldMap (aliases . snd . snd) . filter ((== d) . diet . snd . fst) $
+    zip (leaves p_t) (leaves t_als)
 
 -- | Check an expression passed as an argument.  This does not pass it; see
 -- 'passArgs'.
@@ -860,6 +852,14 @@ internalAlias desc reason = do
   modify $ \s -> s {stateNames = M.insert v reason $ stateNames s}
   pure $ AliasFree (v, [])
 
+-- | Signal an error if a component of an argument that a parameter of this type
+-- consumes shares a location with another component of the argument.
+noSelfAliases :: Loc -> ParamType -> TypeAliases -> CheckM ()
+noSelfAliases loc p_t t =
+  when (any (`S.member` sharedLocations t) $ aliasLocs $ aliasesWithDiet Consume p_t t) $
+    addError loc mempty . withIndexLink "self-aliasing-arg" $
+      "Argument passed for consuming parameter is self-aliased."
+
 -- | Pass checked arguments, each with the type of its parameter, to a function
 -- with the given aliases.  The call uses the function and every argument, and
 -- then consumes what the parameters consume.  See Note [Locations].
@@ -868,8 +868,8 @@ passArgs loc f_als args = do
   checkIfConsumed loc $ f_als <> foldMap (aliases . snd . snd) args
   forM_ (zip [0 :: Int ..] args) $ \(i, (p_t, (e, e_als))) ->
     when (diet p_t == Consume) $ do
-      noSelfAliases (locOf e) e_als
-      let cons_als = consumedAliasesOf p_t e_als
+      noSelfAliases (locOf e) p_t e_als
+      let cons_als = aliasesWithDiet Consume p_t e_als
           others = map (snd . snd) . filter ((/= i) . fst) $ zip [0 ..] args
       when (cons_als `overlaps` f_als) . addError (locOf e) mempty $
         "Argument is consumed, but aliases the function being applied."
@@ -952,13 +952,6 @@ applyArg :: TypeAliases -> TypeAliases -> TypeAliases
 applyArg (Scalar (Arrow closure_als _ d _ (RetType _ rettype))) arg_als =
   returnType closure_als rettype d arg_als
 applyArg _ arg_als = arg_als
-
--- | The aliases of the components of a value passed for a parameter of this
--- type that the parameter observes.
-observedAliasesOf :: ParamType -> TypeAliases -> Aliases
-observedAliasesOf p_t t_als =
-  foldMap (aliases . snd . snd) . filter ((== Observe) . diet . snd . fst) $
-    zip (leaves p_t) (leaves t_als)
 
 applyLoopArg :: Aliases -> ParamType -> TypeAliases -> ResType -> TypeAliases
 applyLoopArg appres (Scalar (Record pfs)) (Scalar (Record afs)) (Scalar (Record rfs)) =
@@ -1116,8 +1109,8 @@ checkLoop loop_loc (param, arg, form, body) = do
   let loop_als =
         applyLoopArg
           ( S.insert loop_al $
-              observedAliasesOf param_t arg_als
-                <> observedAliasesOf param_t body_als
+              aliasesWithDiet Observe param_t arg_als
+                <> aliasesWithDiet Observe param_t body_als
           )
           param_t
           arg_als
@@ -1218,16 +1211,19 @@ freshenOccurrences x = onStruct
         Scalar $ Arrow u pn d (onStruct sa ta) $ RetType ext (onRes sr tr)
     onRes _ tr = tr
 
-checkFuncall ::
-  (Foldable f) =>
-  SrcLoc ->
-  Maybe (QualName VName) ->
-  TypeAliases ->
-  f TypeAliases ->
-  CheckM TypeAliases
-checkFuncall loc fname f_als arg_als = do
+-- | Apply a function with the given aliases to checked arguments, returning the
+-- aliases of the result.
+checkApply :: SrcLoc -> Maybe (QualName VName) -> TypeAliases -> [(Exp, TypeAliases)] -> CheckM TypeAliases
+checkApply loc fname f_als args = do
+  passArgs (locOf loc) (aliases f_als) $ zipWith withParam (diets f_als) args
   app_al <- internalAlias "internal_app_result" $ NameAppRes fname loc
-  pure $ foldl applyArg (second (S.insert app_al) f_als) arg_als
+  pure $ foldl applyArg (second (S.insert app_al) f_als) $ map snd args
+  where
+    withParam d (e, e_als) = (toParam d (typeOf e), (e, e_als))
+
+    diets :: TypeBase dim o -> [Diet]
+    diets (Scalar (Arrow _ _ d _ (RetType _ rt))) = d : diets rt
+    diets _ = repeat Observe
 
 -- | Join the results of the branches of a branching expression (described by
 -- the string), given everything consumed by any of them.  An alias survives if it and everything it aliases
@@ -1281,20 +1277,12 @@ checkExp (AppExp (Apply f args loc) appres) = do
   -- then the function.
   args' <- NE.reverse <$> traverse (traverse checkArg) (NE.reverse args)
   (f', f_als) <- checkExp f_fresh
-  passArgs (locOf loc) (aliases f_als) $
-    zipWith withParam (diets $ toRes Nonfresh f_als) (map snd $ NE.toList args')
-  res_als <- checkFuncall loc (fname f) f_als $ fmap (snd . snd) args'
+  res_als <- checkApply loc (fname f) f_als $ map snd $ NE.toList args'
   pure (AppExp (Apply f' (fmap (second fst) args') loc) appres, res_als)
   where
     fname (Var v _ _) = Just v
     fname (AppExp (Apply e _ _) _) = fname e
     fname _ = Nothing
-
-    withParam d (e, e_als) = (second (const d) (typeOf e), (e, e_als))
-
-    diets (Scalar (Arrow _ _ d _ (RetType _ rt))) =
-      d : diets rt
-    diets _ = repeat Observe
 
 --
 checkExp (AppExp (Loop sparams pat loopinit form body loc) appres) = do
@@ -1364,11 +1352,9 @@ checkExp (AppExp (LetFun fname (typarams, params, retdecl, Info (RetType ext ret
 checkExp (AppExp (BinOp (op, oploc) (Info op_t) (x, xp) (y, yp) loc) appres) = do
   op_t' <- parametricFreshness op op_t [typeOf x, typeOf y]
   op_als <- observeVar (locOf oploc) op op_t'
-  let (_, at1) : (_, at2) : _ = fst $ unfoldFunType op_als
   (x', x_als) <- checkArg x
   (y', y_als) <- checkArg y
-  passArgs (locOf loc) (aliases op_als) [(at1, (x', x_als)), (at2, (y', y_als))]
-  res_als <- checkFuncall loc (Just op) op_als [x_als, y_als]
+  res_als <- checkApply loc (Just op) op_als [(x', x_als), (y', y_als)]
   pure
     ( AppExp (BinOp (op, oploc) (Info op_t') (x', xp) (y', yp) loc) appres,
       res_als
@@ -1810,9 +1796,11 @@ checkValDef globals (fname, tparams, params, body, RetType ext ret, retdecl, loc
 -- indexing, operator sections, and function application (which evaluates its
 -- arguments from right to left, and then the function). So the value of an
 -- operand must not alias anything that a later operand consumes. A function
--- application then consumes what its parameters consume. A consumed argument
--- must have separate components ('noSelfAliases'), and must not overlap the
--- function being applied or any other argument ('passArgs').
+-- application then consumes what its parameters consume. A consumed component
+-- of an argument must not share a location with any other component of that
+-- argument ('noSelfAliases'), and must not overlap the function being applied
+-- or any other argument ('passArgs').  The diet of a function parameter is the
+-- same for all of its components, but that of a loop parameter is not.
 --
 -- A loop is checked as a recursive call whose arguments are what its body
 -- returns ('checkLoopResult').  The value returned for a consumed loop
