@@ -2003,7 +2003,7 @@ checkFunDef (fname, retdecl, tparams, params, body, loc) =
             localChecks tparams' body'''
             recursionCheck tparams' fname params''' rettype'' loc body'''
 
-            globals <- declaredTypes
+            globals <- typeSchemes
             let ((body'''', updated_ret), errors) =
                   Consumption.checkValDef
                     globals

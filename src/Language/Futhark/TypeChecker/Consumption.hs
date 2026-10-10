@@ -17,6 +17,9 @@
 --
 -- As an example of the compromise, @x |> copy@ works and produces a fresh
 -- result, whilst @id >-> copy@ loses freshness information.
+--
+-- Further, we only infer freshness for fully saturated higher-order functions,
+-- so refactoring to take advantage of partial application may not work.
 module Language.Futhark.TypeChecker.Consumption
   ( checkValDef,
 
@@ -47,7 +50,7 @@ import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
 import Language.Futhark.Traversals
-import Language.Futhark.TypeChecker.Monad (Notes, TypeError (..), withIndexLink)
+import Language.Futhark.TypeChecker.Monad (BoundV (..), Notes, TypeError (..), withIndexLink)
 import Prelude hiding (mod)
 
 -- | A position within a compound type. A path step is a record field name, or a
@@ -181,15 +184,15 @@ aliasLeaf _ t = t
 insertSelfAliases :: VName -> TypeAliases -> TypeAliases
 insertSelfAliases v = mapLeaves $ aliasLeaf . AliasBound . (v,)
 
--- | The aliases of a use of the global @v@, given its declared type and type
--- parameters and the type it is used at. A use of a global name aliases that
--- name, except where parametricity rules it out. In particular, a non-function
--- component whose declared type contains one of the type parameters cannot be
--- (part of) a global, and a function can only yield a value aliasing a global
--- if some nonfresh component of its result is not of that kind. See Note
--- [Parametric results].
-globalAliases :: VName -> [TypeParam] -> StructType -> StructType -> TypeAliases
-globalAliases v tparams decl = mapLeaves onLeaf . second (const mempty)
+-- | The aliases of a use of the global @v@, given its type scheme and the type
+-- it is used at. A use of a global name aliases that name, except where
+-- parametricity rules it out. In particular, a non-function component whose
+-- declared type contains one of the type parameters cannot be (part of) a
+-- global, and a function can only yield a value aliasing a global if some
+-- nonfresh component of its result is not of that kind. See Note [Parametric
+-- results].
+globalAliases :: VName -> BoundV -> StructType -> TypeAliases
+globalAliases v (BoundV tparams decl) = mapLeaves onLeaf . second (const mempty)
   where
     tparams' = S.fromList [p | TypeParamType _ p _ <- tparams]
 
@@ -242,7 +245,7 @@ data CheckEnv = CheckEnv
     -- | The declared type of a global, along with the type parameters it is
     -- polymorphic in.  This is what lets us exploit parametricity; see Note
     -- [Parametric results].
-    envGlobal :: QualName VName -> Maybe ([TypeParam], StructType)
+    envGlobal :: QualName VName -> Maybe BoundV
   }
 
 -- | A description of where an artificial compiler-generated
@@ -299,7 +302,7 @@ newtype CheckM a = CheckM (ReaderT CheckEnv (State CheckState) a)
     )
 
 runCheckM ::
-  (QualName VName -> Maybe ([TypeParam], StructType)) ->
+  (QualName VName -> Maybe BoundV) ->
   Loc ->
   CheckM a ->
   (a, [TypeError])
@@ -577,8 +580,8 @@ observeVar loc qv t = do
     isGlobal env
       | isIntrinsic v = second (const mempty) t
       | otherwise =
-          let (tparams, decl) = fromMaybe ([], t) $ envGlobal env qv
-           in notedAliases tparams decl $ globalAliases v tparams decl t
+          let BoundV tparams decl = fromMaybe (BoundV [] t) $ envGlobal env qv
+           in notedAliases tparams decl $ globalAliases v (BoundV tparams decl) t
 
 -- | Instantiate the aliases of a local binding at the type of an occurrence,
 -- just as the type of a global is instantiated. The binding's type is that of
@@ -1160,7 +1163,7 @@ parametricFreshness ::
 parametricFreshness qn ftype argtypes = do
   globals <- asks envGlobal
   pure $ fromMaybe ftype $ do
-    (tparams, decl) <- globals qn
+    BoundV tparams decl <- globals qn
     (param_ts, res) <- funParts decl
     guard $ length argtypes == length param_ts
     i <- resultFromParam tparams param_ts res
@@ -1569,9 +1572,9 @@ checkExp e@Hole {} = noAliases e
 -- | Type-check a value definition.  This also infers a new return
 -- type that may be fresher than previously.
 checkValDef ::
-  -- | The declared type of any global, along with the type parameters it is
+  -- | The type scheme of any global, along with the type parameters it is
   -- polymorphic in.  See Note [Parametric results].
-  (QualName VName -> Maybe ([TypeParam], StructType)) ->
+  (QualName VName -> Maybe BoundV) ->
   (VName, [TypeParam], [Pat ParamType], Exp, ResRetType, Maybe (TypeExp Exp VName), SrcLoc) ->
   ((Exp, ResRetType), [TypeError])
 checkValDef globals (fname, tparams, params, body, RetType ext ret, retdecl, loc) = runCheckM globals' (locOf loc) $ do
@@ -1604,7 +1607,7 @@ checkValDef globals (fname, tparams, params, body, RetType ext ret, retdecl, loc
     -- Recursion is monomorphic, so a recursive call is at the type parameters
     -- of the definition itself.
     globals' qn
-      | qualLeaf qn == fname = Just (tparams, funType params (RetType ext ret))
+      | qualLeaf qn == fname = Just $ BoundV tparams $ funType params (RetType ext ret)
       | otherwise = globals qn
 {-# NOINLINE checkValDef #-}
 
