@@ -461,11 +461,6 @@ matchPat PatLit {} _ = mempty
 matchPat (PatAttr _ p _) t = matchPat p t
 matchPat _ t = error $ "matchPat: pattern does not match " <> prettyString t
 
--- | Check the size expressions in a type.  A size expression may be evaluated
--- before the expression or binding it appears in, so it may consume nothing.
-checkSizes :: (Bifoldable t) => t Exp a -> CheckM ()
-checkSizes = noConsumable . bitraverse_ checkExp pure
-
 bindingPat ::
   Pat StructType ->
   TypeAliases ->
@@ -485,6 +480,11 @@ bindingPat p t m = do
 
 bindingParam :: Pat ParamType -> CheckM (a, TypeAliases) -> CheckM (a, TypeAliases)
 bindingParam = bindingParamAliasing mempty
+
+-- | Check the size expressions in a type.  A size expression may be evaluated
+-- before the expression or binding it appears in, so it may consume nothing.
+checkSizes :: (Bifoldable t) => t Exp a -> CheckM ()
+checkSizes = noConsumable . bitraverse_ checkExp pure
 
 -- | Like 'bindingParam', but every component of the parameter also aliases the
 -- given aliases.
