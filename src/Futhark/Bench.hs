@@ -36,7 +36,7 @@ import Data.Vector.Unboxed qualified as U
 import Futhark.Profile
 import Futhark.Server
 import Futhark.Test
-import Futhark.Util (showText)
+import Futhark.Util (nubOrd, showText)
 import Statistics.Autocorrelation (autocorrelation)
 import Statistics.Sample (fastStdDev, mean)
 import System.Exit
@@ -352,11 +352,12 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
   cmdMaybe . liftIO $ cmdPauseProfiling server
 
   let freeOut = cmdMaybe (cmdFree server [out])
-      freeIns = cmdMaybe (cmdFree server ins)
-      loadInput = valuesAsVars server (zip ins $ map inputType input_types) futhark dir input_spec
-      reloadInput = freeIns >> loadInput
+      loadInput = valuesAsVars server entry (zip ins $ map inputType input_types) futhark program input_spec
 
-  loadInput
+  ins' <- loadInput
+
+  let freeIns = cmdMaybe (cmdFree server (nubOrd ins'))
+      reloadInput = freeIns >> void loadInput
 
   let runtime l
         | Just l' <- T.stripPrefix "runtime: " l,
@@ -369,7 +370,7 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
         when (any inputConsumed input_types) reloadInput
 
       doRun = do
-        call_lines <- cmdEither (cmdCall server entry out ins)
+        call_lines <- cmdEither (cmdCall server entry out ins')
         case mapMaybe runtime call_lines of
           [call_runtime] -> pure (RunResult call_runtime, call_lines)
           [] -> throwError "Could not find runtime in output."
@@ -377,7 +378,7 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
 
   maybe_call_logs <- liftIO . timeout (runTimeout opts * 1000000) . runExceptT $ do
     -- First one uncounted warmup run.
-    void $ cmdEither $ cmdCall server entry out ins
+    void $ cmdEither $ cmdCall server entry out ins'
 
     ys <- runMinimum (freeOut *> doRun <* maybeReload) opts 0 0 mempty
 

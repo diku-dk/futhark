@@ -300,8 +300,8 @@ data CParts = CParts
     cCLI :: T.Text,
     cServer :: T.Text,
     cLib :: T.Text,
-    -- | The manifest, in JSON format.
-    cJsonManifest :: T.Text
+    -- | The manifest describing the C API.
+    cManifest :: Manifest.Manifest
   }
 
 gnuSource :: T.Text
@@ -347,7 +347,7 @@ asLibrary :: CParts -> (T.Text, T.Text, T.Text)
 asLibrary parts =
   ( "#pragma once\n\n" <> cHeader parts,
     gnuSource <> disableWarnings <> cHeader parts <> cUtils parts <> cLib parts,
-    cJsonManifest parts
+    Manifest.manifestToJSON $ cManifest parts
   )
 
 -- | As executable with command-line interface.
@@ -493,7 +493,7 @@ $entry_point_decls
           cCLI = clidefs,
           cServer = serverdefs,
           cLib = libdefs,
-          cJsonManifest = Manifest.manifestToJSON manifest
+          cManifest = manifest
         },
       endstate
     )

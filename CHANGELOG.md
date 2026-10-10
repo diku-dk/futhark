@@ -22,9 +22,24 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Support for ISPC 1.31 (and that is now also the minimum version). (#2557)
 
+* `futhark repl` and `futhark eval` can now run code available via a compiled
+  server executable.
+
+* `futhark test`: `auto output` now works with `script input`.
+
 ### Removed
 
+* The `futhark script` command has been removed.
+
 ### Changed
+
+* FutharkScript has been replaced by ordinary Futhark. The magical builtins have
+  been replaced by magical functions, e.g., `$loadbytes` is now `io.loadbytes`.
+  Obviously only works in interpreted code. Futhark is not an exact
+  functionality match for FutharkScript, but most things should be able to work.
+
+* `futhark literate` no longer implicitly marks functions used in directives as
+  entry points. Use ``entry`` when you actually want compiled entry points.
 
 ### Fixed
 
@@ -57,6 +72,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Horizontal fusion of multi-dimensional histograms. (#2555)
 
 * Internalisation of reduce_by_index_3d with array-valued elements. (#2554)
+
+* A compiler crash caused by size-polymorphic recursive functions. (#2569)
+
+* Overzealous copy removal in conjunction with AD could result in a compiler
+  crash. (#2567)
+
+* Short-circuiting of function parameters failed to take layout into account.
+  (#2568)
 
 ## [0.27.1]
 
@@ -544,6 +567,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   abbreviations and arrays (#2253).
 
 * Reverse mode AD now handles sequential streams. (#2256)
+
+* Invalid simplification in conjunction with array updates, which could crash
+  the compiler. (#2566)
+
+* Invalid short-circuiting could result in compiler crashes and memory errors.
+  (#2565)
+
+* Invalid copy removal could crash the compiler. (#2564)
 
 ## [0.25.29]
 

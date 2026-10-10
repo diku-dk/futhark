@@ -297,6 +297,18 @@ will not result in a double free.
    retrieve the entire array with the ``values`` function,
    particularly when using a GPU backend.
 
+.. c:function:: int futhark_set_i32_1d(struct futhark_context *ctx, struct futhark_i32_1d *arr, int32_t v, int64_t i0);
+
+   Update a single element in the array. Returns a nonzero value if the index is
+   out of bounds or data movement fails for other reasons. **Note:** if you want
+   to write many elements, it is much faster to retrieve the entire array with
+   the ``values`` function, update it using normal code, then construct a new
+   array.
+
+   **Warning:** this operation mutates the underlying memory, which means it
+   will also affect other arrays aliasing it, possibly including asynchronously
+   running code.
+
 .. c:function:: const int64_t *futhark_shape_i32_1d(struct futhark_context *ctx, struct futhark_i32_1d *arr)
 
    Return a pointer to the shape of the array, with one element per
@@ -401,11 +413,11 @@ cut down on boilerplate. Important things to be aware of:
    be manually freed, independently of the records from which they are
    projected, or the fields they are constructed from.
 
-2. The objects are however in an *aliasing* relationship with the
-   fields or original record.  This means you must be careful when
-   passing them to entry points that consume their arguments.  As
-   always, you don't have to worry about this if you never write entry
-   points that consume their arguments.
+2. The objects are however in an *aliasing* relationship with the fields or
+   original record. This means you must be careful when passing them to entry
+   points that consume their arguments. As always, you don't have to worry about
+   this if you never write entry points that consume their arguments, or use the
+   ``set`` functions on arrays.
 
 3. You must synchronise before using any scalar results.
 
@@ -511,7 +523,12 @@ generated (assuming the generated C type is ``arr1d_t``):
 .. c:function:: int futhark_set_opaque_arr1d_t(struct futhark_context *ctx, struct futhark_opaque_arr1d_t *arr, struct futhark_opaque_t *elem, int64_t i0);
 
    Copy the provided element into the given index in the array. Returns a
-   nonzero value if the index is out of bounds.
+   nonzero value if the index is out of bounds or the element has the wrong
+   shape.
+
+   **Warning:** this operation mutates the underlying memory, which means it
+   will also affect other arrays aliasing it, possibly including asynchronously
+   running code.
 
 .. c:function:: const int64_t *futhark_shape_opaque_arr1d_t(struct futhark_context *ctx, struct futhark_opaque_arr1d_t *arr);
 

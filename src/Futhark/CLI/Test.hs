@@ -26,7 +26,7 @@ import Data.Word (Word64)
 import Futhark.Analysis.Metrics.Type
 import Futhark.Server
 import Futhark.Test
-import Futhark.Util (atMostChars, fancyTerminal, randomSeed, showText)
+import Futhark.Util (atMostChars, fancyTerminal, nubOrd, randomSeed, showText)
 import Futhark.Util.Options
 import Futhark.Util.Pretty (annotate, bgColor, bold, hardline, pretty, putDoc, vsep)
 import Futhark.Util.Table
@@ -399,8 +399,6 @@ runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
           onRes = either (Failure . pure) (const Success)
       mapM (fmap onRes . runCompiledCase input_types' (out, out_t) ins) run_cases
   where
-    dir = takeDirectory program
-
     runCompiledCase input_types (out, out_t) ins run = runExceptT $ do
       let TestRun _ input_spec _ index _ = run
           case_ctx =
@@ -412,10 +410,10 @@ runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
       context1 case_ctx $ do
         expected <- getExpectedResult futhark program entry run
 
-        valuesAsVars server (zip ins (map inputType input_types)) futhark dir input_spec
+        ins' <- valuesAsVars server entry (zip ins (map inputType input_types)) futhark program input_spec
 
-        call_r <- liftIO $ cmdCall server entry out ins
-        liftCommand $ cmdFree server ins
+        call_r <- liftIO $ cmdCall server entry out ins'
+        liftCommand $ cmdFree server $ nubOrd ins'
 
         let res = case call_r of
               Left (CmdFailure _ err) ->

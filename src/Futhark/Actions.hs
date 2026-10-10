@@ -582,7 +582,7 @@ compileCtoWASMAction fcfg mode outpath =
         _ -> do
           -- Non-server executables are not supported.
           writeLibs cprog jsprog
-          liftIO $ T.appendFile classpath SequentialWASM.runServer
+          liftIO $ T.appendFile classpath $ SequentialWASM.runServer $ SequentialWASM.cManifest cprog
           runEMCC cpath outpath classpath ["-O3", "-msimd128"] ["-lm"] exps False
     writeLibs cprog jsprog = do
       let (h, imp, _) = SequentialC.asLibrary cprog
@@ -616,7 +616,7 @@ compileMulticoreToWASMAction fcfg mode outpath =
         _ -> do
           -- Non-server executables are not supported.
           writeLibs cprog jsprog
-          liftIO $ T.appendFile classpath MulticoreWASM.runServer
+          liftIO $ T.appendFile classpath $ MulticoreWASM.runServer $ MulticoreWASM.cManifest cprog
           runEMCC cpath outpath classpath ["-O3", "-msimd128"] ["-lm", "-pthread"] exps False
 
     writeLibs cprog jsprog = do

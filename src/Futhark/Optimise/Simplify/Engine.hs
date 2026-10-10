@@ -1142,15 +1142,15 @@ simplifyFun (FunDef entry attrs fname rettype params body) = do
     aliasable_rets =
       map snd $ filter (aliasable . extTypeOf . fst . fst) $ zip rettype [0 ..]
     restricted als = any (`notElem` als)
-    -- A result is marked consumed when simplification must not
-    -- introduce aliasing at that position.  For arrays the 'RetAls'
-    -- decide this on their own: a fresh result has empty alias sets,
-    -- which is the maximally restricted case, so it needs no separate
-    -- test.  An accumulator is different - it carries no aliasing
-    -- information at all, being linear rather than aliased - and every
-    -- use of one consumes it.
+    -- A non-Prim result is marked consumed when simplification must not
+    -- introduce aliasing at that position. For arrays the 'RetAls' decide this
+    -- on their own: a fresh result has empty alias sets, which is the maximally
+    -- restricted case, so it needs no separate test. An accumulator is
+    -- different - it carries no aliasing information at all, being linear
+    -- rather than aliased - and every use of one consumes it.
     usageFromRet (t, RetAls pals rals)
       | isAcc $ extTypeOf t = UT.consumedU
+      | primType $ extTypeOf t = mempty
       | restricted pals aliasable_params
           || restricted rals aliasable_rets =
           UT.consumedU

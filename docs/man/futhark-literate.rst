@@ -31,8 +31,12 @@ programming techniques.
 
 **Warning:** Do not run untrusted programs.  See SAFETY below.
 
-Image directives and builtin functions shell out to ``convert`` (from
-ImageMagick).  Video and audio generation uses ``ffmpeg``.
+Top level functions declared as ``entry`` will run as compiled code, functions
+declared with ``def`` will run in the interpreter. Make sure any significant
+computation happens inside ``entry`` functions.
+
+Image directives and IO functions shell out to ``convert`` (from ImageMagick).
+Video and audio directives and functions use ``ffmpeg``.
 
 For an input file ``foo.fut``, all generated files will be in a
 directory named ``foo-img``.  A ``file`` parameter passed to a
@@ -96,10 +100,10 @@ Any directives that produce images for a program ``foo.fut`` will
 place them in the directory ``foo-img/``.  If this directory already
 exists, it will be deleted.
 
-A directive is a line starting with ``-- >``, which must follow an
-empty line.  Arguments to the directive follow on the remainder of the
-line.  Any expression arguments are given in a very restricted subset
-of Futhark called *FutharkScript* (see below).
+A directive is a line starting with ``-- >``, which must follow an empty line.
+Arguments to the directive follow on the remainder of the line. Any expression
+arguments are evaluated using the Futhark interpreter. Entry points are run as
+compiled code, while everything else is interpreted.
 
 Some directives take mandatory or optional parameters.  These are
 entered after a semicolon *and a linebreak*.
@@ -108,8 +112,7 @@ The following directives are supported:
 
 * ``> e``
 
-  Shows the result of executing the FutharkScript expression ``e``,
-  which can have any (transparent) type.
+  Shows the result of executing the Futhark expression ``e``.
 
 * ``> :video e[; parameters...]``
 
@@ -178,8 +181,7 @@ The following directives are supported:
   The two arrays must have the same length and are interpreted as
   ``x`` and ``y`` values, respectively.
 
-  The expression may also be a record expression (*not* merely the
-  name of a Futhark variable of record type), where each field will be
+  The expression may also be a record expression, where each field will be
   plotted separately and must have the type mentioned above.
 
 * ``> :gnuplot e; script...``
@@ -235,77 +237,22 @@ The following directives are supported:
   amerge filter from ffmpeg, so consult the documentation there for additional
   information.
 
-FUTHARKSCRIPT
-=============
-
-Only an extremely limited subset of Futhark is supported:
-
-.. productionlist::
-   script_exp:   `script_fun` `script_exp`*
-             : | "let" `script_pat` "=" `script_exp` "in" `script_exp`
-             : | `script_atom` ( "." `fieldid` )*
-             : | `id` "[" `script_exp` ( "," `script_exp`)* "]"
-   script_atom: `script_fun`
-              : | "(" `script_exp` ")"
-              : | "(" `script_exp` ( "," `script_exp` )+ ")"
-              : | "[" `script_exp` ( "," `script_exp` )+ "]"
-              : | "empty" "(" ("[" `decimal` "]" )+ `script_type` ")"
-              : | "{" "}"
-              : | "{" (`id` = `script_exp`) ("," `id` = `script_exp`)* "}"
-   script_pat:  `id` | "(" `id` ("," `id`)* ")"
-   script_fun:  `id` | "$" `id`
-   script_type: `int_type` | `float_type` | "bool"
-
-Note that empty arrays must be written using the ``empty(t)``
-notation, e.g. ``empty([0]i32)``.
-
-Function applications are either of Futhark functions or *builtin
-functions*.  The latter are prefixed with ``$`` and are magical
-(usually impure) functions that could not possibly be implemented in
-Futhark.  The following builtins are supported:
-
-* ``$loadimg "file"`` reads an image from the given file and returns
-  it as a row-major ``[][]u32`` array with each pixel encoded as ARGB.
-
-* ``$loaddata "file"`` reads a dataset from the given file. When the file
-  contains a singular value, it is returned as value. Otherwise, a tuple
-  of values is returned, which should be destructured before use. For example:
-  ``let (a, b) = $loaddata "foo.in" in bar a b``.
-
-* ``$loadbytes "file"`` reads the contents of the given file as an
-  array of type ``[]u8``.
-
-* ``$loadaudio "file"`` reads audio from the given file and returns it as a
-  ``[][]f64``, where each row corresponds to a channel of the original
-  soundfile. Most common audio-formats are supported, including mp3, ogg, wav,
-  flac and opus.
-
-* ``$restore "type" "file"`` loads a serialised value of type ``type`` from
-  ``file``. The usual caveats apply regarding the stability of the value
-  serialisation format.
-
-FutharkScript supports a form of automatic uncurrying. If a function
-taking *n* parameters is applied to a single argument that is an
-*n*-element tuple, the function is applied to the elements of the
-tuple as individual arguments.
-
 SAFETY
 ======
 
-Some directives (e.g. ``:gnuplot``) can run arbitrary shell commands.
-Other directives or builtin functions can read or write arbitrary
-files.  Running an untrusted literate Futhark program is as dangerous
-as running a shell script you downloaded off the Internet.  Before
-running a program from an unknown source, you should always give it a
-quick read to see if anything looks fishy.
+Some directives (e.g. ``:gnuplot``) can run arbitrary shell commands. Other
+directives or IO functions can read arbitrary files. Running an untrusted
+literate Futhark program is as dangerous as running a shell script you
+downloaded off the Internet. Before running a program from an unknown source,
+you should always give it a quick read to see if anything looks fishy.
 
 BUGS
 ====
 
-FutharkScript expressions can only refer to names defined in the file
-passed to ``futhark literate``, not any names in imported files.
+The caching machinery does not notice when an external file referenced by an IO
+function changes.
 
 SEE ALSO
 ========
 
-:ref:`futhark-script(1)`, :ref:`futhark-test(1)`, :ref:`futhark-bench(1)`
+:ref:`futhark-test(1)`, :ref:`futhark-bench(1)`

@@ -21,6 +21,7 @@ import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Sequence (Seq (..))
 import Data.Set qualified as S
+import Futhark.Analysis.AlgSimplify qualified as AlgSimplify
 import Futhark.Analysis.LastUse
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Aliases
@@ -623,23 +624,28 @@ fixPointCoalesce lutab fpar bdy topenv = do
   let succ_tab = successCoals buenv
       actv_tab = activeCoals buenv
       inhb_tab = inhibit buenv
-      -- Allow short-circuiting function parameters that are consuming and have
-      -- matching index functions, otherwise mark as failed
-      handleFunctionParams (a, i, s) (_, o, MemBlock _ _ m ixf) =
+      -- See Note [Short-circuiting function parameters].
+      handleFunctionParams (a, i, s, claimed) (p, o, MemBlock pt _ m ixf) =
         case (o, M.lookup m a) of
           (Consume, Just entry)
-            | dstind entry == ixf,
+            | Just (Coalesced _ (MemBlock _ _ _ p_ixf) _) <- M.lookup p $ vartab entry,
+              p_ixf == ixf,
               Set dst_uses <- dstrefs (memrefs entry),
-              dst_uses == mempty ->
+              dst_uses == mempty,
+              LMAD.isDirect ixf,
+              Just size <- M.lookup (dstmem entry) top_allocs,
+              sameSize (scalarTable topenv) (pe64 size) $
+                primByteSize pt * product (LMAD.shape ixf),
+              dstmem entry `notNameIn` claimed ->
                 let (a', s') = markSuccessCoal (a, s) m entry
-                 in (a', i, s')
+                 in (a', i, s', oneName (dstmem entry) <> claimed)
           _ ->
             let (a', i') = markFailedCoal (a, i) m
-             in (a', i', s)
-      (actv_tab', inhb_tab', succ_tab') =
+             in (a', i', s, claimed)
+      (actv_tab', inhb_tab', succ_tab', _) =
         foldl
           handleFunctionParams
-          (actv_tab, inhb_tab, succ_tab)
+          (actv_tab, inhb_tab, succ_tab, mempty)
           $ getArrMemAssocFParam fpar
 
       (succ_tab'', failed_optdeps) = fixPointFilterDeps succ_tab' M.empty
@@ -651,6 +657,10 @@ fixPointCoalesce lutab fpar bdy topenv = do
         then pure succ_tab''
         else fixPointCoalesce lutab fpar bdy (topenv {inhibited = inhb_tab''})
   where
+    top_allocs = M.fromList $ mapMaybe isAlloc $ stmsToList $ bodyStms bdy
+    isAlloc (Let (Pat [pe]) _ (Op (Alloc size _))) = Just (patElemName pe, size)
+    isAlloc _ = Nothing
+
     fixPointFilterDeps :: CoalsTab -> InhibitTab -> (CoalsTab, InhibitTab)
     fixPointFilterDeps coaltab inhbtab =
       let (coaltab', inhbtab') = foldl filterDeps (coaltab, inhbtab) (M.keys coaltab)
@@ -674,6 +684,13 @@ fixPointCoalesce lutab fpar bdy topenv = do
     failedOptDep coal r mr
       | Just coal_etry <- M.lookup mr coal = not $ r `M.member` vartab coal_etry
     failedOptDep _ _ _ = error "In ArrayCoalescing.hs, fun failedOptDep, impossible case reached!"
+
+-- | Are these two sizes certainly equal, after expanding the scalars in the
+-- table?
+sameSize :: ScalarTab -> TPrimExp Int64 VName -> TPrimExp Int64 VName -> Bool
+sameSize scals x y =
+  null . AlgSimplify.simplify0 . fixPoint (substituteInPrimExp scals) . untyped $
+    x - y
 
 -- | Perform short-circuiting on 'Stms'.
 mkCoalsTabStms ::
@@ -1834,6 +1851,43 @@ computeScalarTableMCMem scope_table (MC.ParOp par_op segop) =
 
 filterMapM1 :: (Eq k, Monad m) => (v -> m Bool) -> M.Map k v -> m (M.Map k v)
 filterMapM1 f m = fmap M.fromAscList $ filterM (f . snd) $ M.toAscList m
+
+-- Note [Short-circuiting function parameters]
+--
+-- A consumed function parameter can be short-circuited, but not in the usual
+-- way. Normally the source array is moved into the destination block and the
+-- allocation of the source block is removed. The memory of a parameter is not
+-- allocated by the function, but given to it by the caller, so the parameter
+-- cannot be moved. Instead 'replaceInParams' renames the parameter's memory to
+-- the destination block and removes the allocation of the destination, so it
+-- is the destination that moves into the memory of the parameter. This is how
+-- an in-place 'map' over a consumed parameter is obtained.
+--
+-- This is only valid under four conditions, which 'fixPointCoalesce' checks:
+--
+-- 1. The destination block is allocated at the top level of the function, as
+--    otherwise there is no allocation to remove. In particular, the
+--    destination cannot be the memory of another parameter.
+--
+-- 2. Everything stored in the destination block fits in the memory of the
+--    parameter. All we know about the latter is that it holds the parameter
+--    array, so we require that the parameter is stored directly, and that the
+--    size of the allocation equals the size of the array. This is a symbolic
+--    comparison, and so it may fail for sizes that are in fact equal.
+--
+-- 3. No other parameter is short-circuited into the same destination, as two
+--    parameters cannot be renamed to the same memory.
+--
+-- 4. The layout of the parameter in the destination block, as recorded in
+--    'vartab', is the layout it already has, as renaming the memory does not
+--    move any elements. It is not enough that the layout of the destination,
+--    'dstind', matches, because the parameter may reach the destination
+--    through a change of layout: in @copy (rearrange xs)@, the parameter @xs@
+--    would have to be stored transposed.
+--
+-- Note that it is the final destination that matters: if the destination is
+-- itself short-circuited into a larger block, then it is that block which must
+-- satisfy the conditions.
 
 -- Note [Short-circuiting across memory spaces]
 --

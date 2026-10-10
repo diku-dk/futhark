@@ -231,14 +231,15 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
           SubExpResult mempty <$> mkBranch xs_and_starts
     Just (ArrayLit ses _, cs)
       | DimFix (Constant (IntValue (Int64Value i))) : inds' <- inds,
-        Just se <- maybeNth i ses ->
+        Just se <- maybeNth i ses,
+        forwardable se ->
           case inds' of
             [] -> Just $ pure $ SubExpResult cs se
             _ | Var v2 <- se -> Just $ pure $ IndexResult cs v2 $ Slice inds'
             _ -> Nothing
     Just (Update Unsafe _ (Slice update_inds) se, cs)
       | inds == update_inds,
-        ST.subExpAvailable se vtable ->
+        forwardable se ->
           Just $ pure $ SubExpResult cs se
     -- Indexing single-element arrays.  We know the index must be 0.
     _
@@ -253,6 +254,15 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
     defOf v = do
       (BasicOp op, def_cs) <- ST.lookupExp v vtable
       pure (op, def_cs)
+
+    -- Whether the result may be replaced by 'se' (or a slice of it),
+    -- which makes the result alias 'se'. This is only valid if 'se'
+    -- has not been consumed already, is not consumed later, and the
+    -- result itself is not consumed.
+    forwardable (Constant _) = True
+    forwardable (Var v) =
+      not consuming && not (consumed v) && ST.available v vtable
+
     worthInlining e
       | primExpSizeAtLeast 20 e = False -- totally ad-hoc.
       | otherwise = worthInlining' e

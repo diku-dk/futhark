@@ -144,7 +144,7 @@
         system:
         let
           pkgs = import nixpkgs { inherit system; };
-          python = pkgs.python313Packages;
+          python = pkgs.python314Packages;
           haskell = pkgs.haskell.packages.ghc910;
 
           # The Nix 'system' convention is unfortunately the opposite of what we use
@@ -251,7 +251,7 @@
         system:
         let
           pkgs = import nixpkgs { inherit system; };
-          python = pkgs.python313Packages;
+          python = pkgs.python314Packages;
           haskell = pkgs.haskell.packages.ghc910;
         in
         {

@@ -31,28 +31,59 @@ import Control.Applicative
 import Control.Exception (catch)
 import Control.Exception.Base qualified as E
 import Control.Monad
-import Control.Monad.Except (MonadError (..), runExceptT)
+import Control.Monad.Except (ExceptT (..), MonadError (..), liftEither, runExceptT, withExceptT)
+import Control.Monad.Free.Church (F)
 import Control.Monad.IO.Class (MonadIO, liftIO)
+import Data.Bifunctor (first)
 import Data.Binary qualified as Bin
 import Data.ByteString qualified as SBS
 import Data.ByteString.Lazy qualified as BS
 import Data.Char
+import Data.Either (fromRight)
 import Data.Map qualified as M
 import Data.Maybe
-import Data.Set qualified as S
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
 import Data.Text.IO qualified as T
-import Futhark.Script qualified as Script
+import Futhark.Compiler (readProgramFilesExceptKnown)
+import Futhark.Error (prettyCompilerError)
+import Futhark.Eval (externaliseLast, interpretImports, runInterpreterWith)
+import Futhark.FreshNames (VNameSource)
 import Futhark.Server
 import Futhark.Server.Values
+import Futhark.Test.Compile
 import Futhark.Test.Property
 import Futhark.Test.Spec
 import Futhark.Test.Values qualified as V
-import Futhark.Util (ensureCacheDirectory, isEnvVarAtLeast, pmapIO, showText)
-import Futhark.Util.Pretty (prettyText, prettyTextOneLine)
-import Language.Futhark.Core (nameFromText, nameToText)
-import Language.Futhark.Tuple (areTupleFields, tupleFieldNames)
+import Futhark.Util (ensureCacheDirectory, nubOrd, pmapIO, showText)
+import Futhark.Util.Pretty (docText, prettyText, prettyTextOneLine)
+import Language.Futhark
+  ( DecBase (..),
+    EntryParam (..),
+    EntryPoint (..),
+    EntryType (..),
+    Exp,
+    Info (..),
+    Name,
+    ProgBase (..),
+    StructType,
+    UncheckedExp,
+    ValBindBase (..),
+    baseName,
+    isTupleRecord,
+    nameToText,
+    noSizes,
+    typeOf,
+  )
+import Language.Futhark.Core (nameFromText)
+import Language.Futhark.Interpreter qualified as I
+import Language.Futhark.Interpreter.FFI.Push qualified as FFI
+import Language.Futhark.Interpreter.FFI.ServerM qualified as FFI
+import Language.Futhark.Interpreter.Values qualified as IV
+import Language.Futhark.Parser (SyntaxError (..), parseExp)
+import Language.Futhark.Semantic (Env, FileModule (..), Imports)
+import Language.Futhark.Tuple (areTupleFields)
+import Language.Futhark.TypeChecker (checkExp, prettyTypeError)
 import System.Directory
 import System.Exit
 import System.FilePath
@@ -68,12 +99,6 @@ valuesFromByteString :: String -> BS.ByteString -> Either String [V.Value]
 valuesFromByteString srcname =
   maybe (Left $ "Cannot parse values from '" ++ srcname ++ "'") Right . V.readValues
 
--- | The @futhark@ executable we are using.  This is merely a wrapper
--- around the underlying file path, because we will be using a lot of
--- different file paths here, and it is easy to mix them up.
-newtype FutharkExe = FutharkExe FilePath
-  deriving (Eq, Ord, Show)
-
 -- | Get the actual core Futhark values corresponding to a 'Values'
 -- specification.  The first 'FilePath' is the path of the @futhark@
 -- executable, and the second is the directory which file paths are
@@ -88,7 +113,7 @@ getValues futhark dir v = do
   where
     fileName Values {} = "<values>"
     fileName GenValues {} = "<randomly generated>"
-    fileName ScriptValues {} = "<FutharkScript expression>"
+    fileName ScriptValues {} = "<script expression>"
     fileName (InFile f) = f
     fileName (ScriptFile f) = f
 
@@ -117,132 +142,179 @@ getValuesBS futhark dir (GenValues gens) =
   mconcat <$> mapM (getGenBS futhark dir) gens
 getValuesBS _ _ (ScriptValues e) =
   fail $
-    "Cannot get values from FutharkScript expression: "
+    "Cannot get values from script expression: "
       <> T.unpack (prettyTextOneLine e)
 getValuesBS _ _ (ScriptFile f) =
-  fail $ "Cannot get values from FutharkScript file: " <> f
+  fail $ "Cannot get values from script file: " <> f
 
-valueAsVar ::
+-- | Run an interpreter action that produces test input. Calls to entry points
+-- are dispatched to the server, files are read relative to the given directory,
+-- and traces and breakpoints are ignored.
+runScript :: FFI.Server -> FilePath -> F I.ExtOp a -> IO (Either I.InterpreterError a)
+runScript server dir = runInterpreterWith (const $ pure ()) (Just server) (Just dir)
+
+-- | The entry points of the program (the last import).
+programEntryPoints :: Imports -> M.Map Name EntryPoint
+programEntryPoints imports =
+  M.fromList
+    [ (baseName $ valBindName vb, ep)
+    | ValDec vb <- map unLocal $ progDecs $ fileProg $ snd $ last imports,
+      Just (Info ep) <- [valBindEntryPoint vb]
+    ]
+  where
+    unLocal (LocalDec dec _) = unLocal dec
+    unLocal dec = dec
+
+-- | Read, type check and interpret the program, with its entry points run on
+-- the server. Produces what is needed to type check and evaluate script
+-- expressions in the context of the program, as well as the parameter types of
+-- the given entry point.
+scriptContext ::
+  FFI.Server ->
+  FilePath ->
+  Name ->
+  ExceptT T.Text IO (VNameSource, Env, I.Ctx, [StructType])
+scriptContext server prog entry = do
+  (_, imports, src) <-
+    withExceptT (docText . prettyCompilerError) $
+      readProgramFilesExceptKnown [] mempty [prog]
+  (scope, ctx) <-
+    withExceptT docText . interpretImports (runScript server $ takeDirectory prog) $
+      externaliseLast imports
+  ep <-
+    maybe (throwError $ "Unknown entry point: " <> nameToText entry) pure $
+      M.lookup entry $
+        programEntryPoints imports
+  pure (src, scope, ctx, map (entryType . entryParamType) $ entryParams ep)
+
+-- | Split the result of a script expression into the inputs of an entry point
+-- with these parameters: a tuple with an element for each, unless there is only
+-- one.
+splitInputs :: [p] -> (a -> Maybe [a]) -> a -> Maybe [a]
+splitInputs [_] _ x = Just [x]
+splitInputs _ untuple x = untuple x
+
+-- | Type check a script expression, which must provide the inputs of an entry
+-- point with these parameter types.
+checkScriptExp :: VNameSource -> Env -> [StructType] -> UncheckedExp -> Either T.Text Exp
+checkScriptExp src scope param_ts e =
+  case checkExp [] src scope e of
+    (_, Left terr) ->
+      Left $ docText $ prettyTypeError terr
+    (_, Right (_ : _, fexp)) ->
+      Left $ "Ambiguous type of expression: " <> prettyText (typeOf fexp)
+    (_, Right ([], fexp))
+      | (map noSizes <$> splitInputs param_ts isTupleRecord t) == Just (map noSizes param_ts) ->
+          Right fexp
+      | otherwise ->
+          Left . T.unlines $
+            [ "Expected input of types: " <> T.unwords (map (prettyTextOneLine . noSizes) param_ts),
+              "Provided input of type: " <> prettyTextOneLine (noSizes t)
+            ]
+      where
+        t = typeOf fexp
+
+-- | Evaluate a script expression with the interpreter, and make the result
+-- available as server-side variables for the inputs of the given entry point.
+-- If the entry point has more than one parameter, the value must be a tuple
+-- with an element for each. The expression is evaluated in the context of the
+-- program, with its entry points run on the server. Returns the variable of
+-- each input, taken from the given names: one per input, except that inputs
+-- provided with the same server-side value share a variable, named after the
+-- first of them.
+scriptValuesAsVars ::
   (MonadError T.Text m, MonadIO m) =>
   Server ->
-  VarName ->
-  V.Value ->
-  m ()
-valueAsVar server v val =
-  cmdMaybe $ putValue server v val
+  EntryName ->
+  [VarName] ->
+  FilePath ->
+  UncheckedExp ->
+  m [VarName]
+scriptValuesAsVars server entry names prog e = do
+  ffi_server <- liftIO $ FFI.newServer server
+  let entry' = nameFromText entry
+      onServer = fmap (first T.pack) . FFI.runServerM ffi_server
+  r <- liftIO . runExceptT $ do
+    (src, scope, ctx, param_ts) <- scriptContext ffi_server prog entry'
+    fexp <- liftEither $ checkScriptExp src scope param_ts e
+    v <-
+      withExceptT (docText . I.prettyInterpreterError) . ExceptT $
+        runScript ffi_server (takeDirectory prog) (I.interpretExp ctx fexp)
+    -- The type check ensures that the value can be split.
+    ExceptT . onServer . FFI.putArgs entry' . fromMaybe [] $
+      splitInputs param_ts IV.fromTuple v
+  -- Anything not adopted as an input is garbage, now that the interpreter is
+  -- done - and if something failed, that is everything.
+  released <- liftIO . onServer . FFI.release $ zip (fromRight [] r) names
+  liftEither $ r *> released
 
--- Frees the expression on error.
-scriptValueAsVars ::
-  (MonadError T.Text m, MonadIO m) =>
-  Script.ScriptServer ->
-  [(VarName, TypeName)] ->
-  Script.ExpValue ->
-  m ()
-scriptValueAsVars server names_and_types val
-  | vals <- V.unCompound val,
-    length names_and_types == length vals,
-    Just loads <- zipWithM f names_and_types vals =
-      sequence_ loads
-  where
-    f (v, t0) (V.ValueAtom (Script.SValue t1 sval))
-      | t0 == t1 =
-          Just $ case sval of
-            Script.VVar oldname ->
-              cmdMaybe $ cmdRename (Script.scriptServer server) oldname v
-            Script.VVal sval' ->
-              valueAsVar (Script.scriptServer server) v sval'
-    f _ _ = Nothing
-scriptValueAsVars server names_and_types val
-  | V.ValueAtom (Script.SValue t (Script.VVar vv)) <- val,
-    Just ts <- Script.isScriptTuple server t,
-    ts == map snd names_and_types = do
-      forM_ (zip (map fst names_and_types) tupleFieldNames) $ \(v, k) ->
-        cmdMaybe $ cmdProject (Script.scriptServer server) v vv (nameToText k)
-      cmdMaybe $ cmdFree (Script.scriptServer server) $ S.toList $ Script.serverVarsInValue val
-scriptValueAsVars server names_and_types val = do
-  cmdMaybe $ cmdFree (Script.scriptServer server) $ S.toList $ Script.serverVarsInValue val
-  throwError $
-    "Expected value of type: "
-      <> showText names_and_types -- prettyTextOneLine (V.mkCompound (map (V.ValueAtom . snd) names_and_types))
-      <> "\nBut got value of type:  "
-      <> showText val -- prettyTextOneLine (fmap Script.scriptValueType val)
-      <> notes
-  where
-    notes = mconcat $ mapMaybe note names_and_types
-    note (_, t)
-      | "(" `T.isPrefixOf` t =
-          Just $
-            "\nNote: expected type "
-              <> prettyText t
-              <> " is an opaque tuple that cannot be constructed\n"
-              <> "in FutharkScript.  Consider using type annotations to give it a proper name."
-      | "{" `T.isPrefixOf` t =
-          Just $
-            "\nNote: expected type "
-              <> prettyText t
-              <> " is an opaque record that cannot be constructed\n"
-              <> "in FutharkScript.  Consider using type annotations to give it a proper name."
-      | otherwise =
-          Nothing
-
--- | Make the provided 'Values' available as server-side variables.
--- This may involve arbitrary server-side computation.  Error
--- detection... dubious.
+-- | Make the provided 'Values' available as server-side variables, for use
+-- as the inputs of the given entry point, and return the variable of each
+-- input. These are the given names, except that several inputs may share a
+-- variable (see 'scriptValuesAsVars').  This may involve arbitrary
+-- server-side computation.  Error detection... dubious.  The 'FilePath' is
+-- the program, relative to which other file paths are read.
 valuesAsVars ::
   (MonadError T.Text m, MonadIO m) =>
   Server ->
+  EntryName ->
   [(VarName, TypeName)] ->
   FutharkExe ->
   FilePath ->
   Values ->
-  m ()
-valuesAsVars server names_and_types _ dir (InFile file)
-  | takeExtension file == ".gz" = do
-      s <- liftIO $ readAndDecompress $ dir </> file
-      case s of
-        Left e ->
-          throwError $ showText file <> ": " <> showText e
-        Right s' ->
-          cmdMaybe . withSystemTempFile "futhark-input" $ \tmpf tmpf_h -> do
-            BS.hPutStr tmpf_h s'
-            hClose tmpf_h
-            cmdRestore server tmpf names_and_types
-  | otherwise =
-      cmdMaybe $ cmdRestore server (dir </> file) names_and_types
-valuesAsVars server names_and_types futhark dir (GenValues gens) = do
-  unless (length gens == length names_and_types) . throwError . T.unlines $
-    [ "Expected "
-        <> showText (length names_and_types)
-        <> " input values of types",
-      "  " <> T.unwords (map snd names_and_types),
-      "Provided "
-        <> showText (length gens)
-        <> " input values of types",
-      "  " <> T.unwords (map genValueType gens)
-    ]
-  gen_fs <- mapM (getGenFile futhark dir) gens
-  forM_ (zip gen_fs names_and_types) $ \(file, (v, t)) ->
-    cmdMaybe $ cmdRestore server (dir </> file) [(v, t)]
-valuesAsVars server names_and_types _ _ (Values vs) = do
-  let types = map snd names_and_types
-      vs_types = map (V.valueTypeTextNoDims . V.valueType) vs
-  unless (types == vs_types) . throwError . T.unlines $
-    [ "Expected input of types: " <> T.unwords (map prettyTextOneLine types),
-      "Provided input of types: " <> T.unwords (map prettyTextOneLine vs_types)
-    ]
-  cmdMaybe . withSystemTempFile "futhark-input" $ \tmpf tmpf_h -> do
-    mapM_ (BS.hPutStr tmpf_h . Bin.encode) vs
-    hClose tmpf_h
-    cmdRestore server tmpf names_and_types
-valuesAsVars server names_and_types _ dir (ScriptValues e) =
-  Script.withScriptServer' server $ \server' -> do
-    e_v <- Script.evalExp (Script.scriptBuiltin dir) server' e
-    scriptValueAsVars server' names_and_types e_v
-valuesAsVars server names_and_types futhark dir (ScriptFile f) = do
-  e <-
-    either throwError pure . Script.parseExpFromText f
-      =<< liftIO (T.readFile (dir </> f))
-  valuesAsVars server names_and_types futhark dir (ScriptValues e)
+  m [VarName]
+valuesAsVars server entry names_and_types futhark prog values =
+  case values of
+    InFile file
+      | takeExtension file == ".gz" -> do
+          s <- liftIO $ readAndDecompress $ dir </> file
+          case s of
+            Left e -> throwError $ showText file <> ": " <> showText e
+            Right s' -> restoreBytes s'
+          pure names
+      | otherwise -> do
+          cmdMaybe $ cmdRestore server (dir </> file) names_and_types
+          pure names
+    GenValues gens -> do
+      unless (length gens == length names_and_types) . throwError . T.unlines $
+        [ "Expected "
+            <> showText (length names_and_types)
+            <> " input values of types",
+          "  " <> T.unwords (map snd names_and_types),
+          "Provided "
+            <> showText (length gens)
+            <> " input values of types",
+          "  " <> T.unwords (map genValueType gens)
+        ]
+      gen_fs <- mapM (getGenFile futhark dir) gens
+      forM_ (zip gen_fs names_and_types) $ \(file, (v, t)) ->
+        cmdMaybe $ cmdRestore server (dir </> file) [(v, t)]
+      pure names
+    Values vs -> do
+      let types = map snd names_and_types
+          vs_types = map (V.valueTypeTextNoDims . V.valueType) vs
+      unless (types == vs_types) . throwError . T.unlines $
+        [ "Expected input of types: " <> T.unwords (map prettyTextOneLine types),
+          "Provided input of types: " <> T.unwords (map prettyTextOneLine vs_types)
+        ]
+      restoreBytes $ mconcat $ map Bin.encode vs
+      pure names
+    ScriptValues e ->
+      scriptValuesAsVars server entry names prog e
+    ScriptFile f -> do
+      let f' = dir </> f
+      e <-
+        either (\(SyntaxError _ err) -> throwError err) pure . parseExp f'
+          =<< liftIO (T.readFile f')
+      scriptValuesAsVars server entry names prog e
+  where
+    dir = takeDirectory prog
+    names = map fst names_and_types
+    restoreBytes bytes =
+      cmdMaybe . withSystemTempFile "futhark-input" $ \tmpf tmpf_h -> do
+        BS.hPutStr tmpf_h bytes
+        hClose tmpf_h
+        cmdRestore server tmpf names_and_types
 
 -- | There is a risk of race conditions when multiple programs have
 -- identical 'GenValues'.  In such cases, multiple threads in 'futhark
@@ -354,33 +426,6 @@ getExpectedResult futhark prog entry tr =
     RunTimeFailure err ->
       pure $ RunTimeFailure err
 
--- | The name we use for compiled programs.
-binaryName :: FilePath -> FilePath
-binaryName = dropExtension
-
--- | @compileProgram extra_options futhark backend program@ compiles
--- @program@ with the command @futhark backend extra-options...@, and
--- returns stdout and stderr of the compiler.  Throws an IO exception
--- containing stderr if compilation fails.
-compileProgram ::
-  (MonadIO m, MonadError T.Text m) =>
-  [String] ->
-  FutharkExe ->
-  String ->
-  FilePath ->
-  m (SBS.ByteString, SBS.ByteString)
-compileProgram extra_options (FutharkExe futhark) backend program = do
-  (futcode, stdout, stderr) <- liftIO $ readProcessWithExitCode futhark (backend : options) ""
-  case futcode of
-    ExitFailure 127 -> throwError $ progNotFound $ T.pack futhark
-    ExitFailure _ -> throwError $ T.decodeUtf8 stderr
-    ExitSuccess -> pure ()
-  pure (stdout, stderr)
-  where
-    binOutputf = binaryName program
-    options = [program, "-o", binOutputf] ++ extra_options
-    progNotFound s = s <> ": command not found"
-
 getValueM :: (MonadIO m, MonadError T.Text m) => Server -> VarName -> m V.Value
 getValueM server = either throwError pure <=< liftIO . getValue server
 
@@ -446,12 +491,10 @@ callEntry futhark server prog entry input = do
   let out = "out"
       ins = ["in" <> showText i | i <- [0 .. length input_types - 1]]
       ins_and_types = zip ins (map inputType input_types)
-  valuesAsVars server ins_and_types futhark dir input
-  _ <- cmdEither $ cmdCall server entry out ins
-  cmdMaybe $ cmdFree server ins
+  ins' <- valuesAsVars server entry ins_and_types futhark prog input
+  _ <- cmdEither $ cmdCall server entry out ins'
+  cmdMaybe $ cmdFree server $ nubOrd ins'
   pure out
-  where
-    dir = takeDirectory prog
 
 -- | Ensure that any reference output files exist, or create them (by
 -- compiling the program with the reference compiler and running it on
@@ -542,11 +585,3 @@ checkResult program expected_vs actual_vs =
             else "\n...and " <> prettyText (length mismatches) <> " other mismatches."
     [] ->
       pure ()
-
--- | Create a Futhark server configuration suitable for use when
--- testing/benchmarking Futhark programs.
-futharkServerCfg :: FilePath -> [String] -> ServerCfg
-futharkServerCfg prog opts =
-  (newServerCfg prog opts)
-    { cfgDebug = isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 1
-    }

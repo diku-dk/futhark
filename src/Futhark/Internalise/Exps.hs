@@ -16,6 +16,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Set qualified as S
 import Data.Text qualified as T
+import Futhark.Error (compilerLimitation)
 import Futhark.IR.SOACS as I hiding (stmPat)
 import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.Bindings
@@ -571,7 +572,18 @@ internaliseAppExp desc _ (E.Loop sparams mergepat loopinit form loopbody _) = do
 
           -- Careful not to clobber anything.
           loop_end_cond_body <- renameBody <=< buildBody_ $ do
-            forM_ (zip shapepat shapeargs) $ \(p, se) ->
+            -- Shape arguments may refer to other shape parameters, which
+            -- must not be clobbered before they are read.
+            let shapepat_names = map I.paramName shapepat
+            shapeargs' <- forM (zip shapepat shapeargs) $ \case
+              (p, I.Var v)
+                | v /= I.paramName p,
+                  v `elem` shapepat_names -> do
+                    v' <- newVName $ baseName v <> "_tmp"
+                    letBindNames [v'] $ I.BasicOp $ I.SubExp $ I.Var v
+                    pure $ I.Var v'
+              (_, se) -> pure se
+            forM_ (zip shapepat shapeargs') $ \(p, se) ->
               unless (se == I.Var (I.paramName p)) $
                 letBindNames [I.paramName p] $
                   BasicOp $
@@ -1869,6 +1881,7 @@ isIntrinsicFunction qname args = do
           handleSOACs,
           handleAccs,
           handleAD,
+          handleIO,
           handleRest
         ]
   msum [h args $ baseName $ qualLeaf qname | h <- handlers]
@@ -2076,6 +2089,11 @@ isIntrinsicFunction qname args = do
     handleRest [arr1, offset, s1, s2, s3, s4, arr2] "flat_update_4d" = Just $ \desc -> do
       flatUpdateHelper desc arr1 offset [s1, s2, s3, s4] arr2
     handleRest _ _ = Nothing
+
+    handleIO _ s
+      | Just f <- T.stripPrefix "io_" (nameToText s) = Just $ \_ ->
+          compilerLimitation $ "io." <> f <> " is only supported in interpreted code."
+    handleIO _ _ = Nothing
 
     toSigned int_to e desc = do
       e' <- internaliseExp1 "trunc_arg" e

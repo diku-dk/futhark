@@ -96,13 +96,13 @@ simplifySOAC (VJP shape arr vec lam) = do
   shape' <- traverse Engine.simplify shape
   arr' <- mapM Engine.simplify arr
   vec' <- mapM Engine.simplify vec
-  (lam', hoisted) <- Engine.simplifyLambda mempty lam
+  (lam', hoisted) <- Engine.enterLoop $ Engine.simplifyLambda mempty lam
   pure (VJP shape' arr' vec' lam', hoisted)
 simplifySOAC (JVP shape arr vec lam) = do
   shape' <- traverse Engine.simplify shape
   arr' <- mapM Engine.simplify arr
   vec' <- mapM Engine.simplify vec
-  (lam', hoisted) <- Engine.simplifyLambda mempty lam
+  (lam', hoisted) <- Engine.enterLoop $ Engine.simplifyLambda mempty lam
   pure (JVP shape' arr' vec' lam', hoisted)
 simplifySOAC (WithVJP args lam lam_adj) = do
   args' <- mapM Engine.simplify args
