@@ -71,6 +71,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Horizontal fusion of multi-dimensional histograms. (#2555)
 
+* The simplifier could hoist an allocation out of a sequential loop when its
+  memory reached the loop result only through existential memory (returned by
+  a branch or an inner loop), so that an iteration overwrote the previous
+  iteration's value while it was still live.
+
 * Internalisation of reduce_by_index_3d with array-valued elements. (#2554)
 
 * A compiler crash caused by size-polymorphic recursive functions. (#2569)

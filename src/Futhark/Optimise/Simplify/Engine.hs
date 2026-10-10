@@ -564,6 +564,24 @@ expandUsage usageInStm vtable utable stm@(Let pat aux e) =
                then UT.sizeUsages (freeIn (stmAuxCerts aux) <> freeIn e)
                else mempty
            )
+        <> resultThroughMemory
+    -- Memory blocks are not tracked as aliases, so propagate result usage to
+    -- the memory a statement's results may live in: the blocks named in its
+    -- pattern, and, if it returns existential memory, every block it
+    -- mentions. Otherwise an allocation that reaches a loop result only
+    -- through, say, a branch or inner loop returning existential memory
+    -- could be hoisted out of the loop, and the next iteration would then
+    -- overwrite the previous value while it is still live.
+    resultThroughMemory
+      | any (`UT.isInResult` utable) (patNames pat) =
+          foldMap UT.inResultUsage . filter isMem . namesToList $
+            if any isMemType (patTypes pat)
+              then freeIn stm
+              else freeIn pat
+      | otherwise = mempty
+    isMem v = maybe False isMemType $ ST.lookupType v vtable
+    isMemType Mem {} = True
+    isMemType _ = False
     usageThroughAliases =
       mconcat . mapMaybe usageThroughBindeeAliases $
         zip (patNames pat) (patAliases pat)
