@@ -20,6 +20,9 @@
 --
 -- Further, we only infer freshness for fully saturated higher-order functions,
 -- so refactoring to take advantage of partial application may not work.
+-- Likewise, we infer only the freshness of the value a function returns, not
+-- of what a returned function in turn returns: that must be declared on the
+-- returned lambda itself.
 module Language.Futhark.TypeChecker.Consumption
   ( checkValDef,
 
@@ -781,29 +784,6 @@ overlapCheck loc (src, src_als) (ve, ve_als) =
         <+> dquotes "copy"
         <+> "to remove aliases from the value."
 
--- | 'setMode' does not look inside an arrow, but when we return a function, the
--- freshness of *its* return type has already been inferred when checking the
--- lambda.  So go past all the arrows and set the freshness appropriately - note
--- that for a function the given 'Freshness' is therefore ignored, as the answer
--- is already recorded in the type.
-withArrowRet :: ResType -> TypeAliases -> Freshness -> ResType
-withArrowRet
-  (Scalar (Arrow u pn d pt (RetType ext t1)))
-  (Scalar (Arrow _ _ _ _ (RetType _ t2)))
-  _ =
-    Scalar . Arrow u pn d pt . RetType ext $ go t1 t2
-    where
-      go (Scalar (Record fs1)) (Scalar (Record fs2)) =
-        Scalar $ Record $ M.intersectionWith go fs1 fs2
-      go (Scalar (Sum cs1)) (Scalar (Sum cs2)) =
-        Scalar $ Sum $ M.intersectionWith (zipWith go) cs1 cs2
-      go
-        (Scalar (Arrow u' pn' d' pt' (RetType ext' a)))
-        (Scalar (Arrow _ _ _ _ (RetType _ b))) =
-          Scalar . Arrow u' pn' d' pt' . RetType ext' $ go a b
-      go a b = a `setMode` freshness b
-withArrowRet t _ u = t `setMode` u
-
 inferReturnFreshness :: [Pat ParamType] -> ResType -> TypeAliases -> ResType
 inferReturnFreshness [] ret _ = ret `setMode` Nonfresh
 inferReturnFreshness params ret ret_als = delve ret ret_als
@@ -814,8 +794,7 @@ inferReturnFreshness params ret ret_als = delve ret ret_als
     delve (Scalar (Sum cs1)) (Scalar (Sum cs2)) =
       Scalar $ Sum $ M.intersectionWith (zipWith delve) cs1 cs2
     delve t t_als =
-      withArrowRet t t_als $
-        if null (unfreshness params shared t_als) then Fresh else Nonfresh
+      t `setMode` if null (unfreshness params shared t_als) then Fresh else Nonfresh
 
 checkSubExps :: (ASTMappable e) => e -> CheckM e
 checkSubExps = astMap identityMapper {mapOnExp = fmap fst . checkExp}
