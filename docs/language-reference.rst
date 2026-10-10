@@ -1844,6 +1844,29 @@ When using incremental flattening, do not generate multiple versions
 for this SOAC, but do exploit inner parallelism (which may give rise
 to multiple versions at deeper levels).
 
+``intrablock_result(global)``
+.............................
+
+When combined with ``flattening(only_intra)``, keep the result of the
+"intra-block parallelism" version in global memory instead of shared
+memory.  The block writes its result directly to its slice of the
+global result array, so no shared memory is reserved for it and no
+copy-out is needed.  This is useful when a block's result is too large
+to fit in shared memory, such as when each block streams over a large
+part of the input.
+
+The attribute is a hint: it applies when the block's result is a
+directly laid out array.  Results built by a loop are supported: the
+loop's result accumulator is written directly to global memory.  If such
+an accumulator is initialised with ``#[scratch]`` (its initial value is
+irrelevant, because the loop overwrites it), no initial copy is needed,
+which matters when the accumulator is larger than shared memory.  If the
+result is a view into an existing allocation (for example the result of a
+transposition) or is produced by a ``Match``, it is instead staged in
+shared memory and copied out as usual, and the compiler emits a warning.
+In that case shared memory is still required, so the attribute may not
+help for very large results.
+
 ``noinline``
 ............
 

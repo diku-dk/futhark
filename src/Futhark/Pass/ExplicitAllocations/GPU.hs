@@ -9,6 +9,7 @@ module Futhark.Pass.ExplicitAllocations.GPU
 where
 
 import Control.Monad
+import Data.Map.Strict qualified as M
 import Data.Set qualified as S
 import Futhark.IR.GPU
 import Futhark.IR.GPUMem
@@ -192,13 +193,38 @@ inThreadExpHints e = do
       | otherwise =
           pure NoHint
 
+-- | Place the results of an intra-block kernel that opted into global
+-- memory in the 'intrablockResultSpace', with a direct layout so that
+-- they can be aliased to a slice of the global result array.  Results
+-- that are views into an existing allocation (e.g. the result of a
+-- transposition) are not affected and are staged in shared memory as
+-- usual.
+intrablockResultSpaces :: Attrs -> Exp GPU -> M.Map VName Space
+intrablockResultSpaces attrs (Op (SegOp (SegMap SegBlock {} _ _ body)))
+  | hasIntrablockResultGlobal attrs =
+      M.fromList
+        [ (v, intrablockResultSpace)
+          | Returns _ _ (Var v) <- bodyResult body
+        ]
+intrablockResultSpaces _ _ = mempty
+
 -- | The pass from 'GPU' to 'GPUMem'.
 explicitAllocations :: Pass GPU GPUMem
-explicitAllocations = explicitAllocationsGeneric (Space "device") (handleHostOp Nothing) kernelExpHints
+explicitAllocations =
+  explicitAllocationsGeneric
+    (Space "device")
+    (handleHostOp Nothing)
+    kernelExpHints
+    intrablockResultSpaces
 
 -- | Convert some 'GPU' stms to 'GPUMem'.
 explicitAllocationsInStms ::
   (MonadFreshNames m, HasScope GPUMem m) =>
   Stms GPU ->
   m (Stms GPUMem)
-explicitAllocationsInStms = explicitAllocationsInStmsGeneric (Space "device") (handleHostOp Nothing) kernelExpHints
+explicitAllocationsInStms =
+  explicitAllocationsInStmsGeneric
+    (Space "device")
+    (handleHostOp Nothing)
+    kernelExpHints
+    intrablockResultSpaces

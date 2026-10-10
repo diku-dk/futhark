@@ -89,7 +89,15 @@ data AllocEnv fromrep torep = AllocEnv
     -- could be made more flexible.
     funSpace :: Name -> Space,
     allocInOp :: Op fromrep -> AllocM fromrep torep (Op torep),
-    envExpHints :: Exp torep -> AllocM fromrep torep [ExpHint]
+    envExpHints :: Exp torep -> AllocM fromrep torep [ExpHint],
+    -- | Per-result memory space overrides, in effect for statements
+    -- nested inside the statement that introduced them.  Overridden
+    -- results are forced to a direct (row-major) layout.
+    envResultSpaces :: M.Map VName Space,
+    -- | Backend hook that, given a statement's attributes and
+    -- (unallocated) expression, produces per-result space overrides.
+    -- The overrides apply while allocating the statement's body.
+    envStmResultSpaces :: Attrs -> Exp fromrep -> M.Map VName Space
   }
 
 -- | Monad for adding allocations to an entire program.
@@ -113,7 +121,8 @@ instance (Allocable fromrep torep inner) => MonadBuilder (AllocM fromrep torep) 
   mkLetNamesM names e = do
     def_space <- askDefaultSpace
     hints <- expHints e
-    pat <- patWithAllocations def_space names e hints
+    result_spaces <- asks envResultSpaces
+    pat <- patWithAllocations def_space result_spaces names e hints
     pure $ Let pat (defAux ()) e
 
   mkBodyM stms res = pure $ Body () stms res
@@ -141,9 +150,10 @@ runAllocM ::
   (Name -> Space) ->
   (Op fromrep -> AllocM fromrep torep (Op torep)) ->
   (Exp torep -> AllocM fromrep torep [ExpHint]) ->
+  (Attrs -> Exp fromrep -> M.Map VName Space) ->
   AllocM fromrep torep a ->
   m a
-runAllocM space fun handleOp hints (AllocM m) =
+runAllocM space fun handleOp hints stmResultSpaces (AllocM m) =
   fmap fst $ modifyNameSource $ runState $ runReaderT (runBuilderT m mempty) env
   where
     env =
@@ -152,7 +162,9 @@ runAllocM space fun handleOp hints (AllocM m) =
           funSpace = fun,
           envConsts = mempty,
           allocInOp = handleOp,
-          envExpHints = hints
+          envExpHints = hints,
+          envResultSpaces = mempty,
+          envStmResultSpaces = stmResultSpaces
         }
 
 elemSize :: (Num a) => Type -> a
@@ -225,25 +237,67 @@ allocsForStm ::
   AllocM fromrep torep (Stm torep)
 allocsForStm idents aux e0 = do
   def_space <- askDefaultSpace
-  e <- allocInExp e0
+  -- The result-space overrides in effect for this statement's own
+  -- results (as opposed to those introduced by this statement for its
+  -- body).  Used to recognise a loop whose result is overridden.
+  result_spaces <- asks envResultSpaces
+  stm_result_spaces <- asks envStmResultSpaces
+  -- A #[scratch] array has no meaningful initial value, so when the
+  -- enclosing block is placing a result in a particular space, place the
+  -- scratch there too.  This matters for a loop whose result accumulator
+  -- is initialised with #[scratch]: the scratch must live where the
+  -- result goes, rather than being allocated elsewhere and copied.
+  let scratch_override
+        | BasicOp Scratch {} <- e0,
+          (s : spaces) <- M.elems result_spaces,
+          all (== s) spaces =
+            M.fromList [(identName i, s) | i <- idents]
+        | otherwise = mempty
+      override env =
+        env
+          { envResultSpaces =
+              stm_result_spaces (stmAuxAttrs aux) e0
+                <> envResultSpaces env
+          }
+  e <- local override $ allocInExpWith idents result_spaces e0
   hints <- expHints e
   (rts, e') <- expReturns' e
-  pes <- allocsForPat def_space idents rts hints
+  pes <- allocsForPat def_space (scratch_override <> result_spaces) idents rts hints
   dec <- mkExpDecM (Pat pes) e'
   pure $ Let (Pat pes) (aux {stmAuxDec = dec}) e'
+
+-- | Like 'allocInExp', but aware of the names (and space overrides) of
+-- the results the enclosing statement is about to bind.  This is
+-- needed for 'Loop', whose array accumulators must be placed in the
+-- override space so that the loop result can alias global memory.
+allocInExpWith ::
+  (Allocable fromrep torep inner) =>
+  [Ident] ->
+  M.Map VName Space ->
+  Exp fromrep ->
+  AllocM fromrep torep (Exp torep)
+allocInExpWith idents result_spaces (Loop merge form body)
+  -- Only handle a loop with a single overridden result for now: several
+  -- results would require attributing each loop memory block to its
+  -- result.  When more than one result is overridden we fall back.
+  | length idents == length merge,
+    [_] <- [ident | ident <- idents, M.member (identName ident) result_spaces] =
+      allocInLoop (map (\i -> M.lookup (identName i) result_spaces) idents) merge form body
+allocInExpWith _ _ e = allocInExp e
 
 patWithAllocations ::
   (MonadBuilder m, Mem (Rep m) inner) =>
   Space ->
+  M.Map VName Space ->
   [VName] ->
   Exp (Rep m) ->
   [ExpHint] ->
   m (Pat LetDecMem)
-patWithAllocations def_space names e hints = do
+patWithAllocations def_space result_spaces names e hints = do
   ts' <- instantiateShapes' names <$> expExtType e
   let idents = zipWith Ident names ts'
   rts <- fromMaybe (error "patWithAllocations: ill-typed") <$> expReturns e
-  Pat <$> allocsForPat def_space idents rts hints
+  Pat <$> allocsForPat def_space result_spaces idents rts hints
 
 mkMissingIdents :: (MonadFreshNames m) => [Ident] -> [ExpReturns] -> m [Ident]
 mkMissingIdents idents rts =
@@ -256,27 +310,34 @@ mkMissingIdents idents rts =
 allocsForPat ::
   (MonadBuilder m, Op (Rep m) ~ MemOp inner (Rep m)) =>
   Space ->
+  M.Map VName Space ->
   [Ident] ->
   [ExpReturns] ->
   [ExpHint] ->
   m [PatElem LetDecMem]
-allocsForPat def_space some_idents rts hints = do
+allocsForPat def_space result_spaces some_idents rts hints = do
   idents <- mkMissingIdents some_idents rts
 
   forM (zip3 idents rts hints) $ \(ident, rt, hint) -> do
     let ident_shape = arrayShape $ identType ident
+        -- An overridden result is placed in a specific space with a
+        -- direct layout, so that it can be aliased to global memory.
+        (space, hint') =
+          case M.lookup (identName ident) result_spaces of
+            Just s -> (s, NoHint)
+            Nothing -> (def_space, hint)
     case rt of
       MemPrim _ -> do
-        summary <- summaryForBindage def_space (identType ident) hint
+        summary <- summaryForBindage space (identType ident) hint'
         pure $ PatElem (identName ident) summary
-      MemMem space ->
-        pure $ PatElem (identName ident) $ MemMem space
+      MemMem mem_space ->
+        pure $ PatElem (identName ident) $ MemMem mem_space
       MemArray bt _ o (Just (ReturnsInBlock mem extlmad)) -> do
         let ixfn = instantiateExtLMAD idents extlmad
         pure . PatElem (identName ident) . MemArray bt ident_shape o $ ArrayIn mem ixfn
       MemArray _ extshape _ Nothing
         | Just _ <- knownShape extshape -> do
-            summary <- summaryForBindage def_space (identType ident) hint
+            summary <- summaryForBindage space (identType ident) hint'
             pure $ PatElem (identName ident) summary
       MemArray bt _ o (Just (ReturnsNewBlock _ i extixfn)) -> do
         let ixfn = instantiateExtLMAD idents extixfn
@@ -392,17 +453,33 @@ ensureArrayIn space (Var v) = do
   tell ([Var mem'], ctx)
   pure $ Var v'
 
+-- | Like 'ensureArrayIn', but for a directly laid out array, whose
+-- strides are already determined by its shape.  Such an array needs no
+-- existential context arguments: its row-major layout is canonical.
+ensureDirectArrayIn ::
+  (Allocable fromrep torep inner) =>
+  Space ->
+  SubExp ->
+  WriterT ([SubExp], [SubExp]) (AllocM fromrep torep) SubExp
+ensureDirectArrayIn _ (Constant v) =
+  error $ "ensureDirectArrayIn: " ++ prettyString v ++ " cannot be an array."
+ensureDirectArrayIn space (Var v) = do
+  (mem', v') <- lift $ ensureDirectArray (Just space) v
+  tell ([Var mem'], [])
+  pure $ Var v'
+
 allocInLoopParams ::
   (Allocable fromrep torep inner) =>
+  [Maybe Space] ->
   [(FParam fromrep, SubExp)] ->
   ( [(FParam torep, SubExp)] ->
     ([SubExp] -> AllocM fromrep torep ([SubExp], [SubExp])) ->
     AllocM fromrep torep a
   ) ->
   AllocM fromrep torep a
-allocInLoopParams merge m = do
+allocInLoopParams target_spaces merge m = do
   ((valparams, valargs, handle_loop_subexps), (mem_params, ctx_params)) <-
-    runWriterT $ unzip3 <$> mapM allocInLoopParam merge
+    runWriterT $ unzip3 <$> zipWithM allocInLoopParam target_spaces merge
   let mergeparams' = mem_params <> ctx_params <> valparams
       summary = scopeOfFParams mergeparams'
 
@@ -434,6 +511,7 @@ allocInLoopParams merge m = do
 
     allocInLoopParam ::
       (Allocable fromrep torep inner) =>
+      Maybe Space ->
       (Param DeclType, SubExp) ->
       WriterT
         ([FParam torep], [FParam torep])
@@ -442,7 +520,7 @@ allocInLoopParams merge m = do
           SubExp,
           SubExp -> WriterT ([SubExp], [SubExp]) (AllocM fromrep torep) SubExp
         )
-    allocInLoopParam (mergeparam, Var v)
+    allocInLoopParam target_space (mergeparam, Var v)
       | param_t@(Array pt shape o) <- paramDeclType mergeparam = do
           (v_mem, v_lmad) <- lift $ lookupArraySummary v
           v_mem_space <- lift $ lookupMemSpace v_mem
@@ -450,15 +528,17 @@ allocInLoopParams merge m = do
           -- Loop-invariant array parameters that are in scalar space
           -- are special - we do not wish to existentialise their index
           -- function at all (but the memory block is still existential).
-          case v_mem_space of
-            ScalarSpace {} ->
+          -- An overridden result must not use scalar space, since it has
+          -- to be placed in the target space.
+          case (target_space, v_mem_space) of
+            (Nothing, ScalarSpace {}) ->
               if anyIsLoopParam (freeIn shape)
                 then do
                   -- Arrays with loop-variant shape cannot be in scalar
                   -- space, so copy them elsewhere and try again.
                   space <- lift askDefaultSpace
                   (_, v') <- lift $ allocLinearArray space (baseName v) v
-                  allocInLoopParam (mergeparam, Var v')
+                  allocInLoopParam target_space (mergeparam, Var v')
                 else do
                   p <- newParam "mem_param" $ MemMem v_mem_space
                   tell ([p], [])
@@ -469,32 +549,59 @@ allocInLoopParams merge m = do
                       scalarRes param_t v_mem_space v_lmad
                     )
             _ -> do
-              (v_mem', v') <- lift $ ensureRowMajorArray Nothing v
-              let lmad_ext =
-                    LMAD.existentialize 0 $ LMAD.iota 0 $ map pe64 $ shapeDims shape
+              (v_mem', v') <- lift $ ensureRowMajorArray target_space v
+              (_, v_lmad') <- lift $ lookupArraySummary v'
 
               v_mem_space' <- lift $ lookupMemSpace v_mem'
 
-              ctx_params <-
-                replicateM (length (LMAD.existentialized lmad_ext)) $
-                  newParam "ctx_param_ext" (MemPrim int64)
-
-              param_lmad <-
-                instantiateLMAD $
-                  LMAD.substitute
-                    ( M.fromList . zip (fmap Ext [0 ..]) $
-                        map (le64 . Free . paramName) ctx_params
-                    )
-                    lmad_ext
-
               mem_param <- newParam "mem_param" $ MemMem v_mem_space'
-              tell ([mem_param], ctx_params)
-              pure
-                ( mergeparam {paramDec = MemArray pt shape o $ ArrayIn (paramName mem_param) param_lmad},
-                  Var v',
-                  ensureArrayIn v_mem_space'
-                )
-    allocInLoopParam (mergeparam, se) = doDefault mergeparam se =<< lift askDefaultSpace
+
+              -- A loop parameter whose value is already directly laid
+              -- out (row-major) keeps that canonical layout instead of
+              -- existentialising its strides.  Symbolic strides would be
+              -- bound outside the loop as separate context arguments,
+              -- and after simplification may no longer be syntactically
+              -- equal to the canonical row-major strides, which stops
+              -- 'globalResultAliases' from recognising an intra-block
+              -- result as directly laid out.  Non-direct layouts still
+              -- need context parameters, and are handled as before.
+              if LMAD.isDirect v_lmad'
+                then do
+                  tell ([mem_param], [])
+                  pure
+                    ( mergeparam
+                        { paramDec =
+                            MemArray pt shape o $
+                              ArrayIn
+                                (paramName mem_param)
+                                (LMAD.iota 0 $ map pe64 $ shapeDims shape)
+                        },
+                      Var v',
+                      ensureDirectArrayIn v_mem_space'
+                    )
+                else do
+                  let lmad_ext =
+                        LMAD.existentialize 0 $ LMAD.iota 0 $ map pe64 $ shapeDims shape
+
+                  ctx_params <-
+                    replicateM (length (LMAD.existentialized lmad_ext)) $
+                      newParam "ctx_param_ext" (MemPrim int64)
+
+                  param_lmad <-
+                    instantiateLMAD $
+                      LMAD.substitute
+                        ( M.fromList . zip (fmap Ext [0 ..]) $
+                            map (le64 . Free . paramName) ctx_params
+                        )
+                        lmad_ext
+
+                  tell ([mem_param], ctx_params)
+                  pure
+                    ( mergeparam {paramDec = MemArray pt shape o $ ArrayIn (paramName mem_param) param_lmad},
+                      Var v',
+                      ensureArrayIn v_mem_space'
+                    )
+    allocInLoopParam _ (mergeparam, se) = doDefault mergeparam se =<< lift askDefaultSpace
 
     doDefault mergeparam se space = do
       mergeparam' <- allocInFParam mergeparam space
@@ -622,8 +729,9 @@ explicitAllocationsGeneric ::
   Space ->
   (Op fromrep -> AllocM fromrep torep (Op torep)) ->
   (Exp torep -> AllocM fromrep torep [ExpHint]) ->
+  (Attrs -> Exp fromrep -> M.Map VName Space) ->
   Pass fromrep torep
-explicitAllocationsGeneric def_space handleOp hints =
+explicitAllocationsGeneric def_space handleOp hints stmResultSpaces =
   Pass "explicit allocations" "Transform program to explicit memory representation" $ \prog ->
     let spaceForfun :: Name -> Space
         spaceForfun =
@@ -635,11 +743,11 @@ explicitAllocationsGeneric def_space handleOp hints =
      in intraproceduralTransformationWithConsts onStms (allocInFun spaceForfun) prog
   where
     onStms stms =
-      runAllocM def_space (const def_space) handleOp hints $ collectStms_ $ allocInStms stms $ pure ()
+      runAllocM def_space (const def_space) handleOp hints stmResultSpaces $ collectStms_ $ allocInStms stms $ pure ()
 
     allocInFun spaceForFun consts (FunDef entry attrs fname rettype params fbody) = do
       let space = spaceForFun fname
-      runAllocM space spaceForFun handleOp hints . inScopeOf consts $
+      runAllocM space spaceForFun handleOp hints stmResultSpaces . inScopeOf consts $
         allocInFParams (map (,space) params) $ \params' -> do
           (fbody', mem_rets) <-
             allocInFunBody (map (const $ Just def_space) rettype) fbody
@@ -663,12 +771,13 @@ explicitAllocationsInStmsGeneric ::
   Space ->
   (Op fromrep -> AllocM fromrep torep (Op torep)) ->
   (Exp torep -> AllocM fromrep torep [ExpHint]) ->
+  (Attrs -> Exp fromrep -> M.Map VName Space) ->
   Stms fromrep ->
   m (Stms torep)
-explicitAllocationsInStmsGeneric space handleOp hints stms = do
+explicitAllocationsInStmsGeneric space handleOp hints stmResultSpaces stms = do
   scope <- askScope
   -- XXX: it is not good that we do not have access to function tables here.
-  runAllocM space (const space) handleOp hints $
+  runAllocM space (const space) handleOp hints stmResultSpaces $
     localScope scope $
       collectStms_ $
         allocInStms stms $
@@ -950,18 +1059,32 @@ simplifyMatch _ cases defbody ts =
       | otherwise =
           Right (case_reses, defres, t)
 
-allocInExp ::
+-- | Allocate a loop.  'target_spaces' gives, for each merge parameter
+-- (positionally), an optional space in which its array accumulator must
+-- be placed (used to make an overridden block result alias global
+-- memory).
+allocInLoop ::
   (Allocable fromrep torep inner) =>
-  Exp fromrep ->
+  [Maybe Space] ->
+  [(FParam fromrep, SubExp)] ->
+  LoopForm ->
+  Body fromrep ->
   AllocM fromrep torep (Exp torep)
-allocInExp (Loop merge form (Body () bodystms bodyres)) =
-  allocInLoopParams merge $ \merge' mk_loop_val -> do
+allocInLoop target_spaces merge form (Body () bodystms bodyres) =
+  allocInLoopParams target_spaces merge $ \merge' mk_loop_val -> do
     localScope (scopeOfLoopForm form) $ do
       body' <-
         buildBody_ . allocInStms bodystms $ do
           (valctx, valres') <- mk_loop_val $ map resSubExp bodyres
           pure $ subExpsRes valctx <> zipWith SubExpRes (map resCerts bodyres) valres'
       pure $ Loop merge' form body'
+
+allocInExp ::
+  (Allocable fromrep torep inner) =>
+  Exp fromrep ->
+  AllocM fromrep torep (Exp torep)
+allocInExp (Loop merge form body) =
+  allocInLoop (replicate (length merge) Nothing) merge form body
 allocInExp (Apply fname args rettype loc) = do
   arg_space <- askFunSpace fname
   res_space <- askDefaultSpace
@@ -1088,7 +1211,7 @@ mkLetNamesB' ::
   Exp (Rep m) ->
   m (Stm (Rep m))
 mkLetNamesB' space dec names e = do
-  pat <- patWithAllocations space names e nohints
+  pat <- patWithAllocations space mempty names e nohints
   pure $ Let pat (defAux dec) e
   where
     nohints = map (const NoHint) names
@@ -1111,7 +1234,7 @@ mkLetNamesB'' ::
   Exp (Engine.Wise rep) ->
   m (Stm (Engine.Wise rep))
 mkLetNamesB'' space names e = do
-  pat <- patWithAllocations space names e nohints
+  pat <- patWithAllocations space mempty names e nohints
   let pat' = Engine.addWisdomToPat pat e
       dec = Engine.mkWiseExpDec pat' () e
   pure $ Let pat' (defAux dec) e

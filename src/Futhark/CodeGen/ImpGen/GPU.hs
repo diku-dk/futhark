@@ -271,6 +271,11 @@ expCompiler dest@(Pat [pe]) e@(BasicOp (Replicate shape se))
 -- Allocation in the "shared" space is just a placeholder.
 expCompiler _ (Op (Alloc _ (Space "shared"))) =
   pure ()
+-- An intra-block result is bound to global memory inside the kernel;
+-- the host must not allocate anything for it.
+expCompiler _ (Op (Alloc _ space))
+  | space == intrablockResultSpace =
+      pure ()
 expCompiler pat (WithAcc inputs lam) =
   withAcc pat inputs lam
 -- This is a multi-versioning Match created by incremental flattening.

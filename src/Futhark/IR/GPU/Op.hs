@@ -17,6 +17,12 @@ module Futhark.IR.GPU.Op
     SegSeqDims (..),
     KernelGrid (..),
 
+    -- * Intra-block result placement
+    hasIntrablockResultGlobal,
+    intrablockResultSpace,
+    intrablockResultSpaceId,
+    isIntrablockResultSpace,
+
     -- * Reexports
     module Futhark.IR.GPU.Sizes,
     module Futhark.IR.SegOp,
@@ -48,6 +54,35 @@ import Futhark.Util.Pretty
     (<+>),
   )
 import Futhark.Util.Pretty qualified as PP
+
+-- | Does this attribute set request that the result of an intra-block
+-- kernel be placed in global memory?  This is the
+-- @#[intrablock_result(global)]@ attribute, which is only meaningful in
+-- combination with @#[flattening(only_intra)]@, and makes the block
+-- write its result directly to its slice of the global result array.
+hasIntrablockResultGlobal :: Attrs -> Bool
+hasIntrablockResultGlobal attrs =
+  AttrComp "intrablock_result" [AttrName "global"] `inAttrs` attrs
+
+-- | The memory space of an intra-block kernel result that is written
+-- directly to global memory.  Unlike 'Space "device"', memory in this
+-- space is not allocated by the program: it refers to a slice of an
+-- existing global array and is bound at kernel launch (see
+-- 'Futhark.CodeGen.ImpCode.GPU.GlobalAlias').  It behaves like
+-- 'Space "shared"' for the purposes of allocation and hoisting, but is
+-- declared in the global address space.
+intrablockResultSpace :: Space
+intrablockResultSpace = Space intrablockResultSpaceId
+
+-- | The identifier of 'intrablockResultSpace'.  Exposed so that the
+-- (Imp-level) code generator can recognise the space without having to
+-- duplicate the literal.
+intrablockResultSpaceId :: String
+intrablockResultSpaceId = "global_alias"
+
+-- | Is this the identifier of the intra-block result space?
+isIntrablockResultSpace :: String -> Bool
+isIntrablockResultSpace = (== intrablockResultSpaceId)
 
 -- | These dimensions (indexed from 0, outermost) of the corresponding
 -- 'SegSpace' should not be parallelised, but instead iterated

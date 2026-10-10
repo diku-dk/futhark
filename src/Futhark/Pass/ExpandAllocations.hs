@@ -301,7 +301,8 @@ allocsForBody variant_allocs invariant_allocs grid space kbody kbody' m = do
         <$> offsetMemoryInKernelBody alloc_offsets kbody'
     m alloc_offsets alloc_stms_dev kbody''
   where
-    isSharedAlloc (Let _ _ (Op (Alloc _ (Space "shared")))) = True
+    isSharedAlloc (Let _ _ (Op (Alloc _ alloc_space)))
+      | alloc_space == Space "shared" || alloc_space == intrablockResultSpace = True
     isSharedAlloc _ = False
 
 memoryRequirements ::
@@ -404,7 +405,8 @@ extractGenericBodyAllocations user bound_outside bound_kernel get_stms set_stms 
    in (set_stms (stmsFromList stms) body, allocs)
 
 expandable :: User -> Space -> Bool
-expandable (SegBlock {}, _) (Space "shared") = False
+expandable (SegBlock {}, _) space
+  | space == Space "shared" || space == intrablockResultSpace = False
 expandable _ ScalarSpace {} = False
 expandable _ _ = True
 

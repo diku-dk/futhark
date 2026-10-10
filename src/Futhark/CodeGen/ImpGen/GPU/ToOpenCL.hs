@@ -24,6 +24,7 @@ import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode.GPU hiding (Program)
 import Futhark.CodeGen.ImpCode.GPU qualified as ImpGPU
+import Futhark.IR.GPU.Op (isIntrablockResultSpace)
 import Futhark.CodeGen.ImpCode.OpenCL hiding (Program)
 import Futhark.CodeGen.ImpCode.OpenCL qualified as ImpOpenCL
 import Futhark.CodeGen.RTS.C (atomicsH, halfH)
@@ -149,6 +150,11 @@ pointerQuals "kernel" = [C.ctyquals|__kernel|]
 -- the compiler pipeline to defer to memory on the device, as opposed
 -- to the host.  From a kernel's perspective, this is "global".
 pointerQuals "device" = pointerQuals "global"
+-- Memory in the intra-block result space
+-- ('Futhark.IR.GPU.Op.intrablockResultSpace') is bound to a slice of an
+-- existing global array, so it is a global pointer.
+pointerQuals s
+  | isIntrablockResultSpace s = pointerQuals "global"
 pointerQuals s = error $ "'" ++ s ++ "' is not an OpenCL kernel address space."
 
 -- In-kernel name and per-threadblock size in bytes.
@@ -639,6 +645,12 @@ inKernelOperations env mode body =
       GC.modifyUserState $ \s ->
         s {kernelSharedMemory = (name', size) : kernelSharedMemory s}
       GC.stm [C.cstm|$id:name = (__local unsigned char*) $id:name';|]
+    kernelOps (GlobalAlias name global offset) = do
+      offset' <- GC.compileExp $ untyped offset
+      -- The aliased memory is declared in the global address space
+      -- ('makeAllMemoryGlobal' maps the intra-block result space to
+      -- "global"), so the alias is a global pointer.
+      GC.stm [C.cstm|$id:name = (__global unsigned char*) $id:global + $exp:offset';|]
     kernelOps (ErrorSync f) = do
       label <- nextErrorLabel
       pending <- kernelSyncPending <$> GC.getUserState

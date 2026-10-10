@@ -178,6 +178,13 @@ data KernelOp
   | Barrier Fence
   | MemFence Fence
   | SharedAlloc VName (Count Bytes (TExp Int64))
+  | -- | Bind a memory block to a byte offset into a global memory block,
+  -- i.e. without consuming any shared memory.  This lets an intra-block
+  -- kernel write its result straight to global memory, instead of
+  -- staging it in shared memory and copying it out.  The first name is
+  -- the (kernel-local) memory being bound; the second is the global
+  -- memory it aliases.
+  GlobalAlias VName VName (TExp Int64)
   | -- | Perform a barrier and also check whether any
     -- threads have failed an assertion.  Make sure all
     -- threads would reach all 'ErrorSync's if any of them
@@ -252,6 +259,12 @@ instance Pretty KernelOp where
     "mem_fence_global()"
   pretty (SharedAlloc name size) =
     pretty name <+> equals <+> "shared_alloc" <> parens (pretty size)
+  pretty (GlobalAlias name global offset) =
+    pretty name
+      <+> equals
+      <+> pretty global
+      <+> "+"
+      <+> pretty offset
   pretty (ErrorSync FenceLocal) =
     "error_sync_local()"
   pretty (ErrorSync FenceGlobal) =
@@ -330,6 +343,7 @@ instance Pretty KernelOp where
 instance FreeIn KernelOp where
   freeIn' (Atomic _ op) = freeIn' op
   freeIn' (SharedAlloc _ size) = freeIn' size
+  freeIn' (GlobalAlias _ global offset) = fvName global <> freeIn' offset
   freeIn' _ = mempty
 
 brace :: Doc a -> Doc a
