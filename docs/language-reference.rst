@@ -1495,15 +1495,22 @@ For bulk in-place updates with multiple values, use the ``scatter``
 function from the `prelude
 <https://futhark-lang.org/docs/prelude/doc/prelude/soacs.html>`_.
 
-Alias Analysis
-~~~~~~~~~~~~~~
+Alias Propagation
+~~~~~~~~~~~~~~~~~
 
-The rules used by the Futhark compiler to determine aliasing are
-intuitive in the intra-procedural case.  Aliases are associated with
-entire arrays.  Aliases of a record are tuple are tracked for each
-element, not for the record or tuple itself.  Most constructs produce
-fresh arrays, with no aliases.  The main exceptions are ``if``,
-``loop``, function calls, and variable literals.
+The key safety property behind in-place updates is that once an object has been
+consumed, it is never accessed again. To guarantee this property, the compiler
+must also be aware of the potential for *aliasing*: that two different variables
+share underlying storage.
+
+The rules used by the Futhark compiler to determine aliasing are somewhat
+intricate, but the intuition is easy: the result of an expression aliases its
+subexpressions, except for expressions that explicitly construct fresh results.
+
+Aliases are tracked at the level of arrays and abstract types. Aliases of a
+record are tuple are tracked for each element, not for the record or tuple
+itself. Most constructs produce fresh arrays, with no aliases. The main
+exceptions are ``if``, ``loop``, function calls, and variable literals.
 
 * After a binding ``let a = b``, that simply assigns a new name to an
   existing variable, the variable ``a`` aliases ``b``.  Similarly for
@@ -1525,19 +1532,30 @@ fresh arrays, with no aliases.  The main exceptions are ``if``,
 In-place Updates and Higher-Order Functions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Consumption generally interacts inflexibly with higher-order
-functions.  The issue is that we cannot control how many times a
-function argument is applied, or to what, so it is not safe to pass a
-function that consumes its argument.  The following two conservative
-rules govern the interaction between consumption and higher-order
-functions:
+Consumption generally interacts inflexibly with higher-order functions. The
+issue is that we cannot control how many times a function argument is applied,
+or to what, so it is not safe to pass a function that consumes its argument. The
+following two conservative rules govern the interaction between consumption and
+higher-order functions:
 
 1. In the expression ``let p = e1 in ...``, if *any* in-place update
    takes place in the expression ``e1``, the value bound by ``p`` must
    not be or contain a function.
 
-2. A function that consumes one of its arguments may not be passed as
-   a higher-order argument to another function.
+2. A function that consumes one of its arguments may not be passed as a
+   higher-order argument to another function, unless that other function
+   explicitly expects a consuming function.
+
+3. It is not possible to quantify over the freshness of a functional argument,
+   so the fact that a function result is fresh is usually lost when it is passed
+   as a functional argument.
+
+   a. A major exception is that the type checker performs parametricity-based
+      analysis for *polymorphic* higher-order functions of certain types. For
+      example, when using the pipeline operator as ``x |> f``, the compiler is
+      able to infer that the result can only possibly come from the function
+      ``f``, and hence that the result of the entire expression is as fresh as
+      is declared for ``f``.
 
 .. _module-system:
 
