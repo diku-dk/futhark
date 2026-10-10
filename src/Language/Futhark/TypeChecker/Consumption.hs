@@ -1117,10 +1117,45 @@ checkLoop loop_loc (param, arg, form, body) = do
       loop_als `combineAliases` body_als
     )
 
+-- | If the result of a function with this declared type can only be the result
+-- of applying one of its own parameters, return the position of that parameter.
+-- That case happens when the result is a type parameter which occurs in exactly
+-- one of the parameters, and there only as the result of a function. Our
+-- reasoning (by parametricity) is that the only way to obtain a value of a type
+-- parameter is to be handed one, and no parameter but that one holds any.
+--
+-- This is a very crude rule, and a bit of a special case, but it really helps
+-- the ergonomics of the language.
+resultFromParam :: [TypeParam] -> [StructType] -> ResType -> Maybe Int
+resultFromParam tparams params res
+  | Scalar (TypeVar Nonfresh v _) <- res,
+    qualLeaf v `elem` map typeParamName tparams,
+    [(i, pt)] <- filter (S.member (qualLeaf v) . typeVars . snd) $ zip [0 ..] params,
+    isFunResult (qualLeaf v) pt =
+      Just i
+  | otherwise = Nothing
+  where
+    isFunResult v (Scalar (Arrow _ _ _ _ (RetType _ t))) = isResult v t
+    isFunResult _ _ = False
+    isResult v (Scalar (Arrow _ _ _ _ (RetType _ t))) = isResult v t
+    isResult v (Scalar (TypeVar _ t _)) = qualLeaf t == v
+    isResult _ _ = False
+
+-- | Peel the parameters off a function type, returning their types (in order)
+-- and the type of the final result. 'Nothing' for a non-function type. This is
+-- 'unfoldFunType' except that it preserves the freshness of the result, which
+-- is exactly what we are asking about here.
+funParts :: TypeBase Size u -> Maybe ([StructType], ResType)
+funParts (Scalar (Arrow _ _ _ pt (RetType _ t))) = Just $ go [pt] t
+  where
+    go ps (Scalar (Arrow _ _ _ pt' (RetType _ t'))) = go (pt' : ps) t'
+    go ps t' = (reverse ps, t')
+funParts _ = Nothing
+
 -- | The type of a global applied to arguments of the given types, with what
--- parametricity tells us about the freshness of the result recorded in it.
--- Only an application that supplies every parameter of the type is refined.
--- See Note [Parametric results].
+-- parametricity tells us about the freshness of the result recorded in it. Only
+-- an application that supplies every parameter of the type is refined. See Note
+-- [Parametric results].
 parametricFreshness ::
   QualName VName ->
   StructType ->
@@ -1133,43 +1168,13 @@ parametricFreshness qn ftype argtypes = do
     (param_ts, res) <- funParts decl
     guard $ length argtypes == length param_ts
     i <- resultFromParam tparams param_ts res
+    -- TODO: we could handle more cases here, e.g. a tuple where all of the
+    -- components can be inferred fresh.
     x <- case res of
       Scalar (TypeVar _ v _) -> Just $ qualLeaf v
       _ -> Nothing
     guard $ constructsFresh $ argtypes !! i
     Just $ freshenOccurrences x decl ftype
-
--- | Peel the parameters off a function type, returning their types (in order)
--- and the type of the final result.  'Nothing' for a non-function type.  This
--- is 'unfoldFunType' except that it preserves the freshness of the result,
--- which is exactly what we are asking about here.
-funParts :: TypeBase Size u -> Maybe ([StructType], ResType)
-funParts (Scalar (Arrow _ _ _ pt (RetType _ t))) = Just $ go [pt] t
-  where
-    go ps (Scalar (Arrow _ _ _ pt' (RetType _ t'))) = go (pt' : ps) t'
-    go ps t' = (reverse ps, t')
-funParts _ = Nothing
-
--- | If the result of a function with this declared type can only be the result
--- of applying one of its own parameters, the position of that parameter.  That
--- is the case when the result is a type parameter which occurs in exactly one
--- of the parameters, and there only as the result of a function: the only way
--- to obtain a value of an unknown type is to be handed one, and no parameter
--- but that one holds any.
-resultFromParam :: [TypeParam] -> [StructType] -> ResType -> Maybe Int
-resultFromParam tparams params res
-  | Scalar (TypeVar Nonfresh v _) <- res,
-    qualLeaf v `elem` [pv | TypeParamType _ pv _ <- tparams],
-    [(i, pt)] <- filter (S.member (qualLeaf v) . typeVars . snd) $ zip [0 ..] params,
-    isFunResult (qualLeaf v) pt =
-      Just i
-  | otherwise = Nothing
-  where
-    isFunResult v (Scalar (Arrow _ _ _ _ (RetType _ t))) = isResult v t
-    isFunResult _ _ = False
-    isResult v (Scalar (Arrow _ _ _ _ (RetType _ t))) = isResult v t
-    isResult v (Scalar (TypeVar _ t _)) = qualLeaf t == v
-    isResult _ _ = False
 
 -- | Does applying this function construct its result freshly?  That is so when
 -- every part of its (curried) result is fresh or primitive.  Requiring the
