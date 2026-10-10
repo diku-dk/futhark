@@ -1508,7 +1508,7 @@ intricate, but the intuition is easy: the result of an expression aliases its
 subexpressions, except for expressions that explicitly construct fresh results.
 
 Aliases are tracked at the level of arrays and abstract types. Aliases of a
-record are tuple are tracked for each element, not for the record or tuple
+record or tuple are tracked for each element, not for the record or tuple
 itself. Most constructs produce fresh arrays, with no aliases. The main
 exceptions are ``if``, ``loop``, function calls, and variable literals.
 

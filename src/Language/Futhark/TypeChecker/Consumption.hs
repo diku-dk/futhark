@@ -1612,7 +1612,7 @@ checkValDef globals (fname, tparams, params, body, RetType ext ret, retdecl, loc
 -- one; ask "might these two values share memory?" through 'overlaps' rather
 -- than by comparing alias sets directly. We can think that when 'AliasSelf' is
 -- part of an aliasing set then we have "imprecise aliases", and otherwise we
--- have "precise aliaseS" (but do not take these terms literally; aliasing is
+-- have "precise aliases" (but do not take these terms literally; aliasing is
 -- almost always an over-approximation).
 --
 -- Parametricity is what tells us whether such a value can have been

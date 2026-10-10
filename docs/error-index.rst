@@ -300,7 +300,9 @@ This occurs for expressions like the following::
     loop xs for i < 10 do
       -- Consume xs...
       let xs[i] = 0
+      -- ys is some variable bound outside the loop
       in ys
+
 
 This is not allowed, as the loop parameter ``xs`` is consumed, in this case
 implicitly due to the in-place update, but the loop body returns something that

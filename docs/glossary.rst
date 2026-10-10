@@ -66,7 +66,7 @@ documentation and in compiler output.
 
    Compound type
 
-     A :term:`tuple`, :term:`record`, or :term:`sum type`. Values of these type
+     A :term:`tuple`, :term:`record`, or :term:`sum type`. Values of these types
      do not have their own identity where :term:`aliasing` is concerned; aliases
      are only tracked at the level of their individual components.
 
