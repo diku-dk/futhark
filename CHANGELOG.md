@@ -75,6 +75,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   memory reached the loop result only through existential memory (returned by
   a branch or an inner loop), so that an iteration overwrote the previous
   iteration's value while it was still live.
+* OpenCL profiling reports on macOS no longer undercount event durations by
+  about 42x: Apple's OpenCL reports Mach time units, not nanoseconds.
 
 * Internalisation of reduce_by_index_3d with array-valued elements. (#2554)
 
