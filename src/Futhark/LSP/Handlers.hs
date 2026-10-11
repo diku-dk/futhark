@@ -115,11 +115,13 @@ onDocumentChangeHandler state_mvar =
         file_path = uriToFilePath $ doc ^. uri
     tryReCompile state_mvar file_path
 
--- Some clients (Eglot) sends open/close events whether we want them
--- or not, so we better be prepared to ignore them.
-onDocumentOpenHandler :: Handlers (LspM ())
-onDocumentOpenHandler = notificationHandler SMethod_TextDocumentDidOpen $ \_ -> pure ()
+onDocumentOpenHandler :: IORef State -> Handlers (LspM ())
+onDocumentOpenHandler state_mvar =
+  notificationHandler SMethod_TextDocumentDidOpen $ \msg ->
+    tryReCompile state_mvar $ uriToFilePath $ msg ^. params . textDocument . uri
 
+-- Nothing to do when a document is closed, but we ask for the
+-- notification, so we must handle it.
 onDocumentCloseHandler :: Handlers (LspM ())
 onDocumentCloseHandler = notificationHandler SMethod_TextDocumentDidClose $ \_msg -> pure ()
 
@@ -302,7 +304,7 @@ handlers :: IORef State -> ClientCapabilities -> Handlers (LspM ())
 handlers state_mvar _ =
   mconcat
     [ onInitializeHandler,
-      onDocumentOpenHandler,
+      onDocumentOpenHandler state_mvar,
       onDocumentCloseHandler,
       onDocumentCodeLenses,
       onDocumentCodeLensResolve,
