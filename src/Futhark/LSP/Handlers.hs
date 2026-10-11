@@ -149,7 +149,6 @@ onDocumentFormattingHandler =
           then InR Null
           else InL [fullTextEdit formattedText]
 
-    logWithSeverity Debug <& showText result
     report result
   where
     fullTextEdit newText =
