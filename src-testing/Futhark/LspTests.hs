@@ -109,7 +109,7 @@ testHoverInformation = serverTestCase "Hover" $ do
     expectedRange =
       Range
         { _start = Position {_line = 0, _character = 30},
-          _end = Position {_line = 0, _character = 34}
+          _end = Position {_line = 0, _character = 33}
         }
 
 testDefinition :: TestTree
@@ -124,7 +124,7 @@ testDefinition = serverTestCase "Go To Definition" $ do
               { _uri = docIdent ^. uri,
                 _range =
                   Range
-                    { _end = Position 0 15,
+                    { _end = Position 0 14,
                       _start = Position 0 0
                     }
               }
