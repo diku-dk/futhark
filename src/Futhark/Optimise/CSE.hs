@@ -45,10 +45,15 @@ import Futhark.IR.Aliases
     removeStmAliases,
   )
 import Futhark.IR.GPU qualified as GPU
+import Futhark.IR.GPUMem qualified as GPUMem
 import Futhark.IR.MC qualified as MC
+import Futhark.IR.MCMem qualified as MCMem
 import Futhark.IR.Mem qualified as Memory
 import Futhark.IR.Prop.Aliases
+import Futhark.IR.SOACS qualified as SOACS
 import Futhark.IR.SOACS.SOAC qualified as SOAC
+import Futhark.IR.Seq qualified as Seq
+import Futhark.IR.SeqMem qualified as SeqMem
 import Futhark.Pass
 import Futhark.Transform.Substitute
 
@@ -83,6 +88,17 @@ performCSE cse_arrays =
           )
           (newCSEState cse_arrays)
     onFun _ = pure . cseInFunDef cse_arrays
+
+-- Specialising here means the importers that instantiate the pass (the
+-- pipelines and the dev driver) use these copies instead of each
+-- re-specialising the whole pass whenever they are recompiled.
+{-# SPECIALIZE performCSE :: Bool -> Pass SOACS.SOACS SOACS.SOACS #-}
+{-# SPECIALIZE performCSE :: Bool -> Pass GPU.GPU GPU.GPU #-}
+{-# SPECIALIZE performCSE :: Bool -> Pass MC.MC MC.MC #-}
+{-# SPECIALIZE performCSE :: Bool -> Pass Seq.Seq Seq.Seq #-}
+{-# SPECIALIZE performCSE :: Bool -> Pass SeqMem.SeqMem SeqMem.SeqMem #-}
+{-# SPECIALIZE performCSE :: Bool -> Pass GPUMem.GPUMem GPUMem.GPUMem #-}
+{-# SPECIALIZE performCSE :: Bool -> Pass MCMem.MCMem MCMem.MCMem #-}
 
 -- | Perform CSE on a single function.
 --
