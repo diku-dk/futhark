@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -fomit-interface-pragmas #-}
+
 -- | All (almost) compiler pipelines end with an 'Action', which does
 -- something with the result of the pipeline.
 module Futhark.Actions

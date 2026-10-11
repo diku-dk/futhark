@@ -18,7 +18,6 @@ import Futhark.Analysis.PrimExp.Convert
 import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.IR.Aliases (Aliases)
 import Futhark.IR.GPU.Op
-import Futhark.IR.GPU.Simplify (simplifyKernelOp)
 import Futhark.IR.Mem
 import Futhark.IR.Mem.Simplify
 import Futhark.IR.TypeCheck qualified as TC

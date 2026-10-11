@@ -145,7 +145,7 @@
         let
           pkgs = import nixpkgs { inherit system; };
           python = pkgs.python314Packages;
-          haskell = pkgs.haskell.packages.ghc910;
+          haskell = pkgs.haskell.packages.ghc912;
 
           # The Nix 'system' convention is unfortunately the opposite of what we use
           # in our tarballs, so flip them around here.
@@ -169,7 +169,7 @@
             inherit system;
 
             config.packageOverrides = pkgs: {
-              haskellPackages = pkgs.haskellPackages.override {
+              haskellPackages = haskell.override {
                 overrides = mkHaskellOverrides pkgs;
               };
             };
@@ -252,7 +252,7 @@
         let
           pkgs = import nixpkgs { inherit system; };
           python = pkgs.python314Packages;
-          haskell = pkgs.haskell.packages.ghc910;
+          haskell = pkgs.haskell.packages.ghc912;
         in
         {
           # A shell that only contains tools for style checking.

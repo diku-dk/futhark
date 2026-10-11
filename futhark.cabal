@@ -110,9 +110,13 @@ common common
 
 library
   import: common
-  -- These cause inlining of class-heavy code, which speeds up compilation a lot
-  -- but makes compiling the compiler much slower.
-  ghc-options: -fexpose-all-unfoldings -fspecialise-aggressively
+  -- These cause specialisation of class-heavy code, which speeds up compilation
+  -- a lot. Only overloaded functions are exposed, as those are the only ones
+  -- specialisation needs, and exposing everything makes almost any change
+  -- recompile most of the compiler. Futhark.Passes and Futhark.Actions also set
+  -- -fomit-interface-pragmas, as otherwise any change to a pass or backend
+  -- recompiles every CLI module.
+  ghc-options: -fexpose-overloaded-unfoldings -fspecialise-aggressively
   hs-source-dirs: src
   exposed-modules:
       Futhark
