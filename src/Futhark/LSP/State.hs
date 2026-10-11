@@ -9,6 +9,7 @@ module Futhark.LSP.State
   )
 where
 
+import Data.Int (Int32)
 import Data.Map qualified as M
 import Futhark.Compiler.Program (LoadedProg)
 import Futhark.LSP.PositionMapping (PositionMapping, StaleFile (..))
@@ -20,12 +21,15 @@ data State = State
     stateProgram :: Maybe LoadedProg,
     -- | The stale data, stored to provide PositionMapping when requested.
     -- All files that have been opened have an entry.
-    staleData :: M.Map FilePath StaleFile
+    staleData :: M.Map FilePath StaleFile,
+    -- | The file and version of the most recent compilation, if it
+    -- failed.  Used to avoid recompiling unchanged files.
+    stateFailed :: Maybe (FilePath, Int32)
   }
 
 -- | Initial state.
 emptyState :: State
-emptyState = State Nothing M.empty
+emptyState = State Nothing M.empty Nothing
 
 -- | Get the contents of a stale (last successfully complied) file's contents.
 getStaleContent :: State -> FilePath -> Maybe VirtualFile
@@ -42,7 +46,10 @@ updateStaleContent file_path file_content loadedProg state =
   -- NOTE: insert will replace the old value if the key already exists.
   -- updateStaleContent is only called after a successful type-check,
   -- so the PositionsMapping should be Nothing here, it's calculated after failed type-check.
-  State (Just loadedProg) (M.insert file_path (StaleFile file_content Nothing) (staleData state))
+  state
+    { stateProgram = Just loadedProg,
+      staleData = M.insert file_path (StaleFile file_content Nothing) (staleData state)
+    }
 
 -- | Update the state with another pair of file_path and PositionMapping.
 updateStaleMapping :: Maybe FilePath -> Maybe PositionMapping -> State -> State
@@ -50,5 +57,5 @@ updateStaleMapping (Just file_path) mapping state = do
   case M.lookup file_path (staleData state) of
     Nothing -> state -- Only happends when the file have never been successfully type-checked before.
     Just (StaleFile file_content _mapping) ->
-      State (stateProgram state) (M.insert file_path (StaleFile file_content mapping) (staleData state))
+      state {staleData = M.insert file_path (StaleFile file_content mapping) (staleData state)}
 updateStaleMapping _ _ state = state
