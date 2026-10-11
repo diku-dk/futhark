@@ -246,9 +246,9 @@ testFormattingSyntaxError = serverTestCase "Formatting syntax error" $ do
 main :: IO ()
 main = defaultMain testEvaluationComment
 
-testEvaluationComment :: TestTree
-testEvaluationComment = serverTestCase "Evaluation Comment" $ do
-  docIdent <- createMainDoc mainContents
+-- | Evaluate the single evaluation comment in the document.
+evaluateComment :: TextDocumentIdentifier -> Session ()
+evaluateComment docIdent = do
   lensCommand <-
     getAndResolveCodeLenses docIdent >>= \case
       [CodeLens _ (Just command) _] -> pure command
@@ -257,8 +257,12 @@ testEvaluationComment = serverTestCase "Evaluation Comment" $ do
   executeCommand lensCommand
 
   -- this is important, it crashes with an IOError otherwise
-  _workspaceEdit <- message SMethod_WorkspaceApplyEdit
+  void $ message SMethod_WorkspaceApplyEdit
 
+testEvaluationComment :: TestTree
+testEvaluationComment = serverTestCase "Evaluation Comment" $ do
+  docIdent <- createMainDoc mainContents
+  evaluateComment docIdent
   newContents <- documentContents docIdent
   liftIO $ newContents @?= expectedContents
   where
@@ -270,6 +274,18 @@ testEvaluationComment = serverTestCase "Evaluation Comment" $ do
       def x = 42i32
       -- >>> x + 5
       |]
+
+testEvaluationCommentReplacesResult :: TestTree
+testEvaluationCommentReplacesResult =
+  serverTestCase "Evaluation Comment replaces result" $ do
+    docIdent <- createMainDoc mainContents
+    evaluateComment docIdent
+    evaluateComment docIdent
+    newContents <- documentContents docIdent
+    liftIO $ newContents @?= expectedContents
+  where
+    mainContents = "def x = 42i32\n-- >>> x + 5\ndef y = x\n"
+    expectedContents = "def x = 42i32\n-- >>> x + 5\n-- 47\ndef y = x\n"
 
 fullRange :: Range
 fullRange =
@@ -444,6 +460,7 @@ tests =
       testFormatting,
       testFormattingSyntaxError,
       testEvaluationComment,
+      testEvaluationCommentReplacesResult,
       testInlayTypeHint,
       testTypeCompletionCodeAction
     ]
