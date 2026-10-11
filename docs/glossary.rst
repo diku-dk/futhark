@@ -64,6 +64,12 @@ documentation and in compiler output.
      principle the pipeline could be configurable, but in practice
      each backend is coupled with a specific pipeline.
 
+   Compound type
+
+     A :term:`tuple`, :term:`record`, or :term:`sum type`. Values of these types
+     do not have their own identity where :term:`aliasing` is concerned; aliases
+     are only tracked at the level of their individual components.
+
    Constructive use
 
      A variable ``n`` is used *constructively* in a type if it is used
@@ -309,6 +315,12 @@ documentation and in compiler output.
      consituent parts. Patterns are used in function parameters,
      ``let``-bindings, and ``match``. See :ref:`patterns`.
 
+   Record
+
+     In Futhark, a record is a :term:`compound type` that associated field names
+     with field types. ``{x:i32,y:bool}`` is an example of a record with two
+     fields.
+
    Recursion
 
      A function that calls itself.  Currently not supported in
@@ -375,11 +387,23 @@ documentation and in compiler output.
      on.  They are *second order* because they accept a functional
      argument, and so permit :term:`nested data parallelism`.
 
+   Sum type
+
+     A type that comprises one or more constructors, each of which has a
+     payload. For example, ``#foo | #bar i32`` is a sum type, where ``#foo`` has
+     no payload, and ``#bar`` has an ``i32`` payload.
+
    Symbol
 
      A lexical token that consts of symbolic (non-alphabetic
      characters), and can be bound to a value.  Infix operators such
      as ``+`` and ``/`` are symbols.  See also :term:`name`.
+
+   Tuple
+
+     A special case of a :term:`record` where the fields are contiguously named
+     integers starting at zero. ``(i32,bool)`` is a tuple that is completely
+     equivalent with the record ``{0=i32,1=bool}``.
 
    Type
 

@@ -31,7 +31,7 @@ def foo_bar [n] (grid_foo: *[n]tup) (grid_bar: *[n]tup) : (*[n]tup, *[n]tup) =
 
 def create_tup (_: rng) : tup = (0, 0)
 
-def dummy_grid (n: i64) : [n]tup = replicate n ((create_tup (dummy_rng ())))
+def dummy_grid (n: i64) : *[n]tup = replicate n ((create_tup (dummy_rng ())))
 
 entry foo_bar_bar [n] (grid0: *[n]i64) (grid1: *[n]i64) : ([n]i64, [n]i64) =
   unzip ((foo_bar (zip grid0 grid1) (dummy_grid n)).1)

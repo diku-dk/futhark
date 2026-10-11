@@ -1,5 +1,5 @@
 -- ==
--- error: "t", but this was consumed
+-- error: self-aliased
 
 def f (t: ([]i32, *[]i32)) : i32 =
   let (a, b) = t
