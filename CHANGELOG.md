@@ -89,6 +89,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Short-circuiting of function parameters failed to take layout into account.
   (#2568)
 
+* `futhark literate` now handles indented comments. (#2521)
+
 ## [0.27.1]
 
 ### Added
