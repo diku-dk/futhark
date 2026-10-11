@@ -221,7 +221,7 @@ jobs:
     steps:
     - uses: actions/checkout@v7
 
-    - uses: actions/download-artifact@v5
+    - uses: actions/download-artifact@v8
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -240,7 +240,7 @@ jobs:
     steps:
     - uses: actions/checkout@v7
 
-    - uses: actions/download-artifact@v5
+    - uses: actions/download-artifact@v8
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -266,7 +266,7 @@ jobs:
       with:
         devShell: .#test
 
-    - uses: actions/download-artifact@v5
+    - uses: actions/download-artifact@v8
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -294,7 +294,7 @@ jobs:
       with:
         devShell: .#test
 
-    - uses: actions/download-artifact@v5
+    - uses: actions/download-artifact@v8
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -322,7 +322,7 @@ jobs:
       with:
         devShell: .#test
 
-    - uses: actions/download-artifact@v5
+    - uses: actions/download-artifact@v8
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -351,7 +351,7 @@ jobs:
       with:
         devShell: .#test
 
-    - uses: actions/download-artifact@v5
+    - uses: actions/download-artifact@v8
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -378,7 +378,7 @@ jobs:
       with:
         devShell: .#test
 
-    - uses: actions/download-artifact@v5
+    - uses: actions/download-artifact@v8
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -404,7 +404,7 @@ jobs:
       with:
         devShell: .#test
 
-    - uses: actions/download-artifact@v5
+    - uses: actions/download-artifact@v8
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -530,7 +530,7 @@ jobs:
       with:
         node-version: '22.x'
 
-    - uses: actions/download-artifact@v5
+    - uses: actions/download-artifact@v8
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -567,7 +567,7 @@ jobs:
       with:
         node-version: '22.x'
 
-    - uses: actions/download-artifact@v5
+    - uses: actions/download-artifact@v8
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -600,7 +600,7 @@ jobs:
       with:
         node-version: '22.x'
 
-    - uses: actions/download-artifact@v5
+    - uses: actions/download-artifact@v8
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -621,7 +621,7 @@ jobs:
     steps:
     - uses: actions/checkout@v7
 
-    - uses: actions/download-artifact@v5
+    - uses: actions/download-artifact@v8
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -641,7 +641,7 @@ jobs:
     steps:
     - uses: actions/checkout@v7
 
-    - uses: actions/download-artifact@v5
+    - uses: actions/download-artifact@v8
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -668,7 +668,7 @@ jobs:
       with:
         devShell: .#test
 
-    - uses: actions/download-artifact@v5
+    - uses: actions/download-artifact@v8
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -723,19 +723,19 @@ jobs:
         key: ${{ secrets.SSHKEY }}
         known_hosts: ${{ secrets.KNOWN_HOSTS }}
 
-    - uses: actions/download-artifact@v5
+    - uses: actions/download-artifact@v8
       with:
         name: futhark-nightly-windows-x86_64.zip
 
-    - uses: actions/download-artifact@v5
+    - uses: actions/download-artifact@v8
       with:
         name: futhark-nightly-macos-arm64.tar.xz
 
-    - uses: actions/download-artifact@v5
+    - uses: actions/download-artifact@v8
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
-    - uses: actions/download-artifact@v5
+    - uses: actions/download-artifact@v8
       with:
         name: prelude-docs.tar.xz
 

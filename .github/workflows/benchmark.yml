@@ -99,7 +99,7 @@ jobs:
       with:
         key: ${{ secrets.SSHKEY }}
         known_hosts: ${{ secrets.KNOWN_HOSTS }}
-    - uses: actions/download-artifact@v5
+    - uses: actions/download-artifact@v8
     - run: |
         ls -R
     - name: Prepare package
