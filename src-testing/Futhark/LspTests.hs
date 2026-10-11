@@ -25,6 +25,8 @@ import Language.LSP.Protocol.Types
   ( CodeAction (..),
     CodeLens (CodeLens),
     Definition (Definition),
+    Diagnostic (..),
+    DiagnosticSeverity (DiagnosticSeverity_Error),
     FormattingOptions (FormattingOptions),
     Hover (Hover),
     InlayHint (..),
@@ -57,6 +59,7 @@ import Language.LSP.Test
     getSemanticTokens,
     message,
     runSessionWithHandles,
+    waitForDiagnostics,
   )
 import NeatInterpolation (text)
 import System.IO (hClose)
@@ -90,6 +93,20 @@ createMainDoc = createDoc "main.fut" futharkLanguage
 
 serverTestCase :: TestName -> Session () -> TestTree
 serverTestCase testName = testCase testName . runServerSessionPair
+
+testDiagnosticsOnOpen :: TestTree
+testDiagnosticsOnOpen = serverTestCase "Diagnostics on open" $ do
+  _ <- createMainDoc "def main = 1i32 + true"
+  diags <- waitForDiagnostics
+  liftIO $ map severityAndRange diags @?= [(Just DiagnosticSeverity_Error, expectedRange)]
+  where
+    expectedRange =
+      Range
+        { _start = Position {_line = 0, _character = 18},
+          _end = Position {_line = 0, _character = 22}
+        }
+
+    severityAndRange Diagnostic {..} = (_severity, _range)
 
 testHoverInformation :: TestTree
 testHoverInformation = serverTestCase "Hover" $ do
@@ -364,7 +381,8 @@ tests :: TestTree
 tests =
   testGroup
     "Futhark.LspTests"
-    [ testHoverInformation,
+    [ testDiagnosticsOnOpen,
+      testHoverInformation,
       testDefinition,
       testSemanticTokens,
       testFormatting,
