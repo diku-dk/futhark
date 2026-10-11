@@ -1500,8 +1500,8 @@ Alias Propagation
 
 The key safety property behind in-place updates is that once an object has been
 consumed, it is never accessed again. To guarantee this property, the compiler
-must also be aware of the potential for *aliasing*: that two different variables
-share underlying storage.
+must also be aware of the potential for *aliasing*: whether two different
+variables share underlying storage.
 
 The rules used by the Futhark compiler to determine aliasing are somewhat
 intricate, but the intuition is easy: the result of an expression aliases its
@@ -1523,11 +1523,10 @@ exceptions are ``if``, ``loop``, function calls, and variable literals.
   aliases that the merge parameters may assume at the end of an
   iteration, computed to a fixed point.
 
-* The aliases of a value returned from a function is the most
-  interesting case, and depends on whether the return value is
-  declared *alias-free* (with an asterisk ``*``) or not.  If it is
-  declared alias-free, then it has no aliases.  Otherwise, it aliases
-  all arguments passed for *non-consumed* parameters.
+* The aliases of a value returned from a function is the most interesting case,
+  and depends on whether the return value is declared *fresh* (with an asterisk
+  ``*``) or not. If it is declared alias-free, then it has no aliases.
+  Otherwise, it aliases all arguments passed for *non-consumed* parameters.
 
 In-place Updates and Higher-Order Functions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1556,6 +1555,9 @@ higher-order functions:
       able to infer that the result can only possibly come from the function
       ``f``, and hence that the result of the entire expression is as fresh as
       is declared for ``f``.
+
+      This works only for direct references to polymorphic functions, and they
+      must be fully applied.
 
 .. _module-system:
 
