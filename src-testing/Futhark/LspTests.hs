@@ -35,6 +35,7 @@ import Language.LSP.Protocol.Types
     MarkupKind (MarkupKind_PlainText),
     Position (..),
     Range (..),
+    SemanticTokens (..),
     TextDocumentIdentifier,
     type (|?) (..),
   )
@@ -53,6 +54,7 @@ import Language.LSP.Test
     getCodeActions,
     getDefinitions,
     getHover,
+    getSemanticTokens,
     message,
     runSessionWithHandles,
   )
@@ -141,6 +143,12 @@ testDefinition = serverTestCase "Go To Definition" $ do
         { _line = 1,
           _character = 12
         }
+
+testSemanticTokens :: TestTree
+testSemanticTokens = serverTestCase "Semantic tokens" $ do
+  docIdent <- createMainDoc "def main = 0i32"
+  tokens <- getSemanticTokens docIdent
+  liftIO $ tokens @?= InL (SemanticTokens Nothing [])
 
 testFormatting :: TestTree
 testFormatting = serverTestCase "Formatting" $ do
@@ -358,6 +366,7 @@ tests =
     "Futhark.LspTests"
     [ testHoverInformation,
       testDefinition,
+      testSemanticTokens,
       testFormatting,
       testEvaluationComment,
       testInlayTypeHint,

@@ -54,6 +54,7 @@ import Language.LSP.Protocol.Types
     Null (..),
     Position (Position, _character, _line),
     Range (Range, _end, _start),
+    SemanticTokens (SemanticTokens, _data_, _resultId),
     TextEdit (TextEdit, _newText, _range),
     Uri (Uri),
     toNormalizedUri,
@@ -192,6 +193,15 @@ onDocumentFormattingHandler =
           _code = InR ErrorCodes_InvalidParams
         }
 
+-- The lsp library always advertises the semanticTokens capability,
+-- and some clients (Eglot) then request full semantic tokens whether
+-- we registered a handler or not.  We do not compute semantic tokens,
+-- so we answer with none.
+onDocumentSemanticTokensFull :: Handlers (LspM ())
+onDocumentSemanticTokensFull =
+  requestHandler SMethod_TextDocumentSemanticTokensFull $ \_ respond ->
+    respond $ Right $ InL $ SemanticTokens {_resultId = Nothing, _data_ = []}
+
 onDocumentCodeLenses :: Handlers (LspM ())
 onDocumentCodeLenses =
   requestHandler SMethod_TextDocumentCodeLens $ \request respond -> do
@@ -297,6 +307,7 @@ handlers state_mvar _ =
       onDocumentCodeLenses,
       onDocumentCodeLensResolve,
       onDocumentFormattingHandler,
+      onDocumentSemanticTokensFull,
       onTextDocumentInlayHint state_mvar,
       onTextDocumentCodeAction state_mvar,
       onDocumentSaveHandler state_mvar,

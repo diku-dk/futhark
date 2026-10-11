@@ -13,7 +13,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Changed
 
-### Fized
+### Fixed
+
+* `futhark lsp` now handles `textDocument/semanticTokens/full` in a trivial way
+  to work around a bug in the `lsp` library.
 
 ## [0.28.1]
 
