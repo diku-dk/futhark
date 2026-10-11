@@ -1,7 +1,7 @@
 def f (i: i64) (n: i64) : i64 =
   if i < 0 || n <= i then -1 else i
 
-def g [m] (arr: *[m]i64) : []i64 =
+def g [m] (arr: *[m]i64) : *[]i64 =
   let set =
     reduce_by_index (replicate m 0i64)
                     (+)

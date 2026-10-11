@@ -34,6 +34,7 @@ module Language.Futhark.TypeChecker.Terms.Monad
     checkTypeExpNonrigid,
     lookupVar,
     lookupMod,
+    typeSchemes,
     lookupAbsTy,
 
     -- * Sizes
@@ -592,8 +593,42 @@ lookupVar loc qn@(QualName qs name) inst_t = do
       replaceTyVars loc inst_t
     -- See Note [Checking recursive functions] in
     -- Language.Futhark.TypeChecker.Terms.
-    Just RecursiveV ->
-      replaceTyVars loc inst_t
+    Just RecursiveV -> do
+      (ext, t) <- existentialResult <$> replaceTyVars loc inst_t
+      -- The sizes are now bound by the type, so they are not size variables
+      -- to be solved.
+      modifyConstraints (`M.withoutKeys` S.fromList ext)
+      pure t
+
+-- | Make the sizes of the final result of a function type existential, unless
+-- a parameter mentions them, and return them. Each application of the function
+-- may then return a different size, as each call of a recursive function may.
+existentialResult :: TypeBase Size o -> ([VName], TypeBase Size o)
+existentialResult = go mempty
+  where
+    go :: S.Set VName -> TypeBase Size u -> ([VName], TypeBase Size u)
+    go bound (Scalar (Arrow o pn d ta (RetType ext tr))) =
+      let bound' = bound <> fvVars (freeInType ta)
+       in case tr of
+            Scalar Arrow {} ->
+              Scalar . Arrow o pn d ta . RetType ext <$> go bound' tr
+            _ ->
+              let new = filter (`S.notMember` bound') $ S.toList $ fvVars $ freeInType tr
+               in (new, Scalar $ Arrow o pn d ta $ RetType (ext <> new) tr)
+    go _ t = ([], t)
+
+-- | A pure function for looking up the type scheme of a global name. Used by
+-- consumption checking to exploit parametricity; see Note [Parametric results]
+-- in "Language.Futhark.TypeChecker.Consumption".
+typeSchemes :: TermTypeM (QualName VName -> Maybe TypeM.BoundV)
+typeSchemes = do
+  scope <- asks termScope
+  outer_env <- asks termOuterEnv
+  pure $ \qn@(QualName _ name) ->
+    case (M.lookup name . scopeVtable =<< Scope.lookupQualNameEnvMaybe id scope qn)
+      `mplus` Scope.lookupOuterVal id outer_env name of
+      Just (BoundV tparams t) -> Just (TypeM.BoundV tparams t)
+      _ -> Nothing
 
 -- | Look up the liftedness of an abstract type.
 lookupAbsTy :: QualName VName -> TermTypeM Liftedness

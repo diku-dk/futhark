@@ -32,21 +32,21 @@ import "soacs"
 module type from_prim = {
   type t
 
-  val i8 : i8 -> t
-  val i16 : i16 -> t
-  val i32 : i32 -> t
-  val i64 : i64 -> t
+  val i8 : i8 -> *t
+  val i16 : i16 -> *t
+  val i32 : i32 -> *t
+  val i64 : i64 -> *t
 
-  val u8 : u8 -> t
-  val u16 : u16 -> t
-  val u32 : u32 -> t
-  val u64 : u64 -> t
+  val u8 : u8 -> *t
+  val u16 : u16 -> *t
+  val u32 : u32 -> *t
+  val u64 : u64 -> *t
 
-  val f16 : f16 -> t
-  val f32 : f32 -> t
-  val f64 : f64 -> t
+  val f16 : f16 -> *t
+  val f32 : f32 -> *t
+  val f64 : f64 -> *t
 
-  val bool : bool -> t
+  val bool : bool -> *t
 }
 
 -- | A basic numeric module type that can be implemented for both
@@ -54,12 +54,12 @@ module type from_prim = {
 module type numeric = {
   include from_prim
 
-  val (+) : t -> t -> t
-  val (-) : t -> t -> t
-  val (*) : t -> t -> t
-  val (/) : t -> t -> t
-  val (%) : t -> t -> t
-  val (**) : t -> t -> t
+  val (+) : t -> t -> *t
+  val (-) : t -> t -> *t
+  val (*) : t -> t -> *t
+  val (/) : t -> t -> *t
+  val (%) : t -> t -> *t
+  val (**) : t -> t -> *t
 
   val to_i64 : t -> i64
 
@@ -71,15 +71,15 @@ module type numeric = {
   val (!=) : t -> t -> bool
 
   -- | Arithmetic negation (use `!` for bitwise negation).
-  val neg : t -> t
-  val max : t -> t -> t
-  val min : t -> t -> t
+  val neg : t -> *t
+  val max : t -> t -> *t
+  val min : t -> t -> *t
 
-  val abs : t -> t
+  val abs : t -> *t
 
   -- | Sign function.  Produces -1, 0, or 1 if the argument is
   -- respectively less than, equal to, or greater than zero.
-  val sgn : t -> t
+  val sgn : t -> *t
 
   -- | The most positive representable number.
   val highest : t
@@ -89,16 +89,16 @@ module type numeric = {
   val lowest : t
 
   -- | Returns zero on empty input.
-  val sum [n] : [n]t -> t
+  val sum [n] : [n]t -> *t
 
   -- | Returns one on empty input.
-  val product [n] : [n]t -> t
+  val product [n] : [n]t -> *t
 
   -- | Returns `lowest` on empty input.
-  val maximum [n] : [n]t -> t
+  val maximum [n] : [n]t -> *t
 
   -- | Returns `highest` on empty input.
-  val minimum [n] : [n]t -> t
+  val minimum [n] : [n]t -> *t
 }
 
 -- | An extension of `numeric`@mtype that provides facilities that are
@@ -108,47 +108,47 @@ module type integral = {
 
   -- | Like `/`, but rounds towards zero. This only matters when one of the
   -- operands is negative. May be more efficient.
-  val (//) : t -> t -> t
+  val (//) : t -> t -> *t
 
   -- | Like `%`, but rounds towards zero. This only matters when one of the
   -- operands is negative. May be more efficient.
-  val (%%) : t -> t -> t
+  val (%%) : t -> t -> *t
 
   -- | Bitwise and.
-  val (&) : t -> t -> t
+  val (&) : t -> t -> *t
 
   -- | Bitwise or.
-  val (|) : t -> t -> t
+  val (|) : t -> t -> *t
 
   -- | Bitwise xor.
-  val (^) : t -> t -> t
+  val (^) : t -> t -> *t
 
   -- | Bitwise negation.
-  val not : t -> t
+  val not : t -> *t
 
   -- | Left shift; inserting zeroes.
-  val (<<) : t -> t -> t
+  val (<<) : t -> t -> *t
 
   -- | Arithmetic right shift, using sign extension for the leftmost bits.
-  val (>>) : t -> t -> t
+  val (>>) : t -> t -> *t
 
   -- | Logical right shift, inserting zeroes for the leftmost bits.
-  val (>>>) : t -> t -> t
+  val (>>>) : t -> t -> *t
 
   val num_bits : i32
   val get_bit : i32 -> t -> i32
-  val set_bit : i32 -> t -> i32 -> t
+  val set_bit : i32 -> t -> i32 -> *t
 
   -- | Count number of one bits.
   val popc : t -> i32
 
   -- | Computes `x * y` and returns the high half of the product of x
   -- and y.
-  val mul_hi : (x: t) -> (y: t) -> t
+  val mul_hi : (x: t) -> (y: t) -> *t
 
   -- | Computes `mul_hi a b + c`, but perhaps in a more efficient way,
   -- depending on the target platform.
-  val mad_hi : (a: t) -> (b: t) -> (c: t) -> t
+  val mad_hi : (a: t) -> (b: t) -> (c: t) -> *t
 
   -- | Count number of zero bits preceding the most significant set
   -- bit.  Returns the number of bits in the type if the argument is
@@ -166,57 +166,57 @@ module type real = {
   include numeric
 
   -- | Multiplicative inverse.
-  val recip : t -> t
+  val recip : t -> *t
 
-  val from_fraction : i64 -> i64 -> t
+  val from_fraction : i64 -> i64 -> *t
   val to_i64 : t -> i64
   val to_f64 : t -> f64
 
   -- | Square root.
-  val sqrt : t -> t
+  val sqrt : t -> *t
 
   -- | Inverse square root. Depending on the backend, this may be
   -- faster than `1/sqrt(x)`.
-  val rsqrt : t -> t
+  val rsqrt : t -> *t
 
   -- | Cube root.
-  val cbrt : t -> t
-  val exp : t -> t
+  val cbrt : t -> *t
+  val exp : t -> *t
 
-  val sin : t -> t
-  val cos : t -> t
-  val tan : t -> t
+  val sin : t -> *t
+  val cos : t -> *t
+  val tan : t -> *t
 
   -- | `sin(pi*x)` - depending on backing, may be faster or more
   -- accurate.
-  val sinpi : t -> t
+  val sinpi : t -> *t
 
   -- | `cos(pi*x)` - depending on backing, may be faster or more
   -- accurate.
-  val cospi : t -> t
+  val cospi : t -> *t
 
   -- | `tan(pi*x)` - depending on backing, may be faster or more
   -- accurate.
-  val tanpi : t -> t
+  val tanpi : t -> *t
 
-  val asin : t -> t
-  val acos : t -> t
-  val atan : t -> t
+  val asin : t -> *t
+  val acos : t -> *t
+  val atan : t -> *t
 
-  val asinpi : t -> t
-  val acospi : t -> t
-  val atanpi : t -> t
+  val asinpi : t -> *t
+  val acospi : t -> *t
+  val atanpi : t -> *t
 
-  val sinh : t -> t
-  val cosh : t -> t
-  val tanh : t -> t
+  val sinh : t -> *t
+  val cosh : t -> *t
+  val tanh : t -> *t
 
-  val asinh : t -> t
-  val acosh : t -> t
-  val atanh : t -> t
+  val asinh : t -> *t
+  val acosh : t -> *t
+  val atanh : t -> *t
 
-  val atan2 : t -> t -> t
-  val atan2pi : t -> t -> t
+  val atan2 : t -> t -> *t
+  val atan2pi : t -> t -> *t
 
   -- | Compute the length of the hypotenuse of a right-angled
   -- triangle.  That is, `hypot x y` computes *√(x²+y²)*.  Put another
@@ -224,59 +224,59 @@ module type real = {
   -- The calculation is performed without undue overflow or underflow
   -- during intermediate steps (specific accuracy depends on the
   -- backend).
-  val hypot : t -> t -> t
+  val hypot : t -> t -> *t
 
   -- | The true Gamma function.
-  val gamma : t -> t
+  val gamma : t -> *t
 
   -- | The natural logarithm of the absolute value of `gamma`.
-  val lgamma : t -> t
+  val lgamma : t -> *t
 
   -- | The error function.
-  val erf : t -> t
+  val erf : t -> *t
 
   -- | The complementary error function.
-  val erfc : t -> t
+  val erfc : t -> *t
 
   -- | Linear interpolation.  The third argument must be in the range
   -- `[0,1]` or the results are unspecified.
-  val lerp : t -> t -> t -> t
+  val lerp : t -> t -> t -> *t
 
   -- | Natural logarithm.
-  val log : t -> t
+  val log : t -> *t
 
   -- | Base-2 logarithm.
-  val log2 : t -> t
+  val log2 : t -> *t
 
   -- | Base-10 logarithm.
-  val log10 : t -> t
+  val log10 : t -> *t
 
   -- | Compute `log (1 + x)` accurately even when `x` is very small.
-  val log1p : t -> t
+  val log1p : t -> *t
 
   -- | Round towards infinity.
-  val ceil : t -> t
+  val ceil : t -> *t
 
   -- | Round towards negative infinity.
-  val floor : t -> t
+  val floor : t -> *t
 
   -- | Round towards zero.
-  val trunc : t -> t
+  val trunc : t -> *t
 
   -- | Round to the nearest integer, with halfway cases rounded to the
   -- nearest even integer.  Note that this differs from `round()` in
   -- C, but matches more modern languages.
-  val round : t -> t
+  val round : t -> *t
 
   -- | Computes `a*b+c`.  Depending on the compiler backend, this may
   -- be fused into a single operation that is faster but less
   -- accurate.  Do not confuse it with `fma`.
-  val mad : (a: t) -> (b: t) -> (c: t) -> t
+  val mad : (a: t) -> (b: t) -> (c: t) -> *t
 
   -- | Computes `a*b+c`, with `a*b` being rounded with infinite
   -- precision.  Rounding of intermediate products shall not
   -- occur. Edge case behavior is per the IEEE 754-2008 standard.
-  val fma : (a: t) -> (b: t) -> (c: t) -> t
+  val fma : (a: t) -> (b: t) -> (c: t) -> *t
 
   val isinf : t -> bool
   val isnan : t -> bool
@@ -301,12 +301,12 @@ module type float = {
   -- 't'.
   type int_t
 
-  val from_bits : int_t -> t
+  val from_bits : int_t -> *t
   val to_bits : t -> int_t
 
   val num_bits : i32
   val get_bit : i32 -> t -> i32
-  val set_bit : i32 -> t -> i32 -> t
+  val set_bit : i32 -> t -> i32 -> *t
 
   -- | The difference between 1.0 and the next larger representable
   -- number.
@@ -314,13 +314,13 @@ module type float = {
 
   -- | Produces the next representable number from `x` in the
   -- direction of `y`.
-  val nextafter : (x: t) -> (y: t) -> t
+  val nextafter : (x: t) -> (y: t) -> *t
 
   -- | Multiplies floating-point value by 2 raised to an integer power.
-  val ldexp : t -> i32 -> t
+  val ldexp : t -> i32 -> *t
 
   -- | Compose a floating-point value with the magnitude of `x` and the sign of `y`.
-  val copysign : (x: t) -> (y: t) -> t
+  val copysign : (x: t) -> (y: t) -> *t
 }
 
 -- | Boolean numbers.  When converting from a number to `bool`, 0 is

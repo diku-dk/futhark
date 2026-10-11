@@ -325,34 +325,3 @@ execute](https://github.com/jrprice/Oclgrind/issues/204).  To work
 around this, disable optimisations in the OpenCL compiler:
 
     futhark test foo.fut --backend=opencl --runner=tools/oclgrindrunner.sh --pass-option=--build-option=-O0
-
-## Using `futhark script`
-
-The `futhark script` command is a handy way to run (server-mode)
-executables with arbitrary input, while also seeing logging output in
-real time. This is particularly useful for programs whose benchmarking
-input are complicated FutharkScript expressions.
-
-If you have a program `infinite.fut` containing
-
-```Futhark
-entry main n = iterate 1000000000 (map (+1)) (iota n)
-```
-
-then you can run
-
-```
-$ futhark script -D infinite.fut 'main 10i64'
-```
-
-to run it with debug prints. You can also use `-L` instead of `-D` to
-just enable logging. The `main 10i64` can be an arbitrary FutharkScript
-expression.
-
-The above will compile `infinite.fut` using the `c` backend before
-running it. Pass a `--backend` option to `futhark script` to use a
-different backend, or pass an already compiled program instead of a
-`.fut` file (e.g., `infinite`).
-
-See the manpages for `futhark script` and `futhark literate` for more
-information.

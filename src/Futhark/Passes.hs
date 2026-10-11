@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -fomit-interface-pragmas #-}
+
 -- | Optimisation pipelines.
 module Futhark.Passes
   ( standardPipeline,

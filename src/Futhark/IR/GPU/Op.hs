@@ -8,6 +8,7 @@ module Futhark.IR.GPU.Op
     -- * Host operations
     HostOp (..),
     traverseHostOpStms,
+    simplifyKernelOp,
     typeCheckHostOp,
 
     -- * SegOp refinements
@@ -409,3 +410,45 @@ typeCheckHostOp _ Nothing _ (GPUBody ts body) = do
     [ "Expected type: " <> prettyTuple ts,
       "Got body type: " <> prettyTuple body_ts
     ]
+
+-- | Simplify a 'HostOp', using the provided function for 'OtherOp'.
+simplifyKernelOp ::
+  ( Engine.SimplifiableRep rep,
+    BodyDec rep ~ ()
+  ) =>
+  Engine.SimplifyOp rep (op (Wise rep)) ->
+  HostOp op (Wise rep) ->
+  Engine.SimpleM rep (HostOp op (Wise rep), Stms (Wise rep))
+simplifyKernelOp f (OtherOp op) = do
+  (op', stms) <- f op
+  pure (OtherOp op', stms)
+simplifyKernelOp _ (SegOp op) = do
+  (op', hoisted) <- simplifySegOp op
+  pure (SegOp op', hoisted)
+simplifyKernelOp _ (SizeOp (GetSize key size_class)) =
+  pure (SizeOp $ GetSize key size_class, mempty)
+simplifyKernelOp _ (SizeOp (GetSizeMax size_class)) =
+  pure (SizeOp $ GetSizeMax size_class, mempty)
+simplifyKernelOp _ (SizeOp (CmpSizeLe key size_class x)) = do
+  x' <- Engine.simplify x
+  pure (SizeOp $ CmpSizeLe key size_class x', mempty)
+simplifyKernelOp _ (SizeOp (CalcNumBlocks w max_num_tblocks tblock_size)) = do
+  w' <- Engine.simplify w
+  pure (SizeOp $ CalcNumBlocks w' max_num_tblocks tblock_size, mempty)
+simplifyKernelOp _ (GPUBody ts body) = do
+  ts' <- Engine.simplify ts
+  (hoisted, body') <-
+    -- A GPUBody is a single-threaded kernel that cannot perform
+    -- allocations.  By pretending we are simplifying memory (as we do
+    -- inside SegOps) we allow allocations to be hoisted out of
+    -- branches within the body, and ultimately out of the GPUBody
+    -- itself.
+    Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True}) $
+      Engine.simplifyBody keepOnGPU mempty (map (const mempty) ts) body
+  pure (GPUBody ts' body', hoisted)
+  where
+    keepOnGPU _ _ = keepExpOnGPU . stmExp
+    keepExpOnGPU (BasicOp Index {}) = True
+    keepExpOnGPU (BasicOp (ArrayLit _ t)) | primType t = True
+    keepExpOnGPU Loop {} = True
+    keepExpOnGPU _ = False

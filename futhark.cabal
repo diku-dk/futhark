@@ -110,9 +110,13 @@ common common
 
 library
   import: common
-  -- These cause inlining of class-heavy code, which speeds up compilation a lot
-  -- but makes compiling the compiler much slower.
-  ghc-options: -fexpose-all-unfoldings -fspecialise-aggressively
+  -- These cause specialisation of class-heavy code, which speeds up compilation
+  -- a lot. Only overloaded functions are exposed, as those are the only ones
+  -- specialisation needs, and exposing everything makes almost any change
+  -- recompile most of the compiler. Futhark.Passes and Futhark.Actions also set
+  -- -fomit-interface-pragmas, as otherwise any change to a pass or backend
+  -- recompiles every CLI module.
+  ghc-options: -fexpose-overloaded-unfoldings -fspecialise-aggressively
   hs-source-dirs: src
   exposed-modules:
       Futhark
@@ -180,7 +184,6 @@ library
       Futhark.CLI.Query
       Futhark.CLI.REPL
       Futhark.CLI.Run
-      Futhark.CLI.Script
       Futhark.CLI.Test
       Futhark.CLI.WASM
       Futhark.CodeGen.Backends.CCUDA
@@ -401,8 +404,8 @@ library
       Futhark.Profile.EventSummary
       Futhark.Profile.Html
       Futhark.Profile.SourceRange
-      Futhark.Script
       Futhark.Test
+      Futhark.Test.Compile
       Futhark.Test.Property
       Futhark.Test.Spec
       Futhark.Test.Values
@@ -428,6 +431,10 @@ library
       Language.Futhark.Core
       Language.Futhark.Interpreter
       Language.Futhark.Interpreter.AD
+      Language.Futhark.Interpreter.FFI.AtomicList
+      Language.Futhark.Interpreter.FFI.Push
+      Language.Futhark.Interpreter.FFI.ServerM
+      Language.Futhark.Interpreter.IO
       Language.Futhark.Interpreter.Values
       Language.Futhark.FreeVars
       Language.Futhark.Parser

@@ -37,6 +37,13 @@ import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Compiler.Config (Verbosity (..))
 import Futhark.Error
 import Futhark.IR (PrettyRep, Prog)
+import Futhark.IR.GPU (GPU)
+import Futhark.IR.GPUMem (GPUMem)
+import Futhark.IR.MC (MC)
+import Futhark.IR.MCMem (MCMem)
+import Futhark.IR.SOACS (SOACS)
+import Futhark.IR.Seq (Seq)
+import Futhark.IR.SeqMem (SeqMem)
 import Futhark.IR.TypeCheck
 import Futhark.MonadFreshNames
 import Futhark.Pass
@@ -187,6 +194,16 @@ onePass pass = Pipeline perform
     errorOnError (Left (prog, err)) _ _ =
       validationError pass prog $ show err
     errorOnError _ c x = c x
+
+-- Specialising here means that the type checker is specialised once for each
+-- representation, rather than in every module that builds a pipeline.
+{-# SPECIALIZE onePass :: Pass fromrep SOACS -> Pipeline fromrep SOACS #-}
+{-# SPECIALIZE onePass :: Pass fromrep GPU -> Pipeline fromrep GPU #-}
+{-# SPECIALIZE onePass :: Pass fromrep MC -> Pipeline fromrep MC #-}
+{-# SPECIALIZE onePass :: Pass fromrep Seq -> Pipeline fromrep Seq #-}
+{-# SPECIALIZE onePass :: Pass fromrep SeqMem -> Pipeline fromrep SeqMem #-}
+{-# SPECIALIZE onePass :: Pass fromrep GPUMem -> Pipeline fromrep GPUMem #-}
+{-# SPECIALIZE onePass :: Pass fromrep MCMem -> Pipeline fromrep MCMem #-}
 
 -- | Conditionally run pipeline if predicate is true.
 condPipeline ::
