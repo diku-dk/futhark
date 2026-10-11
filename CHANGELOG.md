@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * `futhark lsp` now handles `textDocument/semanticTokens/full` in a trivial way
   to work around a bug in the `lsp` library.
 
+* `futhark lsp` had an off-by-one error when computing column offsets.
+
 ## [0.28.1]
 
 ### Added
