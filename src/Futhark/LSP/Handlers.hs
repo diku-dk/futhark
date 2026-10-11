@@ -15,6 +15,7 @@ import Data.Aeson.Types (Value (Array, String))
 import Data.Bifunctor (bimap, first)
 import Data.Function ((&))
 import Data.IORef (IORef)
+import Data.Maybe (fromMaybe)
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -48,15 +49,15 @@ import Language.LSP.Protocol.Types
     DidChangeTextDocumentParams (DidChangeTextDocumentParams),
     DidSaveTextDocumentParams (DidSaveTextDocumentParams),
     DocumentFormattingParams (DocumentFormattingParams),
-    ErrorCodes (ErrorCodes_InvalidParams, ErrorCodes_InvalidRequest, ErrorCodes_ParseError),
+    ErrorCodes (ErrorCodes_InvalidParams, ErrorCodes_InvalidRequest),
     HoverParams (HoverParams),
-    LSPErrorCodes,
+    LSPErrorCodes (LSPErrorCodes_RequestFailed),
     Null (..),
     Position (Position, _character, _line),
     Range (Range, _end, _start),
     SemanticTokens (SemanticTokens, _data_, _resultId),
     TextEdit (TextEdit, _newText, _range),
-    Uri (Uri),
+    Uri (..),
     toNormalizedUri,
     uriToFilePath,
     type (|?) (..),
@@ -142,7 +143,7 @@ onDocumentFormattingHandler =
     result <- runExceptT $ do
       virtualFile <- getVirtualFile' fileUri
       let fileText = R.toText $ virtualFile ^. file_text
-      formattedText <- fmtToText' (show fileUri) fileText
+      formattedText <- fmtToText' (fromMaybe (T.unpack (getUri fileUri)) (uriToFilePath fileUri)) fileText
       pure $
         if formattedText == fileText
           then InR Null
@@ -183,8 +184,8 @@ onDocumentFormattingHandler =
 
     syntaxErrorResponse (SyntaxError loc msg) =
       TResponseError
-        { _code = InR ErrorCodes_ParseError,
-          _message = "Syntax Error at " <> locText loc <> ":\n" <> prettyText msg,
+        { _code = InL LSPErrorCodes_RequestFailed,
+          _message = "Syntax error at " <> locText loc <> ":\n" <> prettyText msg,
           _xdata = Nothing
         }
 

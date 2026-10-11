@@ -23,8 +23,10 @@ import Futhark.Fmt.Printer (fmtToText)
 import Language.Futhark.Parser.Monad (SyntaxError (..))
 import Language.LSP.Protocol.Lens (uri)
 import Language.LSP.Protocol.Message
-  ( SMethod (SMethod_WindowShowMessage, SMethod_WorkspaceApplyEdit),
+  ( SMethod (SMethod_TextDocumentFormatting, SMethod_WindowShowMessage, SMethod_WorkspaceApplyEdit),
     TNotificationMessage (TNotificationMessage),
+    TResponseError (TResponseError),
+    TResponseMessage (TResponseMessage),
   )
 import Language.LSP.Protocol.Types
   ( CodeAction (..),
@@ -32,10 +34,12 @@ import Language.LSP.Protocol.Types
     Definition (Definition),
     Diagnostic (..),
     DiagnosticSeverity (DiagnosticSeverity_Error, DiagnosticSeverity_Warning),
+    DocumentFormattingParams (DocumentFormattingParams),
     FormattingOptions (FormattingOptions),
     Hover (Hover),
     InlayHint (..),
     InlayHintKind (InlayHintKind_Type),
+    LSPErrorCodes (LSPErrorCodes_RequestFailed),
     LanguageKind (LanguageKind_Custom),
     Location (..),
     MarkupContent (..),
@@ -67,6 +71,7 @@ import Language.LSP.Test
     getHover,
     getSemanticTokens,
     message,
+    request,
     runSessionWithHandles,
     waitForDiagnostics,
   )
@@ -221,6 +226,22 @@ testFormatting = serverTestCase "Formatting" $ do
         def main =
           0i32
       |]
+
+testFormattingSyntaxError :: TestTree
+testFormattingSyntaxError = serverTestCase "Formatting syntax error" $ do
+  docIdent <- createMainDoc "def main = ("
+  TResponseMessage _ _ result <-
+    request SMethod_TextDocumentFormatting $
+      DocumentFormattingParams Nothing docIdent formattingOptions
+  liftIO $ case result of
+    Left (TResponseError code msg _) -> do
+      code @?= InL LSPErrorCodes_RequestFailed
+      assertBool ("Unexpected message: " <> T.unpack msg) $
+        "main.fut:" `T.isInfixOf` msg
+    Right edits ->
+      assertFailure $ "Expected an error, got: " <> show edits
+  where
+    formattingOptions = FormattingOptions 0 False Nothing Nothing Nothing
 
 main :: IO ()
 main = defaultMain testEvaluationComment
@@ -421,6 +442,7 @@ tests =
       testDefinition,
       testSemanticTokens,
       testFormatting,
+      testFormattingSyntaxError,
       testEvaluationComment,
       testInlayTypeHint,
       testTypeCompletionCodeAction
