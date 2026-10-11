@@ -91,6 +91,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `futhark literate` now handles indented comments. (#2521)
 
+* Various holes in alias analysis (#1675, #2531).
+
 ## [0.27.1]
 
 ### Added
