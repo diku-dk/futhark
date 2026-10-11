@@ -7,12 +7,14 @@
 module Futhark.LspTests (tests, main) where
 
 import Colog.Core (LogAction (LogAction))
+import Control.Applicative ((<|>))
 import Control.Concurrent (forkIO)
 import Control.Lens ((^.))
 import Control.Monad (zipWithM_)
 import Control.Monad.IO.Class (liftIO)
 import Data.Foldable (for_)
 import Data.Functor (void)
+import Data.List (sortOn)
 import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -20,13 +22,16 @@ import Futhark.CLI.LSP (serverDefinition)
 import Futhark.Fmt.Printer (fmtToText)
 import Language.Futhark.Parser.Monad (SyntaxError (..))
 import Language.LSP.Protocol.Lens (uri)
-import Language.LSP.Protocol.Message (SMethod (SMethod_WorkspaceApplyEdit))
+import Language.LSP.Protocol.Message
+  ( SMethod (SMethod_WindowShowMessage, SMethod_WorkspaceApplyEdit),
+    TNotificationMessage (TNotificationMessage),
+  )
 import Language.LSP.Protocol.Types
   ( CodeAction (..),
     CodeLens (CodeLens),
     Definition (Definition),
     Diagnostic (..),
-    DiagnosticSeverity (DiagnosticSeverity_Error),
+    DiagnosticSeverity (DiagnosticSeverity_Error, DiagnosticSeverity_Warning),
     FormattingOptions (FormattingOptions),
     Hover (Hover),
     InlayHint (..),
@@ -35,15 +40,19 @@ import Language.LSP.Protocol.Types
     Location (..),
     MarkupContent (..),
     MarkupKind (MarkupKind_PlainText),
+    MessageType (MessageType_Error),
     Position (..),
     Range (..),
     SemanticTokens (..),
+    ShowMessageParams (ShowMessageParams),
     TextDocumentIdentifier,
     type (|?) (..),
   )
 import Language.LSP.Server (runServerWithHandles)
 import Language.LSP.Test
   ( Session,
+    SessionConfig (..),
+    anyMessage,
     createDoc,
     defaultConfig,
     documentContents,
@@ -65,10 +74,13 @@ import NeatInterpolation (text)
 import System.IO (hClose)
 import System.Process (createPipe)
 import Test.Tasty (TestName, TestTree, defaultMain, testGroup)
-import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
+import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
 runServerSessionPair :: Session a -> IO a
-runServerSessionPair session = do
+runServerSessionPair = runServerSessionPairWith defaultConfig
+
+runServerSessionPairWith :: SessionConfig -> Session a -> IO a
+runServerSessionPairWith config session = do
   (serverIn, clientOut) <- createPipe
   (clientIn, serverOut) <- createPipe
   futharkServer <- serverDefinition
@@ -79,7 +91,7 @@ runServerSessionPair session = do
     forkIO . void $
       runServerWithHandles ignoreLog ignoreLog serverIn serverOut futharkServer
 
-  result <- runSessionWithHandles clientOut clientIn defaultConfig fullLatestClientCaps "." session
+  result <- runSessionWithHandles clientOut clientIn config fullLatestClientCaps "." session
 
   for_ [serverIn, clientOut, clientIn, serverOut] hClose
 
@@ -107,6 +119,27 @@ testDiagnosticsOnOpen = serverTestCase "Diagnostics on open" $ do
         }
 
     severityAndRange Diagnostic {..} = (_severity, _range)
+
+testWarningsWithErrors :: TestTree
+testWarningsWithErrors = serverTestCase "Warnings with errors" $ do
+  _ <- createMainDoc "def f (x: i32) = let y = x in x\ndef g (x: i32) = x + true"
+  diags <- waitForDiagnostics
+  liftIO $
+    sortOn fst (map lineAndSeverity diags)
+      @?= [(0, Just DiagnosticSeverity_Warning), (1, Just DiagnosticSeverity_Error)]
+  where
+    lineAndSeverity Diagnostic {..} = (_line (_start _range), _severity)
+
+testUnlocatedError :: TestTree
+testUnlocatedError = testCase "Error without location" . runServerSessionPairWith config $ do
+  _ <- createDoc "main.txt" (LanguageKind_Custom "Futhark") "def main = 0i32"
+  TNotificationMessage _ _ (ShowMessageParams message_type msg) <- showMessage
+  liftIO $ message_type @?= MessageType_Error
+  liftIO $ assertBool "Mentions extension" $ ".fut extension" `T.isInfixOf` msg
+  where
+    -- By default, lsp-test discards window/showMessage.
+    config = defaultConfig {ignoreLogNotifications = False}
+    showMessage = message SMethod_WindowShowMessage <|> (anyMessage *> showMessage)
 
 testHoverInformation :: TestTree
 testHoverInformation = serverTestCase "Hover" $ do
@@ -382,6 +415,8 @@ tests =
   testGroup
     "Futhark.LspTests"
     [ testDiagnosticsOnOpen,
+      testWarningsWithErrors,
+      testUnlocatedError,
       testHoverInformation,
       testDefinition,
       testSemanticTokens,
