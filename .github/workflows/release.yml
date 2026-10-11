@@ -16,7 +16,7 @@ jobs:
       uses: actions/checkout@v7
 
     - name: Install Nix
-      uses: cachix/install-nix-action@v20
+      uses: cachix/install-nix-action@v27
 
     - name: Prepare metadata
       id: metadata
@@ -36,7 +36,7 @@ jobs:
         sh tools/changelog.sh $VERSION < CHANGELOG.md > release_changes.md
 
     - name: Create release and upload tarball
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v3.0.3
       with:
         name: ${{ steps.metadata.outputs.VERSION }}
         body_path: release_changes.md
@@ -64,7 +64,7 @@ jobs:
     - uses: actions/checkout@v7
 
     - name: Install Nix
-      uses: cachix/install-nix-action@v20
+      uses: cachix/install-nix-action@v27
 
     # - uses: cachix/cachix-action@v12
     #   with:
