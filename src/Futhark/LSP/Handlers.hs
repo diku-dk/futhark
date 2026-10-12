@@ -15,6 +15,7 @@ import Data.Aeson.Types (Value (Array, String))
 import Data.Bifunctor (bimap, first)
 import Data.Function ((&))
 import Data.IORef (IORef)
+import Data.Maybe (fromMaybe)
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -48,14 +49,15 @@ import Language.LSP.Protocol.Types
     DidChangeTextDocumentParams (DidChangeTextDocumentParams),
     DidSaveTextDocumentParams (DidSaveTextDocumentParams),
     DocumentFormattingParams (DocumentFormattingParams),
-    ErrorCodes (ErrorCodes_InvalidParams, ErrorCodes_InvalidRequest, ErrorCodes_ParseError),
+    ErrorCodes (ErrorCodes_InvalidParams, ErrorCodes_InvalidRequest),
     HoverParams (HoverParams),
-    LSPErrorCodes,
+    LSPErrorCodes (LSPErrorCodes_RequestFailed),
     Null (..),
     Position (Position, _character, _line),
     Range (Range, _end, _start),
+    SemanticTokens (SemanticTokens, _data_, _resultId),
     TextEdit (TextEdit, _newText, _range),
-    Uri (Uri),
+    Uri (..),
     toNormalizedUri,
     uriToFilePath,
     type (|?) (..),
@@ -114,11 +116,13 @@ onDocumentChangeHandler state_mvar =
         file_path = uriToFilePath $ doc ^. uri
     tryReCompile state_mvar file_path
 
--- Some clients (Eglot) sends open/close events whether we want them
--- or not, so we better be prepared to ignore them.
-onDocumentOpenHandler :: Handlers (LspM ())
-onDocumentOpenHandler = notificationHandler SMethod_TextDocumentDidOpen $ \_ -> pure ()
+onDocumentOpenHandler :: IORef State -> Handlers (LspM ())
+onDocumentOpenHandler state_mvar =
+  notificationHandler SMethod_TextDocumentDidOpen $ \msg ->
+    tryReCompile state_mvar $ uriToFilePath $ msg ^. params . textDocument . uri
 
+-- Nothing to do when a document is closed, but we ask for the
+-- notification, so we must handle it.
 onDocumentCloseHandler :: Handlers (LspM ())
 onDocumentCloseHandler = notificationHandler SMethod_TextDocumentDidClose $ \_msg -> pure ()
 
@@ -139,13 +143,12 @@ onDocumentFormattingHandler =
     result <- runExceptT $ do
       virtualFile <- getVirtualFile' fileUri
       let fileText = R.toText $ virtualFile ^. file_text
-      formattedText <- fmtToText' (show fileUri) fileText
+      formattedText <- fmtToText' (fromMaybe (T.unpack (getUri fileUri)) (uriToFilePath fileUri)) fileText
       pure $
         if formattedText == fileText
           then InR Null
           else InL [fullTextEdit formattedText]
 
-    logWithSeverity Debug <& showText result
     report result
   where
     fullTextEdit newText =
@@ -180,8 +183,8 @@ onDocumentFormattingHandler =
 
     syntaxErrorResponse (SyntaxError loc msg) =
       TResponseError
-        { _code = InR ErrorCodes_ParseError,
-          _message = "Syntax Error at " <> locText loc <> ":\n" <> prettyText msg,
+        { _code = InL LSPErrorCodes_RequestFailed,
+          _message = "Syntax error at " <> locText loc <> ":\n" <> prettyText msg,
           _xdata = Nothing
         }
 
@@ -191,6 +194,15 @@ onDocumentFormattingHandler =
           _message = "Failed to retrieve document at " <> showText fileUri,
           _code = InR ErrorCodes_InvalidParams
         }
+
+-- The lsp library always advertises the semanticTokens capability,
+-- and some clients (Eglot) then request full semantic tokens whether
+-- we registered a handler or not.  We do not compute semantic tokens,
+-- so we answer with none.
+onDocumentSemanticTokensFull :: Handlers (LspM ())
+onDocumentSemanticTokensFull =
+  requestHandler SMethod_TextDocumentSemanticTokensFull $ \_ respond ->
+    respond $ Right $ InL $ SemanticTokens {_resultId = Nothing, _data_ = []}
 
 onDocumentCodeLenses :: Handlers (LspM ())
 onDocumentCodeLenses =
@@ -292,11 +304,12 @@ handlers :: IORef State -> ClientCapabilities -> Handlers (LspM ())
 handlers state_mvar _ =
   mconcat
     [ onInitializeHandler,
-      onDocumentOpenHandler,
+      onDocumentOpenHandler state_mvar,
       onDocumentCloseHandler,
       onDocumentCodeLenses,
       onDocumentCodeLensResolve,
       onDocumentFormattingHandler,
+      onDocumentSemanticTokensFull,
       onTextDocumentInlayHint state_mvar,
       onTextDocumentCodeAction state_mvar,
       onDocumentSaveHandler state_mvar,

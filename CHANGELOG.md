@@ -5,7 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.28.0]
+## [0.29.0]
+
+### Added
+
+### Removed
+
+### Changed
+
+### Fixed
+
+* `futhark lsp` now handles `textDocument/semanticTokens/full` in a trivial way
+  to work around a bug in the `lsp` library.
+
+* `futhark lsp` had an off-by-one error when computing column offsets.
+
+## [0.28.1]
 
 ### Added
 
