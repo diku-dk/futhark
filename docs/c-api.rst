@@ -320,9 +320,10 @@ will not result in a double free.
 
    Return a pointer to the underlying storage of the array. The return
    type depends on the backend, and is for example ``cl_mem`` when
-   using the OpenCL backend. If using unified memory with the ``hip``
-   or ``cuda`` backends, the pointer can be accessed directly from CPU
-   code.
+   using the OpenCL backend, and an ``id<MTLBuffer>`` cast to ``void*``
+   when using the Metal backend. If using unified memory with the
+   ``hip`` or ``cuda`` backends, the pointer can be accessed directly
+   from CPU code.
 
    **This is an experimental and unstable interface.**
 
@@ -621,7 +622,7 @@ GPU
 ---
 
 The following API functions are available when using the ``opencl``,
-``cuda``, or ``hip`` backends.
+``cuda``, ``hip``, or ``metal`` backends.
 
 .. c:function:: void futhark_context_config_set_device(struct futhark_context_config *cfg, const char *s)
 
@@ -761,6 +762,29 @@ advanced usage.
 
    During :c:func:`futhark_context_new`, read PTX code from the given
    file instead of using the embedded program.
+
+Metal
+-----
+
+The following API functions are available when using the ``metal``
+backend.  Device memory is always shared with the host, so
+:c:func:`futhark_context_config_set_unified_memory` has no effect.
+Arrays passed to the ``futhark_new_raw`` functions must be
+``id<MTLBuffer>`` objects (cast to ``void*``) on the same device as
+the context, and must be resident, for example by adding them to a
+residency set attached to the command queue.
+
+.. c:function:: void futhark_context_config_list_devices(struct futhark_context_config *cfg)
+
+   Print the available Metal devices on standard output.
+
+As with the OpenCL backend, ``futhark_context_config_set_command_queue``
+and ``futhark_context_get_command_queue`` can be used to set and
+retrieve the command queue used by the context, except that the queue
+is an ``id<MTLCommandQueue>`` cast to ``void*``.  Setting a queue also
+determines the device.  ``futhark_context_config_add_build_option``
+accepts only preprocessor definitions, of the form ``-DNAME`` or
+``-DNAME=VALUE``.
 
 Multicore
 ---------

@@ -48,6 +48,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `futhark test`: `auto output` now works with `script input`.
 
+* New backend: `futhark metal`, for Apple GPUs.  It does not support
+  `f64` or 64-bit atomic operations in GPU code.
+
 ### Removed
 
 * The `futhark script` command has been removed.
