@@ -61,6 +61,7 @@ data ShortCircuitReader rep = ShortCircuitReader
   { onOp ::
       LUTabFun ->
       Pat (VarAliases, LetDecMem) ->
+      Attrs ->
       Certs ->
       Op (Aliases rep) ->
       TopdownEnv rep ->
@@ -188,8 +189,8 @@ paramSizes _ = mempty
 --
 -- Because 'SeqMem' don't have any special operation, simply return the input
 -- 'BotUpEnv'.
-shortCircuitSeqMem :: LUTabFun -> Pat (VarAliases, LetDecMem) -> Certs -> Op (Aliases SeqMem) -> TopdownEnv SeqMem -> BotUpEnv -> ShortCircuitM SeqMem BotUpEnv
-shortCircuitSeqMem _ _ _ _ _ = pure
+shortCircuitSeqMem :: LUTabFun -> Pat (VarAliases, LetDecMem) -> Attrs -> Certs -> Op (Aliases SeqMem) -> TopdownEnv SeqMem -> BotUpEnv -> ShortCircuitM SeqMem BotUpEnv
+shortCircuitSeqMem _ _ _ _ _ _ = pure
 
 -- | Short-circuit handler for SegOp.
 shortCircuitSegOp ::
@@ -272,16 +273,22 @@ shortCircuitSegOp lvlOK lutab pat pat_certs (SegHist lvl space _ kernel_body his
 shortCircuitGPUMem ::
   LUTabFun ->
   Pat (VarAliases, LetDecMem) ->
+  Attrs ->
   Certs ->
   Op (Aliases GPUMem) ->
   TopdownEnv GPUMem ->
   BotUpEnv ->
   ShortCircuitM GPUMem BotUpEnv
-shortCircuitGPUMem _ _ _ (Alloc _ _) _ bu_env = pure bu_env
-shortCircuitGPUMem _ _ _ (EnsureDirect _) _ bu_env = pure bu_env
-shortCircuitGPUMem lutab pat certs (Inner (GPU.SegOp op)) td_env bu_env =
-  shortCircuitSegOp isSegThread lutab pat certs op td_env bu_env
-shortCircuitGPUMem lutab pat certs (Inner (GPU.GPUBody _ body)) td_env bu_env = do
+shortCircuitGPUMem _ _ _ _ (Alloc _ _) _ bu_env = pure bu_env
+shortCircuitGPUMem _ _ _ _ (EnsureDirect _) _ bu_env = pure bu_env
+shortCircuitGPUMem lutab pat attrs certs (Inner (GPU.SegOp op)) td_env bu_env
+  | GPU.SegBlock {} <- segLevel op,
+    intrablockResultGlobal attrs =
+      local (\env -> env {spaceOK = sharedToDeviceOK}) $
+        shortCircuitSegOp (const True) lutab pat certs op td_env bu_env
+  | otherwise =
+      shortCircuitSegOp isSegThread lutab pat certs op td_env bu_env
+shortCircuitGPUMem lutab pat _ certs (Inner (GPU.GPUBody _ body)) td_env bu_env = do
   fresh1 <- newVName "gpubody"
   fresh2 <- newVName "gpubody"
   shortCircuitSegOpHelper
@@ -301,24 +308,39 @@ shortCircuitGPUMem lutab pat certs (Inner (GPU.GPUBody _ body)) td_env bu_env = 
     (bodyToKernelBody body)
     td_env
     bu_env
-shortCircuitGPUMem _ _ _ (Inner (GPU.SizeOp _)) _ bu_env = pure bu_env
-shortCircuitGPUMem _ _ _ (Inner (GPU.OtherOp NoOp)) _ bu_env = pure bu_env
+shortCircuitGPUMem _ _ _ _ (Inner (GPU.SizeOp _)) _ bu_env = pure bu_env
+shortCircuitGPUMem _ _ _ _ (Inner (GPU.OtherOp NoOp)) _ bu_env = pure bu_env
+
+-- | Does this statement ask for the results of an intra-block kernel to be
+-- short-circuited from shared memory into the (global) result of the kernel?
+-- See Note [Short-circuiting across memory spaces].
+intrablockResultGlobal :: Attrs -> Bool
+intrablockResultGlobal = inAttrs $ AttrComp "intrablock_result" [AttrName "global"]
+
+-- | The 'spaceOK' inside an intra-block kernel whose results should be put in
+-- global memory: an array in shared memory may then be moved to global
+-- memory.
+sharedToDeviceOK :: Space -> Space -> Bool
+sharedToDeviceOK dst_space src_space =
+  dst_space == src_space
+    || (src_space == Space "shared" && dst_space == Space "device")
 
 shortCircuitMCMem ::
   LUTabFun ->
   Pat (VarAliases, LetDecMem) ->
+  Attrs ->
   Certs ->
   Op (Aliases MCMem) ->
   TopdownEnv MCMem ->
   BotUpEnv ->
   ShortCircuitM MCMem BotUpEnv
-shortCircuitMCMem _ _ _ (Alloc _ _) _ bu_env = pure bu_env
-shortCircuitMCMem _ _ _ (EnsureDirect _) _ bu_env = pure bu_env
-shortCircuitMCMem _ _ _ (Inner (MC.OtherOp NoOp)) _ bu_env = pure bu_env
-shortCircuitMCMem lutab pat certs (Inner (MC.ParOp (Just par_op) op)) td_env bu_env =
+shortCircuitMCMem _ _ _ _ (Alloc _ _) _ bu_env = pure bu_env
+shortCircuitMCMem _ _ _ _ (EnsureDirect _) _ bu_env = pure bu_env
+shortCircuitMCMem _ _ _ _ (Inner (MC.OtherOp NoOp)) _ bu_env = pure bu_env
+shortCircuitMCMem lutab pat _ certs (Inner (MC.ParOp (Just par_op) op)) td_env bu_env =
   shortCircuitSegOp (const True) lutab pat certs par_op td_env bu_env
     >>= shortCircuitSegOp (const True) lutab pat certs op td_env
-shortCircuitMCMem lutab pat certs (Inner (MC.ParOp Nothing op)) td_env bu_env =
+shortCircuitMCMem lutab pat _ certs (Inner (MC.ParOp Nothing op)) td_env bu_env =
   shortCircuitSegOp (const True) lutab pat certs op td_env bu_env
 
 dropLastSegSpace :: SegSpace -> SegSpace
@@ -382,6 +404,7 @@ shortCircuitSegOpHelper ::
   BotUpEnv ->
   ShortCircuitM rep BotUpEnv
 shortCircuitSegOpHelper num_reds lvlOK lvl lutab pat@(Pat ps0) pat_certs space0 kernel_body td_env bu_env = do
+  space_ok <- asks spaceOK
   -- We need to drop the last element of the 'SegSpace' for pattern elements
   -- that correspond to reductions.
   let ps_space_and_res =
@@ -399,7 +422,7 @@ shortCircuitSegOpHelper num_reds lvlOK lvl lutab pat@(Pat ps0) pat_certs space0 
       (actv_return, inhibit_return) =
         if num_reds > 0
           then (actv0, inhibit0)
-          else foldl (makeSegMapCoals lvlOK lvl td_env kernel_body pat_certs) (actv0, inhibit0) ps_space_and_res
+          else foldl (makeSegMapCoals space_ok lvlOK lvl td_env kernel_body pat_certs) (actv0, inhibit0) ps_space_and_res
 
   -- Start from empty references, we'll update with aggregates later.
   let actv0' = M.map (\etry -> etry {memrefs = mempty}) $ actv0 <> actv_return
@@ -527,6 +550,7 @@ shortCircuitSegOpHelper num_reds lvlOK lvl lutab pat@(Pat ps0) pat_certs space0 
 -- kernel result directly in the memory block of pattern element
 makeSegMapCoals ::
   (Coalesceable rep inner) =>
+  (Space -> Space -> Bool) ->
   (lvl -> Bool) ->
   lvl ->
   TopdownEnv rep ->
@@ -535,7 +559,7 @@ makeSegMapCoals ::
   (CoalsTab, InhibitTab) ->
   (PatElem (VarAliases, LetDecMem), SegSpace, KernelResult) ->
   (CoalsTab, InhibitTab)
-makeSegMapCoals lvlOK lvl td_env kernel_body pat_certs (active, inhb) (PatElem pat_name (_, MemArray _ _ _ (ArrayIn pat_mem pat_ixf)), space, Returns _ _ (Var return_name))
+makeSegMapCoals space_ok lvlOK lvl td_env kernel_body pat_certs (active, inhb) (PatElem pat_name (_, MemArray _ _ _ (ArrayIn pat_mem pat_ixf)), space, Returns _ _ (Var return_name))
   | Just (MemBlock tp return_shp return_mem _) <-
       getScopeMemInfo return_name $ scope td_env <> scopeOf (bodyStms kernel_body),
     lvlOK lvl,
@@ -544,7 +568,7 @@ makeSegMapCoals lvlOK lvl td_env kernel_body pat_certs (active, inhb) (PatElem p
       scope td_env <> scopeOf (bodyStms kernel_body) <> scopeOfSegSpace space
         & removeScopeAliases
         & runReader (lookupMemInfo return_mem),
-    pat_space == return_space =
+    space_ok pat_space return_space =
       case M.lookup pat_mem active of
         Nothing ->
           -- We are not in a transitive case
@@ -602,7 +626,7 @@ makeSegMapCoals lvlOK lvl td_env kernel_body pat_certs (active, inhb) (PatElem p
         & map (DimFix . TPrimExp . flip LeafExp (IntType Int64) . fst)
         & Slice
     resultSlice ixf = LMAD.slice ixf $ fullSlice (LMAD.shape ixf) thread_slice
-makeSegMapCoals _ _ td_env _ _ x (_, _, result) =
+makeSegMapCoals _ _ _ td_env _ _ x (_, _, result) =
   freeIn result
     & namesToList
     & mapMaybe (flip getScopeMemInfo $ scope td_env)
@@ -1041,9 +1065,10 @@ mkCoalsTabStm lutab (Let pat _ (Loop arginis lform body)) td_env bu_env = do
         Var a0 <- ini,
         Var r <- bdyres,
         Just coal_etry <- M.lookup m_b actv0,
-        -- A loop-carried array stays in its own space - see Note
+        -- A loop-carried array in 'ScalarSpace' stays there - see Note
         -- [Short-circuiting across memory spaces].
-        memSpace td_env_allocs m_b == Just (dstspace coal_etry),
+        Just m_b_space <- memSpace td_env_allocs m_b,
+        m_b_space == dstspace coal_etry || not (isScalarSpace m_b_space),
         Just _ <- M.lookup b (vartab coal_etry),
         Just (MemBlock _ _ m_a _) <- getScopeMemInfo a (scope td_env_allocs),
         Just (MemBlock _ _ m_a0 _) <- getScopeMemInfo a0 (scope td_env_allocs),
@@ -1216,7 +1241,7 @@ mkCoalsTabStm _ (Let pat _ (BasicOp Update {})) _ _ =
 mkCoalsTabStm lutab stm@(Let pat aux (Op op)) td_env bu_env = do
   -- Process body
   on_op <- asks onOp
-  bu_env' <- on_op lutab pat (stmAuxCerts aux) op td_env bu_env
+  bu_env' <- on_op lutab pat (stmAuxAttrs aux) (stmAuxCerts aux) op td_env bu_env
   activeCoals' <- mkCoalsHelper3PatternMatch stm lutab td_env bu_env'
   pure $ bu_env' {activeCoals = activeCoals'}
 mkCoalsTabStm lutab stm@(Let pat _ e) td_env bu_env = do
@@ -1680,9 +1705,10 @@ hostSpaceOK :: Space -> Space -> Bool
 hostSpaceOK dst_space src_space =
   dst_space == src_space
     || (isScalarSpace src_space && not (isScalarSpace dst_space))
-  where
-    isScalarSpace ScalarSpace {} = True
-    isScalarSpace _ = False
+
+isScalarSpace :: Space -> Bool
+isScalarSpace ScalarSpace {} = True
+isScalarSpace _ = False
 
 data MemBodyResult = MemBodyResult
   { patMem :: VName,
@@ -1899,11 +1925,17 @@ filterMapM1 f m = fmap M.fromAscList $ filterM (f . snd) $ M.toAscList m
 -- the array at all, which is what the 'spaceOK' of each representation
 -- answers.
 --
--- For 'GPUMem' the answer for now is that the spaces must be identical, but it
--- is not clear to me whether we could change this in the future. On the host,
--- 'ScalarSpace' is merely a storage representation for memory the host can
--- address, an array of scalars rather than a block of bytes, so such an array
--- can be moved into the default space. This is 'hostSpaceOK'. It holds in one
+-- For 'GPUMem' the answer is usually that the spaces must be identical. The
+-- exception is an intra-block kernel with the attribute
+-- @#[intrablock_result(global)]@, inside of which an array in shared memory may
+-- be moved to global memory ('sharedToDeviceOK'). This lets the block construct
+-- its results directly in the result of the kernel, instead of in shared memory
+-- followed by a copy, which matters when the results do not fit in shared
+-- memory. Arrays that are not part of the result stay in shared memory.
+--
+-- On the host, 'ScalarSpace' is merely a storage representation for memory the
+-- host can address, an array of scalars rather than a block of bytes, so such
+-- an array can be moved into the default space. This is 'hostSpaceOK'. It holds in one
 -- direction only, because the array must fit in the destination, and a
 -- 'ScalarSpace' block is exactly one array large.
 --
@@ -1914,12 +1946,12 @@ filterMapM1 f m = fmap M.fromAscList $ filterM (f . snd) $ M.toAscList m
 -- "Futhark.Optimise.ArrayShortCircuiting" rewrites along with the results
 -- themselves.
 --
--- Two kinds of arrays are never moved, even when 'spaceOK' permits it. The
+-- Two kinds of arrays are not moved, even when 'spaceOK' permits it. The
 -- first is an array in the memory of a function parameter, where the source
 -- block does not in fact disappear: 'replaceInParams' renames the parameter to
 -- the destination and removes the destination's allocation, so it is the space
 -- of the parameter that survives, and the move would happen in the opposite
--- direction from the one we checked. The second is a loop-carried array, which
--- we refuse in 'mapmbFun' for for performance reasons, as being in
--- 'ScalarSpace' is what keeps such an array out of (heap) memory across all the
--- iterations.
+-- direction from the one we checked. The second is a loop-carried array in
+-- 'ScalarSpace', which we refuse in 'mapmbFun' for performance reasons, as
+-- being in 'ScalarSpace' is what keeps such an array out of (heap) memory
+-- across all the iterations.

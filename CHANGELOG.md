@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* New attribute `#[intrablock_result(global)]` for constructing the results of
+  intra-block kernels directly in global memory, for results that do not fit
+  in shared memory. (#2559)
+
 ### Removed
 
 ### Changed
