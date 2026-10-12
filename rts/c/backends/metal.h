@@ -491,7 +491,8 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
               (event_report_fn)metal_event_report);
   }
 
-  unsigned char args_struct[kernel->args_size];
+  // The +1 is to avoid a zero-length array.
+  unsigned char args_struct[kernel->args_size+1];
   for (int i = 0; i < num_args; i++) {
     if (kernel->arg_is_pointer[i]) {
       id<MTLBuffer> b = metal_buffer(*(gpu_mem*)args[i]);
