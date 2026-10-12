@@ -37,6 +37,7 @@ import Futhark.IR.SegOp qualified as Seg
 import Futhark.Util (showText)
 import Language.Futhark.Primitive qualified as P
 import Numeric.Half qualified as H
+import System.IO (stderr)
 
 data Val
   = PrimVal PrimValue
@@ -509,7 +510,7 @@ evalBasicOp env (Reshape array_name reshape) = do
 evalBasicOp env (Opaque OpaqueNil se) =
   pure <$> evalSubExp env se
 evalBasicOp env (Opaque (OpaqueTrace t) se) = do
-  liftIO $ TIO.putStrLn t
+  liftIO $ TIO.hPutStrLn stderr t
   pure <$> evalSubExp env se
 evalBasicOp env (Manifest array_name _) = do
   array <- evalVar env array_name
