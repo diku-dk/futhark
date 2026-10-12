@@ -512,7 +512,7 @@ runAutotuner opts prog =
     `catch` onServerException
 
 supportedBackends :: [String]
-supportedBackends = ["opencl", "cuda", "hip"]
+supportedBackends = ["opencl", "cuda", "hip", "metal"]
 
 commandLineOptions :: [FunOptDescr AutotuneOptions]
 commandLineOptions =
