@@ -252,6 +252,31 @@ jobs:
     - run: |
         futhark test -s tests
 
+  test-ir-interpreter:
+    runs-on: ubuntu-24.04
+    needs: [build-linux-nix]
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - uses: actions/download-artifact@v8
+      with:
+        name: futhark-nightly-linux-x86_64.tar.xz
+
+    - name: Install from nightly tarball
+      run: |
+        tar xvf futhark-nightly-linux-x86_64.tar.xz
+        make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - name: Interpret SOACS IR
+      run: |
+        futhark test --interpret-soacs tests --exclude=autodiff
+
+    - name: Interpret GPU IR
+      run: |
+        futhark test --interpret-gpu tests --exclude=autodiff
+
   test-c:
     runs-on: ubuntu-24.04
     needs: [build-linux-nix]

@@ -230,6 +230,14 @@ OPTIONS
   Pass the program through the compiler frontend, but do not run them.
   This is only useful for testing the Futhark compiler itself.
 
+--interpret-soacs
+  Run the tests with the IR interpreter, using the SOACS representation. Mostly
+  useful for compiler hacking.
+
+--interpret-gpu
+  Run the tests with the IR interpreter, using the GPU representation. Mostly
+  useful for compiler hacking.
+
 -t
   Type-check the programs, but do not run them.
 
