@@ -1126,46 +1126,42 @@ evalSegRed ::
 evalSegRed funs env space types body operators = do
   (shape, indexed_rows) <- evalSegSpace funs env space body
 
-  case shape of
-    [] ->
-      error "SegRed requires a nonempty index space"
-    _ -> do
-      let segment_shape = init shape
-          segment_width = last shape
-          segment_count = product segment_shape
-          reduction_count = Seg.segBinOpResults operators
-          reduction_types = take reduction_count types
-          map_types = drop reduction_count types
-          reduction_result_rows =
-            map (take reduction_count . snd) indexed_rows
+  let segment_shape = init shape
+      segment_width = last shape
+      segment_count = product segment_shape
+      reduction_count = Seg.segBinOpResults operators
+      reduction_types = take reduction_count types
+      map_types = drop reduction_count types
+      reduction_result_rows =
+        map (take reduction_count . snd) indexed_rows
 
-      reduction_rows <-
-        mapM (mapM expectKernelValue) reduction_result_rows
+  reduction_rows <-
+    mapM (mapM expectKernelValue) reduction_result_rows
 
-      let segments =
-            segmentRows
-              segment_count
-              segment_width
-              reduction_rows
+  let segments =
+        segmentRows
+          segment_count
+          segment_width
+          reduction_rows
 
-      reduced_rows <- mapM reduceSegment segments
+  reduced_rows <- mapM reduceSegment segments
 
-      reduction_outputs <-
-        collectOutputs
-          env
-          segment_shape
-          reduction_types
-          reduced_rows
+  reduction_outputs <-
+    collectOutputs
+      env
+      segment_shape
+      reduction_types
+      reduced_rows
 
-      map_outputs <-
-        collectSegOutputs
-          env
-          shape
-          map_types
-          (drop reduction_count $ bodyResult body)
-          (map (fmap $ drop reduction_count) indexed_rows)
+  map_outputs <-
+    collectSegOutputs
+      env
+      shape
+      map_types
+      (drop reduction_count $ bodyResult body)
+      (map (fmap $ drop reduction_count) indexed_rows)
 
-      pure $ reduction_outputs <> map_outputs
+  pure $ reduction_outputs <> map_outputs
   where
     reduceSegment rows = do
       initial_states <- initialSegStates env operators
@@ -1188,26 +1184,22 @@ evalSegScan funs env space body operators post_operator = do
   (shape, indexed_rows) <- evalSegSpace funs env space body
   worker_rows <- mapM evaluateWorker indexed_rows
 
-  case shape of
-    [] ->
-      error "SegScan requires a nonempty index space"
-    _ -> do
-      let segment_shape = init shape
-          segment_width = last shape
-          segment_count = product segment_shape
-          segments =
-            segmentRows
-              segment_count
-              segment_width
-              worker_rows
+  let segment_shape = init shape
+      segment_width = last shape
+      segment_count = product segment_shape
+      segments =
+        segmentRows
+          segment_count
+          segment_width
+          worker_rows
 
-      output_rows <- concat <$> mapM (scanSegment shape) segments
+  output_rows <- concat <$> mapM (scanSegment shape) segments
 
-      collectOutputs
-        env
-        shape
-        (lambdaReturnType post_lambda)
-        output_rows
+  collectOutputs
+    env
+    shape
+    (lambdaReturnType post_lambda)
+    output_rows
   where
     evaluateWorker (coordinate, values) = do
       values' <- mapM expectKernelValue values
@@ -1254,43 +1246,24 @@ evalSegHist ::
   [Seg.HistOp rep] ->
   InterpM rep [Val]
 evalSegHist funs env space body operators = do
-  (shape, indexed_rows) <- evalSegSpace funs env space body
-
-  case shape of
-    [] ->
-      error "SegHist requires a nonempty index space"
-    _ -> do
-      initial_histograms <-
-        mapM (mapM (evalVar env) . Seg.histDest) operators
-
-      final_histograms <-
-        foldM
-          updateFromWorker
-          initial_histograms
-          indexed_rows
-
-      pure $ concat final_histograms
+  (_, indexed_rows) <- evalSegSpace funs env space body
+  initial_histograms <- mapM (mapM (evalVar env) . Seg.histDest) operators
+  final_histograms <- foldM updateFromWorker initial_histograms indexed_rows
+  pure $ concat final_histograms
   where
-    index_counts =
-      map (shapeRank . Seg.histShape) operators
-
-    value_counts =
-      map (length . Seg.histDest) operators
+    index_counts = map (shapeRank . Seg.histShape) operators
+    value_counts = map (length . Seg.histDest) operators
 
     updateFromWorker histograms (coordinate, worker_values) = do
       let segment_indices = init coordinate
 
       worker_values' <- mapM expectKernelValue worker_values
 
-      let (index_groups, remaining) =
-            splitGroups index_counts worker_values'
-          (value_groups, _) =
-            splitGroups value_counts remaining
+      let (index_groups, remaining) = splitGroups index_counts worker_values'
+          (value_groups, _) = splitGroups value_counts remaining
 
       evaluated_indices <-
-        mapM
-          (mapM (expectPrimVal >=> expectInt))
-          index_groups
+        mapM (mapM (expectPrimVal >=> expectInt)) index_groups
 
       forM (zip3 operators evaluated_indices (zip value_groups histograms)) $
         \(operator, bucket_indices, values_and_histograms) ->
