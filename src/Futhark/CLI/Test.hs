@@ -155,9 +155,9 @@ data TestMode
   | -- | Test interpreted code.
     Interpreted
   | -- | Test code interpreted after internalisation to SOACS.
-    SOACSInterpreted
+    InterpretedSOACS
   | -- | Test code interpreted after internalisation to GPU IR
-    GPUInterpreted
+    InterpretedGPU
   | -- | Perform structure tests.
     Structure
   deriving (Eq, Show)
@@ -361,7 +361,7 @@ runTestCase (TestCase mode program testcase progs pbtConfig) = do
               phaseRandom = Nothing
             }
 
-      when (mode `elem` [Compiled, Interpreted, SOACSInterpreted, GPUInterpreted]) $
+      when (mode `elem` [Compiled, Interpreted, InterpretedSOACS, InterpretedGPU]) $
         context "Generating reference outputs" $
           -- We probably get the concurrency at the test program level,
           -- so force just one data set at a time here.
@@ -411,12 +411,12 @@ runTestCase (TestCase mode program testcase progs pbtConfig) = do
           accErrors_ $
             map (runInterpretedEntry (FutharkExe futhark) program) ios
 
-      when (mode == SOACSInterpreted) $
+      when (mode == InterpretedSOACS) $
         context "Interpreting SOACS" $
           accErrors_ $
             map (runIRInterpretedEntry (FutharkExe futhark) SOACSInterpreter program) ios
 
-      when (mode == GPUInterpreted) $
+      when (mode == InterpretedGPU) $
         context "Interpreting GPU IR" $
           accErrors_ $
             map (runIRInterpretedEntry (FutharkExe futhark) GPUInterpreter program) ios
@@ -860,14 +860,14 @@ commandLineOptions =
       "Only interpret",
     Option
       []
-      ["soacs-interpreted"]
-      (NoArg $ Right $ \config -> config {configTestMode = SOACSInterpreted})
-      "Only interpret internalised SOACS code",
+      ["interpret-soacs"]
+      (NoArg $ Right $ \config -> config {configTestMode = InterpretedSOACS})
+      "Only interpret SOACS IR",
     Option
       []
-      ["gpu-interpreted"]
-      (NoArg $ Right $ \config -> config {configTestMode = GPUInterpreted})
-      "Only interpret internalised GPU code",
+      ["interpret-gpu"]
+      (NoArg $ Right $ \config -> config {configTestMode = InterpretedGPU})
+      "Only interpret GPU IR",
     Option
       "c"
       ["compiled"]

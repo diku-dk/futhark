@@ -271,11 +271,11 @@ jobs:
 
     - name: Interpret SOACS IR
       run: |
-        futhark test --soacs-interpreted tests --exclude=autodiff
+        futhark test --interpret-soacs tests --exclude=autodiff
 
     - name: Interpret GPU IR
       run: |
-        futhark test --gpu-interpreted tests --exclude=autodiff
+        futhark test --interpret-gpu tests --exclude=autodiff
 
   test-c:
     runs-on: ubuntu-24.04
