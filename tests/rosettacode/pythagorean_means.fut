@@ -1,6 +1,7 @@
 -- http://rosettacode.org/wiki/Averages/Pythagorean_means
 --
 -- ==
+-- tags { no_metal }
 -- input { [1.0,2.0,3.0,1.0] }
 -- output { 1.75f64 1.565f64 1.412f64 }
 

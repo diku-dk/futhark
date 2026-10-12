@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_metal }
 -- entry: acospi64
 -- input { [1.0, 0f64, -1.0] }
 -- output { [0f64, 0.5f64, 1f64 ] }

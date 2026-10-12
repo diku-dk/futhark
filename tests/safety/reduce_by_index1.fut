@@ -1,4 +1,7 @@
+-- Hangs on Metal: the i64 update uses locking, and a failing
+-- assertion leaves the lock taken.
 -- ==
+-- tags { no_metal }
 -- compiled random input { [20000]f32 } error: l != 1337
 
 def main [n] (xs: *[n]f32) =

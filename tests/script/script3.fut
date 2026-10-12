@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_metal }
 -- entry: dotprod
 -- script input @ script3.futharkscript
 

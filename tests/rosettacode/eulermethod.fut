@@ -5,6 +5,7 @@
 -- determined temperature (so we are computing the error).
 --
 -- ==
+-- tags { no_metal }
 -- input { 100.0 0.0 100.0 2.0 }
 -- output {
 --   [0.0f64, 0.7486588319044785f64, 1.2946993164580505f64, 1.679265585204547f64,

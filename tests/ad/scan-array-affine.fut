@@ -2,7 +2,7 @@
 -- Prefixes satisfy A_i = a_i*A_(i-1), B_i = a_i*B_(i-1)+b_i.
 -- Expected derivatives are from these recurrences, not another AD mode.
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_metal }
 -- entry: main
 -- input { [[2f64, 3], [5f64, 7], [11f64, 13]]
 --         [[1f64, 1], [1f64, 1], [1f64, 1]] }

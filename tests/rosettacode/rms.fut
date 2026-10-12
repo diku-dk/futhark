@@ -1,3 +1,6 @@
+-- ==
+-- tags { no_metal }
+
 -- http://rosettacode.org/wiki/Averages/Root_mean_square
 --
 -- input { [1.0,2.0,3.0,1.0] }

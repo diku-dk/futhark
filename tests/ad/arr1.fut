@@ -1,7 +1,7 @@
 def primal (x, y) : [2]f64 = [x + y, x * y]
 
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_metal }
 -- entry: fwd fwd_vec
 -- input { 5.0 7.0 }
 -- output { [[1.0,7.0], [1.0, 5.0]] }

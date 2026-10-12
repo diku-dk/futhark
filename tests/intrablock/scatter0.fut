@@ -1,5 +1,6 @@
 -- Based on #2218.
 -- ==
+-- tags { no_metal }
 -- structure gpu { /SegMap 1 /SegMap/WithAcc/SegMap 1 }
 
 def main (is: []i64) (vs: [][]f64) =

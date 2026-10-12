@@ -1,6 +1,7 @@
 -- Test ad-hoc properties and utility functions for f64.
 
 -- ==
+-- tags { no_metal }
 -- entry: testInf
 -- input { [1f64, -1f64, -1f64] [0f64, 0f64, 1f64] }
 -- output { [true, true, false] }

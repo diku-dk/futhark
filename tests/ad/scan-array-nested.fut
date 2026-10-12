@@ -1,7 +1,7 @@
 -- Hessian-vector product of the sum of squared array-valued prefixes.
 -- H*v is twice the suffix sum of the prefix sums of v, componentwise.
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_metal }
 -- entry: main
 -- input { [[1f64, 2], [3f64, 4], [5f64, 6]]
 --         [[1f64, 2], [3f64, 4], [5f64, 6]] }

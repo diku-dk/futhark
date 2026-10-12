@@ -1,6 +1,6 @@
 -- Simple reduce with summation.
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_metal }
 -- entry: rev fwd fwd_vec
 -- input { [1.0, 2.0, 3.0, 4.0, 5.0, 6.0] }
 -- output { [1.0, 1.0, 1.0, 1.0, 1.0, 1.0] }

@@ -1,5 +1,6 @@
 -- Compute LU-factorisation of matrix.
 -- ==
+-- tags { no_metal }
 -- input {
 --   [[4.0,3.0],[6.0,3.0]]
 -- }

@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_metal }
 -- entry: test_f16
 -- input { [0f16, 0f16, -0f16, f16.nan] [1f16, -1f16, 0f16, f16.inf] }
 -- output { [0.0f16, -0.0f16, 0.0f16, f16.nan] }

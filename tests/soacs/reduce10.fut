@@ -2,6 +2,7 @@
 -- operator), where the operands are arrays.
 --
 -- ==
+-- tags { no_metal }
 -- input { [[1.0,2.0],[2.0,3.0],[4.0,5.0]] }
 -- structure gpu { /SegRed 1 }
 

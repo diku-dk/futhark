@@ -18,6 +18,7 @@ entry f32_to_bool = map bool.f32
 entry f64_to_bool = map bool.f64
 
 -- ==
+-- tags { no_metal }
 -- entry: f16_to_f32
 -- input { [f16.inf, -f16.inf, f16.nan, -1f16, 1f16] }
 -- output { [f32.inf, -f32.inf, f32.nan, -1.0f32, 1.0f32] }

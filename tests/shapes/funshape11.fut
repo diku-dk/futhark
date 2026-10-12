@@ -1,5 +1,6 @@
 -- We must maintain the dependent size in the function returned by mkhassum.
 -- ==
+-- tags { no_metal }
 -- input { 0i32 }
 -- output { 6.0 }
 

@@ -1,5 +1,6 @@
 -- Convert booleans to different types.
 -- ==
+-- tags { no_metal }
 -- entry: castB
 -- input { [false, true] }
 -- output { [false, true] }

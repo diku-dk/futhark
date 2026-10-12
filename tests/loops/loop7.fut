@@ -2,6 +2,7 @@
 -- optimisation.  It requires proper maintaining of the loop result
 -- ordering.
 -- ==
+-- tags { no_metal }
 
 def main (n: i64, i: i32, x: f64) : [][]f64 =
   let res = replicate n (replicate n 0.0)

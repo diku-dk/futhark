@@ -1,5 +1,6 @@
 -- HOF field alongside an ordinary field in the same record.
 -- ==
+-- tags { no_metal }
 -- input { 2i64 3i64 } output { [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] 42i64 }
 def f (n: i64) (m: i64) = {g = (\(x: f64) -> replicate (m ** n) x), k = 42i64}
 

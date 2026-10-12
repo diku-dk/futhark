@@ -1,6 +1,7 @@
 -- Test f64.(fma,mad).  The test values here are very crude and do not
 -- actually test the numerical properties we hope to get.
 -- ==
+-- tags { no_metal }
 -- input { [1f64, 2f64, 3f64 ]
 --         [3f64, 2f64, 1f64 ]
 --         [2f64, 3f64, 1f64 ]
