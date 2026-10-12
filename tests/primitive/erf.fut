@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_metal }
 -- entry: erf64
 -- input { [0f64, 1f64] }
 -- output { [0f64, 0.8427007929497149f64] }

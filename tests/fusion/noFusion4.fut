@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_metal }
 def main (arr: *[]f64) : f64 =
   let x = map (+ 1.0) arr
   let arr[1] = 3.33

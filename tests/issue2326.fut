@@ -1,3 +1,6 @@
+-- ==
+-- tags { no_metal }
+
 module type blocked_square_regular = {
   type~ mat [n]
 

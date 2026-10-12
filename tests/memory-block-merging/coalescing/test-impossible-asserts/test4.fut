@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_metal }
 -- structure gpu-mem { Alloc 1 }
 -- structure seq-mem { Alloc 1 }
 

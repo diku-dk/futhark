@@ -1,6 +1,6 @@
 -- #1878
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_metal }
 -- entry: fwd_J rev_J fwd_vec_J rev_vec_J
 -- input { [1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0] }
 -- output { [[0.0, 2.0, 3.0, 4.0],

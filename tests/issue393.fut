@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_metal }
 -- structure { /Screma 1 /Screma/Screma 2 }
 
 def dotprod [n] (xs: [n]f64) (ys: [n]f64) : f64 =

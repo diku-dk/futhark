@@ -3,7 +3,7 @@
 
 
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_metal }
 
 entry calculate_objective [d]
                           (xParam: [3][4 * d]f64)

@@ -1,5 +1,6 @@
 -- Test inspired from Option Pricing's brownian bridge
 -- ==
+-- tags { no_metal }
 -- input { [ [1.0, 3.0, 5.0, 7.0, 9.0, 11.0], [0.0, 2.0, 4.0, 6.0, 8.0, 10.0] ] }
 -- output { [[3.0f64, 2.0f64, 2.0f64, 2.0f64, 2.75f64, -11.25f64], [2.0f64, 2.0f64, 2.0f64, 2.0f64, 2.0f64, -10.0f64]] }
 

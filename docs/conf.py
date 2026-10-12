@@ -461,6 +461,7 @@ man_pages: List[Tuple[str, str, str, List[Any], int]] = [
     ),
     ("man/futhark-cuda", "futhark-cuda", "compile Futhark to CUDA", [], 1),
     ("man/futhark-hip", "futhark-hip", "compile Futhark to HIP", [], 1),
+    ("man/futhark-metal", "futhark-metal", "compile Futhark to Metal", [], 1),
     (
         "man/futhark-python",
         "futhark-python",

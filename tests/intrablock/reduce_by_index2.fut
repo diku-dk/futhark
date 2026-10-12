@@ -1,6 +1,7 @@
 -- Nastier operator that requires locking.  (If we ever get 64-bit
 -- float atomics, then maybe add another test.)
 -- ==
+-- tags { no_metal }
 -- random input { 10i64 [1][256]i64 } auto output
 -- compiled random input { 10i64 [100][256]i64 } auto output
 

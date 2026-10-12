@@ -16,6 +16,9 @@ LDFLAGS=-lm -lcuda -lcudart -lnvrtc
 else ifeq ($(FUTHARK_BACKEND),hip)
 CFLAGS=-O3 -std=c99
 LDFLAGS=-lm -lamdhip64 -lhiprtc
+else ifeq ($(FUTHARK_BACKEND),metal)
+CFLAGS=-O3 -std=c99 -ObjC -fno-objc-arc
+LDFLAGS=-lm -framework Metal -framework Foundation
 else
 CFLAGS=-O3 -std=c99
 LDFLAGS=-lm
@@ -25,7 +28,14 @@ endif
 
 .PHONY: test clean
 
-test: $(patsubst %.fut, do_test_%, $(wildcard *.fut))
+TESTS=$(wildcard *.fut)
+
+ifeq ($(FUTHARK_BACKEND),metal)
+# Uses f64, which Metal does not support.
+TESTS:=$(filter-out record_array.fut,$(TESTS))
+endif
+
+test: $(patsubst %.fut, do_test_%, $(TESTS))
 
 do_test_%: test_%
 	./validatemanifest.py ../../docs/manifest.schema.json $*.json

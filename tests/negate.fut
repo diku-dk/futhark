@@ -1,5 +1,6 @@
 -- Test that negation works for both integers and f64s.
 -- ==
+-- tags { no_metal }
 -- input {
 --   [1,2,3]
 -- }

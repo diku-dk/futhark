@@ -8,6 +8,7 @@ module Futhark.CodeGen.ImpGen.GPU
   ( compileProgOpenCL,
     compileProgCUDA,
     compileProgHIP,
+    compileProgMetal,
     Warnings,
   )
 where
@@ -40,8 +41,9 @@ callKernelOperations =
       opsAllocCompilers = mempty
     }
 
-openclAtomics, cudaAtomics :: AtomicBinOp
-(openclAtomics, cudaAtomics) = (flip lookup opencl, flip lookup cuda)
+openclAtomics, cudaAtomics, metalAtomics :: AtomicBinOp
+(openclAtomics, cudaAtomics, metalAtomics) =
+  (flip lookup opencl, flip lookup cuda, flip lookup metal)
   where
     opencl64 =
       [ (Add Int64 OverflowUndef, Imp.AtomicAdd Int64),
@@ -88,6 +90,9 @@ openclAtomics, cudaAtomics :: AtomicBinOp
       ]
     opencl = opencl8 <> opencl16 <> opencl32 <> opencl64
     cuda = opencl
+    -- Metal has no 64-bit atomics (except for min/max on some
+    -- devices), and no f64 at all.
+    metal = opencl8 <> opencl16 <> opencl32
 
 compileProg ::
   (MonadFreshNames m) =>
@@ -103,11 +108,13 @@ compileProg env =
 -- either CUDA or OpenCL characteristics.
 compileProgOpenCL,
   compileProgCUDA,
-  compileProgHIP ::
+  compileProgHIP,
+  compileProgMetal ::
     (MonadFreshNames m) => Prog GPUMem -> m (Warnings, Imp.Program)
 compileProgOpenCL = compileProg $ HostEnv openclAtomics OpenCL mempty
 compileProgCUDA = compileProg $ HostEnv cudaAtomics CUDA mempty
 compileProgHIP = compileProg $ HostEnv cudaAtomics HIP mempty
+compileProgMetal = compileProg $ HostEnv metalAtomics Metal mempty
 
 opCompiler ::
   Pat LetDecMem ->

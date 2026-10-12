@@ -1,3 +1,6 @@
+-- ==
+-- tags { no_metal }
+
 -- Issue was memory expansion did not handle an allocation inside
 -- nested SegOps in a Group SegOp.  And _this_ was because the size
 -- was not hoisted all the way out, because there was an If

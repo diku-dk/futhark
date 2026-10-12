@@ -1,3 +1,6 @@
+-- ==
+-- tags { no_metal }
+
 -- This test exposed a bug in map-nest creation.  The program involves
 -- ISWIM with apparently more complex shapes than the other ISWIM
 -- tests.  The bug happened whilst pulling a transpose before the

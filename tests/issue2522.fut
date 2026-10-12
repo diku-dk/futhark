@@ -4,7 +4,7 @@ def all_unique [n] (size: i64) (is: [n]i64) : bool =
   |> (== n)
 
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_metal }
 -- entry: main
 -- input { [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]] }
 -- output { [[1.0, 1.0, 1.0], [1.0, 1.0, 1.0]] }

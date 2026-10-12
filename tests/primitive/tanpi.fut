@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_metal }
 -- entry: tanpi64
 -- input { [0f64, 0.1f64, 1f64, 2f64 ] }
 -- output { [0f64, 0.3249196962329063f64, 0f64, 0f64] }

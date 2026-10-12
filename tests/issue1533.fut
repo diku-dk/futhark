@@ -2,6 +2,7 @@
 -- permutations.
 -- In multicore backend: invalid hoisting after double buffering.
 -- ==
+-- tags { no_metal }
 -- compiled random input { [20][20][20]f64 } auto output
 
 type complex = {r: f64, i: f64}

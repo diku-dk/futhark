@@ -1,5 +1,5 @@
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_metal }
 
 -- ==
 -- entry: fwd_vec fwd_map

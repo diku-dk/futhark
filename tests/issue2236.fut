@@ -1,5 +1,5 @@
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_metal }
 
 def vecadd = map2 (f64.+)
 def scale x v = map (x f64.*) v

@@ -1,3 +1,6 @@
+-- ==
+-- tags { no_metal }
+
 -- This is a fragile test, in that it depends on subtle interchange to
 -- even produce the code that sequentialisation chokes on.
 

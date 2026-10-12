@@ -1,5 +1,6 @@
 -- Array of tuples polymorphism.
 -- ==
+-- tags { no_metal }
 -- input { 2i64 } output { [1i64,0i64] [1.0,0.0] [1i64,0i64] }
 
 module pm (P: {type vector [n] 't val reverse [n] 't : vector [n] t -> vector [n] t}) = {

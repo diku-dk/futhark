@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_metal }
 def f (a: f64) : f64 = a + 3.0
 def g (a: f64) (b: f64) : f64 = a * b
 

@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_metal }
 -- entry: hypotf16
 -- input { [0f16, 3f16, 1.8446744e19f16] [0f16, 4f16, 0f16] } output { [0f16, 5f16, 1.8446744e19f16] }
 

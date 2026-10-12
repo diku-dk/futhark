@@ -1,6 +1,6 @@
 
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_metal }
 -- entry: rev fwd fwd_vec rev_vec
 -- input { true [1.0,2.0,3.0] }
 -- output { [[0.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]] }

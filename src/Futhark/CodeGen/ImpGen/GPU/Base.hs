@@ -68,7 +68,7 @@ import Prelude hiding (quot, rem)
 -- of the kernels code is the same, there are some cases where we
 -- generate special code based on the ultimate low-level API we are
 -- targeting.
-data Target = CUDA | OpenCL | HIP
+data Target = CUDA | OpenCL | HIP | Metal
 
 -- | Information about the locks available for accumulators.
 data Locks = Locks
@@ -716,6 +716,17 @@ type AtomicBinOp =
   BinOp ->
   Maybe (VName -> VName -> Count Imp.Elements (Imp.TExp Int64) -> Imp.Exp -> Imp.AtomicOp)
 
+-- | Can values of this type be updated with atomic compare-and-swap?
+-- Smaller types than 32 bits are emulated with 32-bit
+-- compare-and-swap.  We assume that 64-bit compare-and-swap is
+-- available if 64-bit atomic addition is, which is not the case for
+-- Metal.
+casSupported :: AtomicBinOp -> PrimType -> Bool
+casSupported atomicBinOp t =
+  case primBitSize t of
+    64 -> isJust $ atomicBinOp $ Add Int64 OverflowUndef
+    bits -> bits `elem` [8, 16, 32]
+
 -- | Do an atomic update corresponding to a binary operator lambda.
 atomicUpdateLocking ::
   AtomicBinOp ->
@@ -723,7 +734,7 @@ atomicUpdateLocking ::
   AtomicUpdate GPUMem KernelEnv
 atomicUpdateLocking atomicBinOp lam
   | Just ops_and_ts <- lamIsBinOp lam,
-    all (\(_, t, _, _) -> primBitSize t `elem` [8, 16, 32, 64]) ops_and_ts =
+    all (\(op, t, _, _) -> isJust (atomicBinOp op) || casSupported atomicBinOp t) ops_and_ts =
       primOrCas ops_and_ts $ \space arrs bucket ->
         -- If the operator is a vectorised binary operator on single values, we
         -- can use a particularly efficient implementation. If the operator has
@@ -759,10 +770,10 @@ atomicUpdateLocking atomicBinOp lam
 
 -- If the operator functions purely on single single values, we can use an
 -- implementation based on CAS, no matter what the operator does.
-atomicUpdateLocking _ op
+atomicUpdateLocking atomicBinOp op
   | [Prim t] <- lambdaReturnType op,
     [xp, _] <- lambdaParams op,
-    primBitSize t `elem` [8, 16, 32, 64] = AtomicCAS $ \space [arr] bucket -> do
+    casSupported atomicBinOp t = AtomicCAS $ \space [arr] bucket -> do
       old <- dPrimS "old" t
       atomicUpdateCAS space t arr old bucket (paramName xp) $
         compileBody' [xp] (lambdaBody op)

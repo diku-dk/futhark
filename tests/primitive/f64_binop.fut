@@ -9,6 +9,7 @@ entry mod = map2 (f64.%)
 entry pow = map2 (f64.**)
 
 -- ==
+-- tags { no_metal }
 -- entry: add
 -- input  { [0.0f64, 1.0f64, 1.0f64, -1.0f64, 1.79769e308, 0f64,    0f64]
 --          [0.0f64, 0.0f64, 0.0f64,  0.0f64, 10f64,       f64.nan, f64.inf] }

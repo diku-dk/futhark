@@ -555,6 +555,7 @@ commandLineOptions =
                 "opencl" -> Right $ GPUMemAction compileOpenCLAction
                 "hip" -> Right $ GPUMemAction compileHIPAction
                 "cuda" -> Right $ GPUMemAction compileCUDAAction
+                "metal" -> Right $ GPUMemAction compileMetalAction
                 "wasm" -> Right $ SeqMemAction compileCtoWASMAction
                 "wasm-multicore" -> Right $ MCMemAction compileMulticoreToWASMAction
                 "ispc" -> Right $ MCMemAction compileMulticoreToISPCAction

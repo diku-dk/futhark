@@ -1,3 +1,6 @@
+-- ==
+-- tags { no_metal }
+
 -- --
 -- input {
 --   5
