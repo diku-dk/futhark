@@ -277,13 +277,13 @@ evalExp funs env (Match ses cases default_body _) = do
 
     matchesValue Nothing _ = True
     matchesValue (Just expected) actual = expected == actual
-evalExp funs env (Loop merge (ForLoop iterator int_type bound_exp) body) = do
-  initial_values <- mapM (evalSubExp env . snd) merge
+evalExp funs env (Loop params_and_inits (ForLoop iterator int_type bound_exp) body) = do
+  initial_values <- mapM (evalSubExp env . snd) params_and_inits
   bound_value <- evalSubExp env bound_exp >>= expectPrimVal
   bound <- expectInt bound_value
   runIterations 0 bound initial_values
   where
-    merge_names = map (paramName . fst) merge
+    param_names = map (paramName . fst) params_and_inits
 
     runIterations iteration bound current_values
       | iteration >= bound =
@@ -294,22 +294,22 @@ evalExp funs env (Loop merge (ForLoop iterator int_type bound_exp) body) = do
               loop_bindings =
                 M.fromList $
                   (iterator, iterator_value)
-                    : zip merge_names current_values
+                    : zip param_names current_values
               iteration_env =
                 M.union loop_bindings env
 
           next_values <- evalBody funs iteration_env body
           runIterations (iteration + 1) bound next_values
-evalExp funs env (Loop merge (WhileLoop condition) body) = do
-  initial_values <- mapM (evalSubExp env . snd) merge
+evalExp funs env (Loop params_and_inits (WhileLoop condition) body) = do
+  initial_values <- mapM (evalSubExp env . snd) params_and_inits
   runWhile initial_values
   where
-    merge_names = map (paramName . fst) merge
+    param_names = map (paramName . fst) params_and_inits
 
     runWhile current_values = do
       let loop_env =
             M.union
-              (M.fromList $ zip merge_names current_values)
+              (M.fromList $ zip param_names current_values)
               env
 
       condition_value <- evalVar loop_env condition
