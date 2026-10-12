@@ -18,6 +18,10 @@ module Futhark.IR.GPU.Op
     SegSeqDims (..),
     KernelGrid (..),
 
+    -- * Attributes
+    intrablockResultGlobalAttr,
+    intrablockResultGlobal,
+
     -- * Reexports
     module Futhark.IR.GPU.Sizes,
     module Futhark.IR.SegOp,
@@ -49,6 +53,17 @@ import Futhark.Util.Pretty
     (<+>),
   )
 import Futhark.Util.Pretty qualified as PP
+
+-- | The attribute @#[intrablock_result(global)]@. On the statement of an
+-- intra-block 'SegMap', it asks for the results of the kernel to be constructed
+-- directly in global memory rather than in shared memory, which is done by
+-- memory short-circuiting.
+intrablockResultGlobalAttr :: Attr
+intrablockResultGlobalAttr = AttrComp "intrablock_result" [AttrName "global"]
+
+-- | Does this set of attributes contain 'intrablockResultGlobalAttr'?
+intrablockResultGlobal :: Attrs -> Bool
+intrablockResultGlobal = inAttrs intrablockResultGlobalAttr
 
 -- | These dimensions (indexed from 0, outermost) of the corresponding
 -- 'SegSpace' should not be parallelised, but instead iterated

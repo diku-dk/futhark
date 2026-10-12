@@ -283,9 +283,12 @@ shortCircuitGPUMem _ _ _ _ (Alloc _ _) _ bu_env = pure bu_env
 shortCircuitGPUMem _ _ _ _ (EnsureDirect _) _ bu_env = pure bu_env
 shortCircuitGPUMem lutab pat attrs certs (Inner (GPU.SegOp op)) td_env bu_env
   | GPU.SegBlock {} <- segLevel op,
-    intrablockResultGlobal attrs =
+    GPU.intrablockResultGlobal attrs =
       local (\env -> env {spaceOK = sharedToDeviceOK}) $
         shortCircuitSegOp (const True) lutab pat certs op td_env bu_env
+  | SegHist GPU.SegThreadInBlock {} _ _ _ hist_ops <- op =
+      keepHistDestsInSpace td_env hist_ops
+        <$> shortCircuitSegOp isSegThread lutab pat certs op td_env bu_env
   | otherwise =
       shortCircuitSegOp isSegThread lutab pat certs op td_env bu_env
 shortCircuitGPUMem lutab pat _ certs (Inner (GPU.GPUBody _ body)) td_env bu_env = do
@@ -311,11 +314,22 @@ shortCircuitGPUMem lutab pat _ certs (Inner (GPU.GPUBody _ body)) td_env bu_env 
 shortCircuitGPUMem _ _ _ _ (Inner (GPU.SizeOp _)) _ bu_env = pure bu_env
 shortCircuitGPUMem _ _ _ _ (Inner (GPU.OtherOp NoOp)) _ bu_env = pure bu_env
 
--- | Does this statement ask for the results of an intra-block kernel to be
--- short-circuited from shared memory into the (global) result of the kernel?
--- See Note [Short-circuiting across memory spaces].
-intrablockResultGlobal :: Attrs -> Bool
-intrablockResultGlobal = inAttrs $ AttrComp "intrablock_result" [AttrName "global"]
+-- | The atomic updates of a block-level histogram assume that its destinations
+-- are in shared memory (see "Futhark.CodeGen.ImpGen.GPU.Block"), so they must
+-- not be moved to another space.
+keepHistDestsInSpace :: TopdownEnv GPUMem -> [HistOp (Aliases GPUMem)] -> BotUpEnv -> BotUpEnv
+keepHistDestsInSpace td_env hist_ops bu_env =
+  let (actv, inh) =
+        foldl failMove (activeCoals bu_env, inhibit bu_env) $
+          mapMaybe (fmap memName . flip getScopeMemInfo (scope td_env)) $
+            concatMap histDest hist_ops
+   in bu_env {activeCoals = actv, inhibit = inh}
+  where
+    failMove acc@(actv, _) m
+      | Just entry <- M.lookup m actv,
+        memSpace td_env m /= Just (dstspace entry) =
+          markFailedCoal acc m
+      | otherwise = acc
 
 -- | The 'spaceOK' inside an intra-block kernel whose results should be put in
 -- global memory: an array in shared memory may then be moved to global
