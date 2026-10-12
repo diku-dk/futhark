@@ -1,19 +1,64 @@
 // Start of transpose.cl
 
+// The kernel parameters are given by macros, because Metal kernels
+// take their arguments as a struct.
+#ifdef FUTHARK_METAL
+#define GEN_TRANSPOSE_ARGS(INT_TYPE)                                    \
+  struct transpose_args_##INT_TYPE {                                    \
+    device uint8_t *dst_mem;                                            \
+    int64_t dst_offset;                                                 \
+    device uint8_t *src_mem;                                            \
+    int64_t src_offset;                                                 \
+    INT_TYPE num_arrays;                                                \
+    INT_TYPE x_elems;                                                   \
+    INT_TYPE y_elems;                                                   \
+    INT_TYPE mulx;                                                      \
+    INT_TYPE muly;                                                      \
+    int32_t repeat_1;                                                   \
+    int32_t repeat_2;                                                   \
+  };
+
+GEN_TRANSPOSE_ARGS(int32_t)
+GEN_TRANSPOSE_ARGS(int64_t)
+
+#define TRANSPOSE_PARAMS(ELEM_TYPE, INT_TYPE)                           \
+  FUTHARK_KERNEL_PARAMS(transpose_args_##INT_TYPE)
+
+#define TRANSPOSE_UNPACK(ELEM_TYPE, INT_TYPE)                           \
+  threadgroup uint64_t *shared_mem = shared_mem_aligned;                \
+  device ELEM_TYPE *dst_mem = (device ELEM_TYPE*)futhark_args->dst_mem; \
+  int64_t dst_offset = futhark_args->dst_offset;                        \
+  device ELEM_TYPE *src_mem = (device ELEM_TYPE*)futhark_args->src_mem; \
+  int64_t src_offset = futhark_args->src_offset;                        \
+  INT_TYPE num_arrays = futhark_args->num_arrays;                       \
+  INT_TYPE x_elems = futhark_args->x_elems;                             \
+  INT_TYPE y_elems = futhark_args->y_elems;                             \
+  INT_TYPE mulx = futhark_args->mulx;                                   \
+  INT_TYPE muly = futhark_args->muly;                                   \
+  int32_t repeat_1 = futhark_args->repeat_1;                            \
+  int32_t repeat_2 = futhark_args->repeat_2;
+#else
+#define TRANSPOSE_PARAMS(ELEM_TYPE, INT_TYPE)                           \
+  SHARED_MEM_PARAM                                                      \
+  __global ELEM_TYPE *dst_mem,                                          \
+  int64_t dst_offset,                                                   \
+  __global ELEM_TYPE *src_mem,                                          \
+  int64_t src_offset,                                                   \
+  INT_TYPE num_arrays,                                                  \
+  INT_TYPE x_elems,                                                     \
+  INT_TYPE y_elems,                                                     \
+  INT_TYPE mulx,                                                        \
+  INT_TYPE muly,                                                        \
+  int32_t repeat_1,                                                     \
+  int32_t repeat_2
+
+#define TRANSPOSE_UNPACK(ELEM_TYPE, INT_TYPE)
+#endif
+
 #define GEN_TRANSPOSE_KERNELS(NAME, ELEM_TYPE)                          \
 FUTHARK_KERNEL_SIZED(TR_BLOCK_DIM*2, TR_TILE_DIM/TR_ELEMS_PER_THREAD, 1)\
-void map_transpose_##NAME(SHARED_MEM_PARAM                              \
-                          __global ELEM_TYPE *dst_mem,                  \
-                          int64_t dst_offset,                           \
-                          __global ELEM_TYPE *src_mem,                  \
-                          int64_t src_offset,                           \
-                          int32_t num_arrays,                           \
-                          int32_t x_elems,                              \
-                          int32_t y_elems,                              \
-                          int32_t mulx,                                 \
-                          int32_t muly,                                 \
-                          int32_t repeat_1,                             \
-                          int32_t repeat_2) {                           \
+void map_transpose_##NAME(TRANSPOSE_PARAMS(ELEM_TYPE, int32_t)) {       \
+  TRANSPOSE_UNPACK(ELEM_TYPE, int32_t)                                  \
   (void)mulx; (void)muly;                                               \
   __local ELEM_TYPE* block = (__local ELEM_TYPE*)shared_mem;            \
   int tblock_id_0 = get_tblock_id(0);                                   \
@@ -62,18 +107,8 @@ void map_transpose_##NAME(SHARED_MEM_PARAM                              \
 }                                                                       \
                                                                         \
 FUTHARK_KERNEL_SIZED(TR_BLOCK_DIM, TR_BLOCK_DIM, 1)                     \
-void map_transpose_##NAME##_low_height(SHARED_MEM_PARAM                 \
-                                                __global ELEM_TYPE *dst_mem, \
-                                                int64_t dst_offset,     \
-                                                __global ELEM_TYPE *src_mem, \
-                                                int64_t src_offset,     \
-                                                int32_t num_arrays,     \
-                                                int32_t x_elems,        \
-                                                int32_t y_elems,        \
-                                                int32_t mulx,           \
-                                                int32_t muly,           \
-                                                int32_t repeat_1,       \
-                                                int32_t repeat_2) {     \
+void map_transpose_##NAME##_low_height(TRANSPOSE_PARAMS(ELEM_TYPE, int32_t)) { \
+  TRANSPOSE_UNPACK(ELEM_TYPE, int32_t)                                  \
   __local ELEM_TYPE* block = (__local ELEM_TYPE*)shared_mem;            \
   int tblock_id_0 = get_tblock_id(0);                                   \
   int global_id_0 = get_global_id(0);                                   \
@@ -117,18 +152,8 @@ void map_transpose_##NAME##_low_height(SHARED_MEM_PARAM                 \
 }                                                                       \
                                                                         \
 FUTHARK_KERNEL_SIZED(TR_BLOCK_DIM, TR_BLOCK_DIM, 1)                     \
-void map_transpose_##NAME##_low_width(SHARED_MEM_PARAM                  \
-                                      __global ELEM_TYPE *dst_mem,      \
-                                      int64_t dst_offset,               \
-                                      __global ELEM_TYPE *src_mem,      \
-                                      int64_t src_offset,               \
-                                      int32_t num_arrays,               \
-                                      int32_t x_elems,                  \
-                                      int32_t y_elems,                  \
-                                      int32_t mulx,                     \
-                                      int32_t muly,                     \
-                                      int32_t repeat_1,                 \
-                                      int32_t repeat_2) {               \
+void map_transpose_##NAME##_low_width(TRANSPOSE_PARAMS(ELEM_TYPE, int32_t)) { \
+  TRANSPOSE_UNPACK(ELEM_TYPE, int32_t)                                  \
   __local ELEM_TYPE* block = (__local ELEM_TYPE*)shared_mem;            \
   int tblock_id_0 = get_tblock_id(0);                                   \
   int global_id_0 = get_global_id(0);                                   \
@@ -169,18 +194,8 @@ void map_transpose_##NAME##_low_width(SHARED_MEM_PARAM                  \
 }                                                                       \
                                                                         \
 FUTHARK_KERNEL_SIZED(TR_BLOCK_DIM*TR_BLOCK_DIM, 1, 1)                   \
-void map_transpose_##NAME##_small(SHARED_MEM_PARAM                       \
-                                  __global ELEM_TYPE *dst_mem,          \
-                                  int64_t dst_offset,                   \
-                                  __global ELEM_TYPE *src_mem,          \
-                                  int64_t src_offset,                   \
-                                  int32_t num_arrays,                   \
-                                  int32_t x_elems,                      \
-                                  int32_t y_elems,                      \
-                                  int32_t mulx,                         \
-                                  int32_t muly,                         \
-                                  int32_t repeat_1,                     \
-                                  int32_t repeat_2) {                   \
+void map_transpose_##NAME##_small(TRANSPOSE_PARAMS(ELEM_TYPE, int32_t)) { \
+  TRANSPOSE_UNPACK(ELEM_TYPE, int32_t)                                  \
   (void)mulx; (void)muly;                                               \
   __local ELEM_TYPE* block = (__local ELEM_TYPE*)shared_mem;            \
   int tblock_id_0 = get_tblock_id(0);                                   \
@@ -210,18 +225,8 @@ void map_transpose_##NAME##_small(SHARED_MEM_PARAM                       \
 }                                                                       \
                                                                         \
 FUTHARK_KERNEL_SIZED(TR_BLOCK_DIM*2, TR_TILE_DIM/TR_ELEMS_PER_THREAD, 1)\
-void map_transpose_##NAME##_large(SHARED_MEM_PARAM                      \
-                                  __global ELEM_TYPE *dst_mem,          \
-                                  int64_t dst_offset,                   \
-                                  __global ELEM_TYPE *src_mem,          \
-                                  int64_t src_offset,                   \
-                                  int64_t num_arrays,                   \
-                                  int64_t x_elems,                      \
-                                  int64_t y_elems,                      \
-                                  int64_t mulx,                         \
-                                  int64_t muly,                         \
-                                  int32_t repeat_1,                     \
-                                  int32_t repeat_2) {                   \
+void map_transpose_##NAME##_large(TRANSPOSE_PARAMS(ELEM_TYPE, int64_t)) { \
+  TRANSPOSE_UNPACK(ELEM_TYPE, int64_t)                                  \
   (void)mulx; (void)muly;                                               \
   __local ELEM_TYPE* block = (__local ELEM_TYPE*)shared_mem;             \
   int tblock_id_0 = get_tblock_id(0);                                   \
