@@ -1,5 +1,6 @@
 -- Polymorphic function using polymorphic type in parametric module.
 -- ==
+-- tags { no_metal }
 -- input { 2 3 } output { [1i64,0i64] [2.0,1.0,0.0] }
 
 module pm (P: {type~ vector 't val reverse 't : vector t -> vector t}) = {

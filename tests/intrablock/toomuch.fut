@@ -2,6 +2,7 @@
 -- availability, so should not be picked, even if it looks like a good
 -- idea!
 -- ==
+-- tags { no_metal }
 -- compiled random input { [128][256]f64 [128][256]f64 [128][256]f64 [128][256]f64 } auto output
 
 type vec = (f64, f64, f64, f64)

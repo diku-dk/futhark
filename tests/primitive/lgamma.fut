@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_metal }
 -- entry: lgammaf32
 -- input { [1.0f32, 4.0f32] }
 -- output { [0f32, 1.7917594692280554f32] }

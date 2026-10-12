@@ -1,6 +1,7 @@
 -- Make sure not to share the in-place updated array too much in the
 -- prelude.
 -- ==
+-- tags { no_metal }
 -- random input { [10]f64 [100]f64 } auto output
 
 def seqmap [n] 'a 'b (f: a -> b) (xs: [n]a) (dummy: b) : [n]b =

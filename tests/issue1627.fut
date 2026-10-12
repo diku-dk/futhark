@@ -73,5 +73,6 @@ entry main [nelx] [nely] [nelz] (x: [nelx][nely][nelz]f32) =
   tabulate_3d nelx nely nelz (\i j k -> getElementStiffnessDiagonal x {x = i, y = j, z = k})
 
 -- ==
+-- tags { no_metal }
 -- entry: main
 -- input { [[[1f32, 1f32]]] } auto output

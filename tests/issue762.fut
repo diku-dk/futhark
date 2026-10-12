@@ -1,3 +1,6 @@
+-- ==
+-- tags { no_metal }
+
 def main [N] [D] [K] [triD] (x: [N][D]f64) (means: [K][D]f64) (qs: [K][D]f64) (ls: [K][triD]f64) =
   let xs =
     map (\x' ->

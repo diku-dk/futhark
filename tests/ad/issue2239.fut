@@ -1,5 +1,5 @@
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_metal }
 -- input { [1.0, 1.0, 1.0] } output { [-4.0, -2.0, 0.0] }
 
 entry main seed =

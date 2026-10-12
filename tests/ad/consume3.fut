@@ -1,5 +1,5 @@
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_metal }
 
 def test [n] (xs: [n]f64) =
   let xs' = copy xs

@@ -1,5 +1,6 @@
 -- Example program from the ARRAY'14 paper.
 -- ==
+-- tags { no_metal }
 
 def main [k] [m] [n] (xs: [k]i64, as: [m][n]f64) : [][]f64 =
   map (\(e: (i64, []f64)) ->

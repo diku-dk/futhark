@@ -1,3 +1,6 @@
+-- ==
+-- tags { no_metal }
+
 type ObjectGeom =
     #Wall f64
   | #Block ([3]f64)

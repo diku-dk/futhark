@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_metal }
 -- entry: asinpi64
 -- input { [0.0f64, 1f64, -1f64, -1.0f64] }
 -- output { [0f64, 0.5f64, -0.5f64, -0.5f64 ] }

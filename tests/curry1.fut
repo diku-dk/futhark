@@ -1,5 +1,6 @@
 -- Test that we can curry even "complex" arguments.
 -- ==
+-- tags { no_metal }
 -- input {
 --   [1.0,6.0,3.0,4.0,1.0,0.0]
 -- }

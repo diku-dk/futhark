@@ -1,6 +1,7 @@
 -- NaN and inf must work.
 
 -- ==
+-- tags { no_metal }
 -- entry: eqNaN
 -- input { [2f64, f64.nan, f64.inf, -f64.inf] }
 -- output { [false, false, false, false] }

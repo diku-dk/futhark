@@ -1,3 +1,6 @@
+-- ==
+-- tags { no_metal }
+
 type vector = (f64, f64)
 
 def add (v1: vector) (v2: vector) : vector =

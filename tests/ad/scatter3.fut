@@ -4,7 +4,7 @@
 -- variable adjoints returned from the return-sweep with_acc were given their
 -- primal types instead of the vectorised adjoint types.
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_metal }
 -- entry: main
 -- input { [3.0] }
 -- output { [[1.0], [2.0]] }

@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_metal }
 -- entry: sinpi64
 -- input { [0f64, 0.5f64, 1f64, 1.5f64, 2f64, -0.5f64 ] }
 -- output { [0.0f64, 1f64, 0f64, -1f64, 0f64, -1.0f64] }

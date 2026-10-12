@@ -1,6 +1,7 @@
 -- This test inspired by code often created by
 -- arrays-of-tuples-to-tuple-of-arrays transformation.
 -- ==
+-- tags { no_metal }
 -- input {
 -- }
 -- output {

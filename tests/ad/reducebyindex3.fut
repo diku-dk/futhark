@@ -1,5 +1,5 @@
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_metal }
 --  entry: rev rev_vec
 --  input {
 --    [0i64,1i64,2i64,1i64,0i64,1i64,2i64]

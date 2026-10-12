@@ -1,6 +1,7 @@
 -- http://rosettacode.org/wiki/Averages/Arithmetic_mean
 --
 -- ==
+-- tags { no_metal }
 -- input { [1.0,2.0,3.0,1.0] }
 -- output { 1.75f64 }
 

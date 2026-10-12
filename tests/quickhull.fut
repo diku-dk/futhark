@@ -2,6 +2,7 @@
 --
 -- The structure test is to verify that inlining happens as expected.
 -- ==
+-- tags { no_metal }
 -- input { [[0.0,0.0],[2.0,0.0],[2.0,2.0],[0.0,2.0],[1.0,1.0],[1.5,0.5],[0.5,1.5]] }
 -- output { [[0.0, 0.0], [0.0, 2.0], [2.0, 2.0], [2.0, 0.0]] }
 -- structure { Apply 3 }

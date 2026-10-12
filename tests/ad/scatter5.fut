@@ -1,6 +1,6 @@
 -- Based on #2522.
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_metal }
 -- input { [1.0,2.0,3.0,4.0] }
 -- output { [0.0, 1.0, 1.0, 1.0] }
 

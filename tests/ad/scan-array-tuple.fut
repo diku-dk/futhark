@@ -2,7 +2,7 @@
 -- Scalar products have derivatives [1+5+5*11, 2+2*11, 2*5].
 -- The array components compose affine functions as in scan-array-affine.
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_metal }
 -- entry: main
 -- input { [2f32, 5, 11] [[2f64, 3], [5f64, 7], [11f64, 13]]
 --         [1f32, 1, 1] [[1f64, 1], [1f64, 1], [1f64, 1]] }

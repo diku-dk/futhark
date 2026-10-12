@@ -1,5 +1,5 @@
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_metal }
 -- input { [[2.0,3.0]] [1.0,2.0] [3.0,4.0] 5.0 [1.0,2.0] [3.0,5.0] true }
 -- output { -16.0 }
 

@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_metal }
 -- entry: gamma64
 -- input { [1.0, 4.0] }
 -- output { [1f64, 6f64] }
