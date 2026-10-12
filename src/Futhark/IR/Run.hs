@@ -1893,13 +1893,8 @@ shapeVector :: [Int] -> SVec.Vector Int
 shapeVector = SVec.fromList
 
 -- | Run a program in the SOAC IR
-runSOACS ::
-  Prog SOACS ->
-  Name ->
-  [V.Value] ->
-  IO (Either T.Text [V.Value])
-runSOACS =
-  runProgram evalSOAC
+runSOACS :: Prog SOACS -> Name -> [V.Value] -> IO (Either T.Text [V.Value])
+runSOACS = runProgram evalSOAC
 
 evalGPUOp :: OpEvaluator GPU
 evalGPUOp funs env (SegOp op) = evalSegOp funs env op
