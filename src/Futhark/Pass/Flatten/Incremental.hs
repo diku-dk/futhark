@@ -44,7 +44,7 @@ module Futhark.Pass.Flatten.Incremental
     sufficientParallelism,
     isParallelFunInside,
     kernelAlternatives,
-    intraBlockAlternative,
+    intraBlockAlternatives,
     mapAlternatives,
     scanRedAlternatives,
     propagateVersioningAttrs,
@@ -203,10 +203,21 @@ mayExploitIntra attrs =
   where
     attrs' = flatteningAttrs attrs
 
-intraBlockAlternative ::
+-- | The intra-block versions of a map. Returns whether the block size fits
+-- (which must be true for any of the versions to be usable), whether the
+-- versions are fit and worthwhile, and the versions in order of preference.
+--
+-- There are two versions: one where the results of the kernel are put in
+-- shared memory (and then copied out), and one where they are constructed
+-- directly in global memory ('intrablockResultGlobal'). The former is faster,
+-- but requires the results to fit in shared memory, which is checked at
+-- run-time by the code generator (see 'Futhark.CodeGen.ImpGen.GPU'). If the
+-- attribute is already present, only the latter version is produced, and if
+-- the results of each block are scalars, only the former.
+intraBlockAlternatives ::
   Intrablock.IntrablockResult ->
-  FlattenM (SubExp, Body GPU)
-intraBlockAlternative intra = do
+  FlattenM (SubExp, SubExp, [Body GPU])
+intraBlockAlternatives intra = do
   addStms $ Intrablock.intraPreludeStms intra
   max_tblock_size <-
     letSubExp "max_tblock_size" $ Op $ SizeOp $ GetSizeMax SizeThreadBlock
@@ -227,12 +238,24 @@ intraBlockAlternative intra = do
     letSubExp "intra_suff_and_fits" $
       BasicOp $
         BinOp LogAnd fits intra_suff
-  intra_body <-
-    renameBody $
-      mkBody
-        (Intrablock.intraKernelStms intra)
-        (varsRes $ Intrablock.intraResultNames intra)
-  pure (intra_ok, intra_body)
+  let kstms = Intrablock.intraKernelStms intra
+      global_kstms = fmap resultGlobal kstms
+      versions
+        | any (intrablockResultGlobal . stmAuxAttrs . stmAux) kstms = [global_kstms]
+        | any arrayResults kstms = [kstms, global_kstms]
+        | otherwise = [kstms]
+  intra_bodies <-
+    forM versions $ \stms ->
+      renameBody $ mkBody stms $ varsRes $ Intrablock.intraResultNames intra
+  pure (fits, intra_ok, intra_bodies)
+  where
+    resultGlobal (Let pat aux e@(Op (SegOp (SegMap SegBlock {} _ _ _)))) =
+      Let pat (aux {stmAuxAttrs = oneAttr intrablockResultGlobalAttr <> stmAuxAttrs aux}) e
+    resultGlobal stm = stm
+
+    arrayResults (Let _ _ (Op (SegOp (SegMap SegBlock {} _ ts _)))) =
+      any ((> 0) . arrayRank) ts
+    arrayResults _ = False
 
 -- | Construct the multi-versioned alternatives for a map, given actions that
 -- construct the fully-flattened body and the outer-parallel-only body, and an
@@ -275,17 +298,25 @@ mapAlternatives desc result_ts attrs parallel_fun_inside worth_seq ws mkFullBody
           full []
     Just intra_res
       | only_intra -> do
-          (_, intra_body) <- intraBlockAlternative intra_res
-          kernelAlternatives desc result_ts intra_body []
+          -- The last version is the fallback, which is used without any
+          -- checks. The others are guarded only by the block size fitting,
+          -- and (implicitly) by their shared memory fitting.
+          (fits, _, intra_bodies) <- intraBlockAlternatives intra_res
+          kernelAlternatives desc result_ts (last intra_bodies) $
+            map (fits,) (init intra_bodies)
       | worth_seq,
         mayExploitOuter attrs -> do
           outer_alt <- outerAlternative
-          intra_alt <- intraBlockAlternative intra_res
-          full [outer_alt, intra_alt]
+          intra_alts <- intraAlts intra_res
+          full $ outer_alt : intra_alts
       | otherwise ->
-          full . pure =<< intraBlockAlternative intra_res
+          full =<< intraAlts intra_res
   where
     only_intra = onlyExploitIntra attrs
+
+    intraAlts intra_res = do
+      (_, intra_ok, intra_bodies) <- intraBlockAlternatives intra_res
+      pure $ map (intra_ok,) intra_bodies
 
     full alts = do
       full_body <- mkFullBody
