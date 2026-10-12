@@ -105,7 +105,7 @@ static inline char mulhi(signed char x, signed char y) { return mulhi((char)x, (
 
 static inline float log1p(float x) {
   float u = 1.0f + x;
-  if (u == 1.0f || isinf(u)) {
+  if (u == 1.0f || u == INFINITY) {
     return u == 1.0f ? x : u;
   }
   return log(u) * (x / (u - 1.0f));
@@ -113,7 +113,7 @@ static inline float log1p(float x) {
 
 static inline float expm1(float x) {
   float u = exp(x);
-  if (u == 1.0f || isinf(u)) {
+  if (u == 1.0f || u == INFINITY) {
     return u == 1.0f ? x : u;
   }
   if (u - 1.0f == -1.0f) {
