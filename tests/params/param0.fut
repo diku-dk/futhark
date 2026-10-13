@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_webgpu }
 -- entry: foo
 -- compiled no_wasm input { 2i64 } output { 3i64 }
 

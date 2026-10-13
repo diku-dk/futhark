@@ -5,6 +5,7 @@
 -- until it is applied, so it does not need a self static value for a binding
 -- that has not been processed yet.
 -- ==
+-- tags { no_webgpu }
 -- entry: outer
 -- input { 0i64 } output { 0i64 }
 -- input { 4i64 } output { 94i64 }

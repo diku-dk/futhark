@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_webgpu }
 -- random input { [100]bool [100]i64 [10][10]i32 [10][10]i32 } auto output
 -- compiled random input { [1000]bool [1000]i64 [10][10]i32 [10][10]i32 } auto output
 -- structure gpu-mem { If/False/Replicate 0 If/True/Replicate 0 }

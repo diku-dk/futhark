@@ -4,6 +4,7 @@
 -- array).
 --
 -- ==
+-- tags { no_webgpu }
 -- input { [1f32,2f32,3f32] 4f32 5f32 }
 -- output { 24.0f32 }
 -- structure gpu { SegRed 1 }

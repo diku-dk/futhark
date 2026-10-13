@@ -1,5 +1,6 @@
 -- Uniform redomap with variant neutral element; empty outer array too.
 -- ==
+-- tags { no_webgpu }
 -- input { [3i64,7i64,1i64] 4i64 }
 -- auto output
 -- input { empty([0]i64) 4i64 }

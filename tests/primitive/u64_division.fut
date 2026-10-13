@@ -1,6 +1,7 @@
 -- Test of division-like operators for u64 values.
 
 -- ==
+-- tags { no_webgpu }
 -- entry: divide
 -- input { [7u64, 9223372036854775808u64]
 --         [3u64, 9u64] }

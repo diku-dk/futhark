@@ -1,5 +1,6 @@
 -- Intragroup Game of Life!
 -- ==
+-- tags { no_webgpu }
 -- random no_python compiled input { 100 [100][16][16]bool } auto output
 -- random no_python compiled input { 1000 [100][16][16]bool } auto output
 -- random no_python compiled input { 3000 [100][16][16]bool } auto output

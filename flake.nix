@@ -90,6 +90,7 @@
         futhark-data = new.callPackage ./nix/futhark-data.nix { };
         futhark-server = new.callPackage ./nix/futhark-server.nix { };
         futhark-manifest = new.callPackage ./nix/futhark-manifest.nix { };
+        language-wgsl = new.callCabal2nix "language-wgsl" ./language-wgsl { };
 
         # The plain Haskell package -- library and executable, no static
         # linking. This is what downstream Haskell projects should depend
@@ -265,6 +266,21 @@
             nativeBuildInputs = import ./nix/pkgs-test.nix { inherit pkgs python; };
           };
 
+          # A shell for running WebGPU tests in CI, in Node and without a GPU
+          # (see tools/webgpu/node-runner.sh).  This is separate from the
+          # 'test' shell because Emscripten is large.
+          test-webgpu = pkgs.mkShell {
+            nativeBuildInputs = with pkgs; [
+              emscripten
+              nodejs
+              (callPackage ./nix/node-webgpu.nix { })
+            ];
+
+            # The Vulkan driver file for lavapipe, Mesa's software
+            # implementation of Vulkan.
+            LAVAPIPE_ICD = "${pkgs.mesa}/share/vulkan/icd.d/lvp_icd.${pkgs.stdenv.hostPlatform.uname.processor}.json";
+          };
+
           # The main development shell that contains all development tools.
           default = pkgs.mkShell {
             nativeBuildInputs =
@@ -303,6 +319,15 @@
                     doCheck = false;
                   }))
                   imagemagick # needed for literate tests
+                ]
+                # The following are for WebGPU.
+                ++ [
+                  emscripten
+                  python3Packages.aiohttp
+                  python3Packages.selenium
+                  chromium
+                  chromedriver
+                  nodejs
                 ]
                 ++ lib.optionals (pkgs.stdenv.hostPlatform.isLinux) [
                   xdot

@@ -2,6 +2,7 @@
 -- if none but single elements of the reused memory (updated or aliased) are
 -- returned or if the memory source is migrated into the same kernel.
 -- ==
+-- tags { no_webgpu }
 -- structure gpu {
 --   /If/True/GPUBody/If/True/Reshape 1
 --   /GPUBody/Loop/Reshape 1

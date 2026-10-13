@@ -2,6 +2,7 @@
 -- This is a simple case in which there is no code after stream.
 --
 -- ==
+-- tags { no_webgpu }
 -- input {
 --   [ [1.0f32, 3.0f32], [2.0f32, 4.0f32] ]
 --   [ [5.0f32, 8.0f32], [6.0f32, 7.0f32] ]

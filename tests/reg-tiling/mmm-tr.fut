@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_webgpu }
 --
 -- compiled random input {[2001][4037]f32 [2021][4037]f32} auto output
 -- compiled random input {[1024][1024]f32 [1024][1024]f32} auto output

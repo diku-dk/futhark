@@ -4,6 +4,7 @@
 -- before the versioning branch, where they would also be executed
 -- when another version is picked at runtime.
 -- ==
+-- tags { no_webgpu }
 -- input { [[1i64, 2i64], [3i64, 4i64]] }
 -- output { [[4i64, 5i64], [6i64, 7i64]] }
 -- structure gpu { /Replicate 0 /If/False/Replicate 2 }

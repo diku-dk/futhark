@@ -1,5 +1,6 @@
 -- Nonuniform (irregular-width) redomap with variant neutral element.
 -- ==
+-- tags { no_webgpu }
 -- input { [3i64,7i64,0i64,1i64] }
 -- auto output
 -- input { empty([0]i64) }

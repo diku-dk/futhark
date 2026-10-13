@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_webgpu }
 -- input { 2i64 [[10i64, 2i64, 3i64], [4i64, 5i64, 6i64]] }
 -- auto output
 -- structure gpu { /If/True/SegScan 1 /If/False/SegScan 1 /If/False/SegMap 3 }

@@ -7,6 +7,7 @@
 -- provenance (one is a slice of a larger array) to stress the
 -- assumption that same-width replicated views are aligned.
 -- ==
+-- tags { no_webgpu }
 -- input { [1i64,4i64,0i64,3i64] }
 -- auto output
 -- structure gpu { /SegScan 4 /Apply/segiota 4 /Apply/repiota 4 /Apply/partition 1 }

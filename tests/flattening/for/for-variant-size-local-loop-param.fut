@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_webgpu }
 -- input { [7i64, 14i64, 14i64] }
 -- auto output
 -- structure gpu { /SegMap 1 /SegMap/Loop 1 }

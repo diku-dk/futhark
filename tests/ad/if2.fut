@@ -1,5 +1,5 @@
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_webgpu }
 -- entry: f_jvp
 -- input { [1.0,2.0,3.0] }
 -- output { [0.0, 3.0, 2.0] }

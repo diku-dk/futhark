@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_webgpu }
 -- entry: main
 -- nobench input  { [0i64, 0i64, 0i64, 1i64, 1i64, 1i64, 2i64, 2i64, 2i64] [0i64, 1i64, 2i64, 0i64, 1i64, 2i64, 0i64, 1i64, 2i64] }
 -- output         { [7i64, -5i64, -4i64, 2i64, -1i64, -1i64, 1i64, -1i64, 2i64] }

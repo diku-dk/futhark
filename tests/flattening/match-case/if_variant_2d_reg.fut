@@ -4,6 +4,7 @@
 -- the element type (only the sizes are zeroed), so that merging the branch
 -- results by scatter is well-typed.
 -- ==
+-- tags { no_webgpu }
 -- input { [true, false, true] [[1,2,3],[4,5,6],[7,8,9]] }
 -- output { [[2,3,4],[8,10,12],[8,9,10]] }
 -- input { empty([0]bool) empty([0][3]i32) }

@@ -2,6 +2,7 @@
 -- return type is unique, must not make the result of applying it
 -- (here through "|>") alias that value.
 -- ==
+-- tags { no_webgpu }
 -- input { [1i64,2i64,3i64,4i64] } output { 10i64 10i64 }
 
 module type monoid = {

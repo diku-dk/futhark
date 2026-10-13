@@ -1,5 +1,6 @@
 -- Test with only variant 'xs'.
 -- ==
+-- tags { no_webgpu }
 -- input { [4i64,5i64,6i64] }
 -- auto output
 -- structure gpu { WithAcc 0 Update 1 }

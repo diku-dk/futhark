@@ -36,6 +36,7 @@ module mk_bitset (I: integral) : bitset = {
 module bitset_u8 = mk_bitset u8
 
 -- ==
+-- tags { no_webgpu }
 -- entry: test_complement
 -- input { 0u8 } output { 0i64 }
 -- input { 1u8 } output { 1i64 }

@@ -24,6 +24,7 @@ import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.Backends.SimpleRep
 import Futhark.CodeGen.ImpCode.GPU hiding (Program)
 import Futhark.CodeGen.ImpCode.GPU qualified as ImpGPU
+import Futhark.CodeGen.ImpCode.Kernels qualified as ImpKernels
 import Futhark.CodeGen.ImpCode.OpenCL hiding (Program)
 import Futhark.CodeGen.ImpCode.OpenCL qualified as ImpOpenCL
 import Futhark.CodeGen.RTS.C (atomicsH, halfH)
@@ -114,7 +115,7 @@ cleanParams m = M.map clean m
 
 findParamUsers ::
   Env ->
-  Definitions ImpOpenCL.OpenCL ->
+  Definitions ImpOpenCL.HostOp ->
   ParamMap ->
   ParamMap
 findParamUsers env defs = M.mapWithKey onParam
@@ -218,7 +219,7 @@ envFromProg prog = Env funs (funsMayFail cg funs) cg
     funs = defFuns prog
     cg = ImpGPU.callGraph calledInHostOp funs
 
-lookupFunction :: Name -> Env -> Maybe (ImpGPU.Function HostOp)
+lookupFunction :: Name -> Env -> Maybe (ImpGPU.Function ImpGPU.HostOp)
 lookupFunction fname = lookup fname . unFunctions . envFuns
 
 functionMayFail :: Name -> Env -> Bool
@@ -226,7 +227,7 @@ functionMayFail fname = S.member fname . envFunsMayFail
 
 type OnKernelM = ReaderT Env (State ToOpenCL)
 
-onHostOp :: KernelTarget -> HostOp -> OnKernelM OpenCL
+onHostOp :: KernelTarget -> ImpGPU.HostOp -> OnKernelM ImpKernels.HostOp
 onHostOp target (CallKernel k) = onKernel target k
 onHostOp _ (ImpGPU.GetSize v key _) =
   pure $ ImpOpenCL.GetSize v key
@@ -297,7 +298,7 @@ ensureDeviceFun fname host_func = do
   exists <- gets $ M.member fname . clDevFuns
   unless exists $ generateDeviceFun fname host_func
 
-calledInHostOp :: HostOp -> S.Set Name
+calledInHostOp :: ImpGPU.HostOp -> S.Set Name
 calledInHostOp (CallKernel k) = calledFuncs calledInKernelOp $ kernelBody k
 calledInHostOp _ = mempty
 
@@ -321,7 +322,7 @@ ensureDeviceFuns code = do
       Nothing -> pure Nothing
   where
     bad = compilerLimitationS "Cannot generate GPU functions that contain parallelism."
-    toDevice :: HostOp -> KernelOp
+    toDevice :: ImpGPU.HostOp -> KernelOp
     toDevice _ = bad
 
 isConst :: BlockDim -> Maybe KernelConstExp
@@ -331,7 +332,7 @@ isConst (Right e) =
   Just e
 isConst _ = Nothing
 
-onKernel :: KernelTarget -> Kernel -> OnKernelM OpenCL
+onKernel :: KernelTarget -> Kernel -> OnKernelM ImpOpenCL.HostOp
 onKernel target kernel = do
   called <- ensureDeviceFuns $ kernelBody kernel
 
@@ -639,6 +640,8 @@ inKernelOperations env mode body =
       GC.modifyUserState $ \s ->
         s {kernelSharedMemory = (name', size) : kernelSharedMemory s}
       GC.stm [C.cstm|$id:name = (__local unsigned char*) $id:name';|]
+    kernelOps (UniformRead dest src i typ space) =
+      GC.compileCode (Read dest src i typ space Nonvolatile)
     kernelOps (ErrorSync f) = do
       label <- nextErrorLabel
       pending <- kernelSyncPending <$> GC.getUserState

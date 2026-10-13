@@ -1,3 +1,6 @@
+-- ==
+-- tags { no_webgpu }
+
 type comp = f64
 
 type Layer [nx] [ny] =

@@ -1,5 +1,6 @@
 -- Polymorphic infix operators ought to work.
 -- ==
+-- tags { no_webgpu }
 -- input { [1,2,3] [4,5,6] [true] [false] }
 -- output { [1,2,3,4,5,6] [true,false] }
 

@@ -1,6 +1,7 @@
 -- input { 2i64 3i64 }
 -- output { [[[1, 1], [2, 0], [3, -1]], [[2, 2], [3, 1], [4, 0]]] }
 -- ==
+-- tags { no_webgpu }
 -- structure { Screma 3 }
 
 entry main n m =

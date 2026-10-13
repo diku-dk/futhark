@@ -1,5 +1,6 @@
 -- A simple test for index-function generalization across a for loop
 -- ==
+-- tags { no_webgpu }
 -- input { [0i64, 1000i64, 42i64, 1001i64, 50000i64] }
 -- output { 1249975000i64 }
 

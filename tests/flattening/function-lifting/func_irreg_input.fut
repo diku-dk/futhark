@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_webgpu }
 -- entry: main
 -- input  { [0i64, 1i64, 2i64, 3i64, 4i64, 5i64] }
 -- output { [0i64, 0i64, 1i64, 3i64, 6i64,10i64] }

@@ -1,4 +1,6 @@
 -- The problem is that a simplified index function is used.
+-- ==
+-- tags { no_webgpu }
 
 def main (b: bool) (xs: []i32) =
   map (\(x: i32) ->

@@ -85,6 +85,7 @@ def ker2Blk [n]
 -- inside the outermost WithAcc (from the scatter at the end of radixIt).
 -- The path /WithAcc/Screma/Loop/WithAcc captures this nesting exactly.
 -- ==
+-- tags { no_webgpu }
 -- entry: radixIt
 -- input { 3i64 8i64 0u32
 --         [ 12u32,11u32,10u32, 9u32, 4u32, 3u32, 2u32, 1u32

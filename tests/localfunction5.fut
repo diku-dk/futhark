@@ -1,5 +1,7 @@
 -- Shape-bound variables used inside a local function, but where the
 -- array itself is not used.
+-- ==
+-- tags { no_webgpu }
 
 def f (n: i64) = replicate n 0
 

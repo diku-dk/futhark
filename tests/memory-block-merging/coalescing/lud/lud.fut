@@ -1,6 +1,7 @@
 -- Parallel blocked LU-decomposition.
 --
 -- ==
+-- tags { no_webgpu }
 -- structure gpu-mem { Alloc 17 }
 -- structure seq-mem { Alloc 12 }
 

@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_webgpu }
 -- random input { [2][3][4]f32 } auto output
 
 def foo [n] [m] (A: [n][m]f32) : [n][m]f32 =

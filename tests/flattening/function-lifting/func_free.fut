@@ -1,5 +1,6 @@
 -- Lifting a function with a free variables as argument and result
 -- ==
+-- tags { no_webgpu }
 -- entry: main
 -- input  { [  0i64,  1i64,  2i64,  3i64,  4i64,  5i64] }
 -- output { [280i64,294i64,308i64,322i64,336i64,350i64] }

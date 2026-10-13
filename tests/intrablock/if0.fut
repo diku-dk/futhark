@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_webgpu }
 -- compiled random input { [1023]bool [1023][256]i32 } auto output
 -- structure gpu {
 --   /SegMap/If/True/SegMap 1

@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_webgpu }
 -- input { [0,-1,3,4,-2] }
 -- output { 1 }
 

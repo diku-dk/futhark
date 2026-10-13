@@ -1,4 +1,4 @@
-packages: futhark.cabal
+packages: futhark.cabal, language-wgsl
 index-state: 2026-10-07T07:37:17Z
 multi-repl: True
 

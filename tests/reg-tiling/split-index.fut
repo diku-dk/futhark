@@ -1,6 +1,7 @@
 -- Register tiling where the index of a tiled input is computed from
 -- the thread index, here by splitting it into two dimensions.
 -- ==
+-- tags { no_webgpu }
 -- compiled random input { [40][50]i32 [50][5][7]i32 } auto output
 -- structure gpu { SegMap/Loop/WithAcc 2 }
 

@@ -39,6 +39,11 @@ SCALAR_FUN_ATTR uint16_t mul16(uint16_t x, uint16_t y) { return x * y; }
 SCALAR_FUN_ATTR uint32_t mul32(uint32_t x, uint32_t y) { return x * y; }
 SCALAR_FUN_ATTR uint64_t mul64(uint64_t x, uint64_t y) { return x * y; }
 
+SCALAR_FUN_ATTR uint8_t   neg_i8(uint8_t x)  { return -x; }
+SCALAR_FUN_ATTR uint16_t neg_i16(uint16_t x) { return -x; }
+SCALAR_FUN_ATTR uint32_t neg_i32(uint32_t x) { return -x; }
+SCALAR_FUN_ATTR uint64_t neg_i64(uint64_t x) { return -x; }
+
 #if defined(ISPC)
 
 SCALAR_FUN_ATTR uint8_t udiv8(uint8_t x, uint8_t y) {
