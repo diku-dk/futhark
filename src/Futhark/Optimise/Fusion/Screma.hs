@@ -102,9 +102,6 @@ splitLambdaByPar names inp lam out = do
   when
     (parAccsOverlap new_lam new_lam')
     (fail "Can not fuse due to overlap in parameter accumalators.")
-  when
-    (resAccsOverlap new_lam new_lam')
-    (fail "Can not fuse due to overlap in result accumalators.")
   pure
     ( (new_inp, new_lam, new_out),
       (new_inp', new_lam', new_out')
@@ -134,16 +131,14 @@ splitLambdaByPar names inp lam out = do
 -- consumers scans or reduces.
 fusible ::
   (MonadFail m) =>
-  [SOAC.Input] ->
   ScremaForm SOACS ->
   [VName] ->
   [SOAC.Input] ->
   ScremaForm SOACS ->
-  [VName] ->
   m ()
-fusible inp_p form_p out_p inp_c form_c out_c = do
+fusible form_p out_p inp_c form_c = do
   ((_, post_scan_p, _), _) <-
-    splitLambdaByPar post_scan_pars_p inp_p post_p out_c
+    splitLambdaByPar post_scan_pars_p (lambdaParams post_p) post_p (lambdaReturnType post_p)
   let post_scan_res_p = bodyResult $ lambdaBody post_scan_p
       forbidden_p = namesFromList $ resToOut out_p post_p <$> post_scan_res_p
       is_fusible =
@@ -288,6 +283,8 @@ moveRedScanSuperScrema ::
   (MonadFail m, MonadFreshNames m) =>
   SuperScrema SOACS ->
   m (SuperScrema SOACS)
+moveRedScanSuperScrema super_screma@(SuperScrema _ _ _ _ _ _ [] [] _) =
+  pure super_screma
 moveRedScanSuperScrema super_screma = do
   ((scan_red_inp_c, scan_red_lam', _), (_, map_lam', _)) <-
     splitAtLambdaByRes
@@ -311,7 +308,7 @@ moveRedScanSuperScrema super_screma = do
       new_pars = lambdaParams lam
       new_res = scan_res <> scan_res' <> red_res <> red_res' <> map_res
       new_body = mkBody (stms <> binds <> stms') new_res
-      new_lam = eliminateByRes $ Lambda new_pars new_ts new_body
+      new_lam = Lambda new_pars new_ts new_body
       (scan_pars', map_pars') =
         splitAt (scanResults scan) (lambdaParams lam')
 
@@ -324,7 +321,7 @@ moveRedScanSuperScrema super_screma = do
         varsRes (map paramName extra_scan_pars')
           <> bodyResult (lambdaBody map_lam')
       new_body' = mkBody new_stms' new_res'
-      new_lam' = eliminateByRes $ Lambda new_pars' new_ts' new_body'
+      new_lam' = Lambda new_pars' new_ts' new_body'
 
   pure $
     SuperScrema w inp new_lam new_scan new_red new_lam' [] [] lam''
@@ -369,7 +366,7 @@ moveLastSuperScrema (SuperScrema w inp lam scan red lam' [] [] lam'') = do
       new_stms = stms' <> binds <> stms''
       new_res = bodyResult $ lambdaBody temp_lam''
       new_body = mkBody new_stms new_res
-      new_lam' = eliminateByRes $ Lambda new_pars new_ts new_body
+      new_lam' = Lambda new_pars new_ts new_body
 
   new_lam'' <- mkIdentityLambda $ lambdaReturnType lam''
   pure $
@@ -381,21 +378,11 @@ moveLastSuperScrema _ =
 parAccs :: Lambda SOACS -> [Type]
 parAccs = filter isAcc . map typeOf . lambdaParams
 
--- | Find all Accumulator results.
-resAccs :: Lambda SOACS -> [Type]
-resAccs = filter isAcc . lambdaReturnType
-
 -- | Check if the lambda parameters have overlapping accumulators.
 parAccsOverlap :: Lambda SOACS -> Lambda SOACS -> Bool
 parAccsOverlap lam = any (`elem` accs) . parAccs
   where
     accs = parAccs lam
-
--- | Check if the lambdas result have overlapping accumulators.
-resAccsOverlap :: Lambda SOACS -> Lambda SOACS -> Bool
-resAccsOverlap lam = any (`elem` accs) . resAccs
-  where
-    accs = resAccs lam
 
 -- | Check if the lambdas have parameters that overlap due to
 -- consumption.
@@ -426,12 +413,14 @@ splitAtLambdaByRes i inp lam out = do
     new_lam' = Lambda new_pars' new_ts' new_body'
     pars = lambdaParams lam
     stms = bodyStms $ lambdaBody lam
-    new_body = mkBody (eliminate (freeIn new_res) stms) new_res
-    new_body' = mkBody (eliminate (freeIn new_res') stms) new_res'
-    inBody body = (`nameIn` freeIn body) . paramName . fst
-    removePars body = unzip $ filter (inBody body) $ zip pars inp
-    (new_pars, new_inp) = removePars new_body
-    (new_pars', new_inp') = removePars new_body'
+    (new_deps, new_stms) = eliminateWithDeps (freeIn new_res) stms
+    (new_deps', new_stms') = eliminateWithDeps (freeIn new_res') stms
+    new_body = mkBody new_stms new_res
+    new_body' = mkBody new_stms' new_res'
+    inBody deps = (`nameIn` deps) . paramName . fst
+    removePars deps = unzip $ filter (inBody deps) $ zip pars inp
+    (new_pars, new_inp) = removePars new_deps
+    (new_pars', new_inp') = removePars new_deps'
     (new_res, new_res') = splitAt i $ bodyResult $ lambdaBody lam
     (new_ts, new_ts') = splitAt i $ lambdaReturnType lam
     (new_out, new_out') = splitAt i out
@@ -496,7 +485,7 @@ fuseScrema ::
   [VName] ->
   m ([SOAC.Input], ScremaForm SOACS, [VName])
 fuseScrema w inp_p form_p out_p inp_c form_c out_c = do
-  fusible inp_p form_p out_p inp_c form_c out_c
+  fusible form_p out_p inp_c form_c
   (super_screma, new_out) <- fuseSuperScrema w inp_p form_p out_p inp_c form_c out_c
   (new_inp, form') <-
     fmap (second prunePreLambdaResults . toScrema) $

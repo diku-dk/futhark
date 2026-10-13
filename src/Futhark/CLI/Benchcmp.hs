@@ -7,13 +7,15 @@ import Data.ByteString.Lazy.Char8 qualified as LBS
 import Data.Either qualified as E
 import Data.List qualified as L
 import Data.Map qualified as M
+import Data.Ord (comparing)
 import Data.Text qualified as T
 import Data.Vector qualified as V
 import Futhark.Bench
 import Futhark.Util (showText)
-import Futhark.Util.Options (mainWithOptions)
+import Futhark.Util.Options (mainWithOptions, optionsError)
 import Statistics.Sample qualified as S
 import System.Console.ANSI (hSupportsANSI)
+import System.Console.GetOpt (ArgDescr (ReqArg), OptDescr (Option))
 import System.IO (stdout)
 import Text.Printf (printf)
 
@@ -286,23 +288,123 @@ printProgSpeedUps colors prog bench_result = do
   putStrLn $ printf "%s%s%s%s" (header colors) (bold colors) prog (endc colors)
   mapM_ (uncurry (printSpeedUp colors)) $ M.toList bench_result
 
+-- | Geometric mean of a list of positive doubles; returns 1.0 for an empty list.
+geoMean :: [Double] -> Double
+geoMean [] = 1.0
+geoMean xs = exp (sum (log <$> xs) / fromIntegral (length xs))
+
+-- | Which metric to use when sorting program groups.
+data SortMetric = BySignificantCount | ByGeoMeanSignificant | ByGeoMeanAll
+
+-- | Precomputed per-group sort scores.
+data GroupScore = GroupScore
+  { gsSignificantCount :: Int,
+    gsGeoMeanSignificant :: Double,
+    gsGeoMeanAll :: Double
+  }
+
+computeGroupScore :: M.Map T.Text SpeedUp -> GroupScore
+computeGroupScore datasets =
+  GroupScore
+    { gsSignificantCount = length sigReg,
+      gsGeoMeanSignificant = geoMean (speedup <$> sigAll),
+      gsGeoMeanAll = geoMean (speedup <$> all')
+    }
+  where
+    all' = M.elems datasets
+    sigAll = filter significant all'
+    sigReg = filter (\s -> significant s && speedup s < 0.99) all'
+
+-- | Whether to surface the worst or best programs first.
+-- "Worst" means the most regressions / lowest speedup ratio.
+data SortOrder = WorstFirst | BestFirst
+
+scoreFor :: SortMetric -> GroupScore -> Double
+scoreFor BySignificantCount gs = fromIntegral (gsSignificantCount gs)
+scoreFor ByGeoMeanSignificant gs = gsGeoMeanSignificant gs
+scoreFor ByGeoMeanAll gs = gsGeoMeanAll gs
+
+-- | Sort a list of (program, datasets) pairs by the chosen metric and order.
+-- Ties on the primary key fall back to geoMeanAll ascending then name alphabetically.
+sortGroups ::
+  SortMetric ->
+  SortOrder ->
+  [(T.Text, M.Map T.Text SpeedUp)] ->
+  [(T.Text, M.Map T.Text SpeedUp)]
+sortGroups metric order = L.sortBy cmpFull
+  where
+    score g = scoreFor metric (computeGroupScore (snd g))
+    geoAll g = gsGeoMeanAll (computeGroupScore (snd g))
+    -- For count metrics "worst first" = descending; for ratio metrics
+    -- "worst first" = ascending (lower ratio = bigger regression).
+    primaryCmp = case (metric, order) of
+      (BySignificantCount, WorstFirst) -> flip compare `on` score
+      (BySignificantCount, BestFirst) -> compare `on` score
+      (_, WorstFirst) -> compare `on` score
+      (_, BestFirst) -> flip compare `on` score
+    cmpFull a b =
+      primaryCmp a b
+        <> comparing geoAll a b
+        <> comparing fst a b
+    on f g x y = f (g x) (g y)
+
+-- | Config for the benchcmp tool.
+data BenchcmpConfig = BenchcmpConfig
+  { cfgSortMetric :: Maybe SortMetric,
+    cfgSortOrder :: SortOrder
+  }
+
+defaultConfig :: BenchcmpConfig
+defaultConfig = BenchcmpConfig Nothing WorstFirst
+
 -- | Given a Map of programs with dataset speedups and relevant errors, print
 -- the errors and print the speedups in a human readable manner.
 printComparisons ::
   Colors ->
+  BenchcmpConfig ->
   M.Map T.Text (M.Map T.Text SpeedUp) ->
   ([T.Text], [T.Text]) ->
   IO ()
-printComparisons colors speedups (errors, missing) = do
+printComparisons colors cfg speedups (errors, missing) = do
   mapM_ (putStrLn . T.unpack) $ L.sort missing
   mapM_ (putStrLn . T.unpack) $ L.sort errors
-  mapM_ (uncurry (printProgSpeedUps colors)) $ M.toList speedups
+  let groups = case cfgSortMetric cfg of
+        Nothing -> M.toList speedups
+        Just metric -> sortGroups metric (cfgSortOrder cfg) (M.toList speedups)
+  mapM_ (uncurry (printProgSpeedUps colors)) groups
 
 -- | Run @futhark benchcmp@
 main :: String -> [String] -> IO ()
-main = mainWithOptions () [] "<file> <file>" f
+main = mainWithOptions defaultConfig options "<file> <file>" f
   where
-    f [a_path', b_path'] () = Just $ do
+    options =
+      [ Option
+          []
+          ["sort-by"]
+          ( ReqArg
+              ( \arg -> case arg of
+                  "significant" -> Right $ \cfg -> cfg {cfgSortMetric = Just BySignificantCount}
+                  "geomean-significant" -> Right $ \cfg -> cfg {cfgSortMetric = Just ByGeoMeanSignificant}
+                  "geomean-all" -> Right $ \cfg -> cfg {cfgSortMetric = Just ByGeoMeanAll}
+                  _ -> Left . optionsError $ "Unknown --sort-by value: " <> arg
+              )
+              "METRIC"
+          )
+          "Sort program groups by: significant, geomean-significant, geomean-all (default: unsorted).",
+        Option
+          []
+          ["order"]
+          ( ReqArg
+              ( \arg -> case arg of
+                  "worst-first" -> Right $ \cfg -> cfg {cfgSortOrder = WorstFirst}
+                  "best-first" -> Right $ \cfg -> cfg {cfgSortOrder = BestFirst}
+                  _ -> Left . optionsError $ "Unknown --order value: " <> arg
+              )
+              "ORDER"
+          )
+          "Sort order: worst-first (default) or best-first."
+      ]
+    f [a_path', b_path'] cfg = Just $ do
       let a_path = T.pack a_path'
       let b_path = T.pack b_path'
       a_either <- decodeFileBenchResultsMap a_path
@@ -316,7 +418,7 @@ main = mainWithOptions () [] "<file> <file>" f
               else nonTtyColors
 
       let comparePrint =
-            (uncurry (printComparisons colors) .)
+            (uncurry (printComparisons colors cfg) .)
               . compareBenchResults a_path b_path
 
       case (a_either, b_either) of

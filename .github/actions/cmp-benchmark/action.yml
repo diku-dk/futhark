@@ -1,0 +1,23 @@
+name: 'Compare Benchmark'
+description: 'Run futhark bench with master and PR compilers and compare results'
+inputs:
+  backend:
+    description: 'Backend to use'
+    required: true
+  system:
+    description: 'Name of system (e.g. GPU name)'
+    required: true
+  slurm-options:
+    description: 'Options to pass to srun'
+    required: false
+    default: ''
+runs:
+  using: "composite"
+  steps:
+    - name: Ensure script is executable
+      run: chmod +x .github/actions/cmp-benchmark/cmp-benchmark.sh
+      shell: bash
+    - uses: ./.github/actions/futhark-slurm
+      with:
+        script: .github/actions/cmp-benchmark/cmp-benchmark.sh ${{inputs.backend}} ${{inputs.system}}
+        slurm-options: ${{inputs.slurm-options}}

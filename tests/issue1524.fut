@@ -7,7 +7,7 @@ def dotprod [n] (a: [n]f32) (b: [n]f32) : f32 =
 
 def lud_perimeter_lower [b] [m] (diag: [b][b]f32) (mat: [m][b][b]f32) : *[m][b][b]f32 =
   map (\blk ->
-         #[incremental_flattening(only_intra)]
+         #[flattening(only_intra)]
          map (\row0 ->
                 -- Lower
                 #[unsafe]

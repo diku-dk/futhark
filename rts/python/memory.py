@@ -145,12 +145,12 @@ def lmad_map_tr(dst_strides, src_strides, shape):
     if rowmajor_strides[map_r:] == dst_strides[map_r:]:
         r = lmad_is_tr(src_strides[map_r:], shape[map_r:])
         if r is not None:
-            (n, m) = r
+            n, m = r
             return (k, n, m)
     elif rowmajor_strides[map_r:] == src_strides[map_r:]:
         r = lmad_is_tr(dst_strides[map_r:], shape[map_r:])
         if r is not None:
-            (n, m) = r
+            n, m = r
             return (k, m, n)  # Sic!
     return None
 

@@ -1,11 +1,13 @@
 module Futhark.Internalise.TypesValuesTests (tests) where
 
 import Control.Monad.Free (Free (..))
+import Data.Bifunctor (first, second)
 import Data.Map qualified as M
 import Data.String (fromString)
 import Futhark.IR.Syntax hiding (Free)
 import Futhark.IR.SyntaxTests ()
 import Futhark.Internalise.TypesValues
+import Language.Futhark qualified as E
 import Language.Futhark.SyntaxTests ()
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -41,7 +43,7 @@ sumTypeTests =
   testGroup
     "internaliseConstructors"
     [ testCase "Dedup of primitives" $
-        internaliseConstructors
+        constrs
           ( M.fromList
               [ ("foo", [Pure "i64"]),
                 ("bar", [Pure "i64"])
@@ -53,7 +55,7 @@ sumTypeTests =
                 ]
               ),
       testCase "Dedup of array" $
-        internaliseConstructors
+        constrs
           ( M.fromList
               [ ("foo", [Pure "[?0]i64"]),
                 ("bar", [Pure "[?0]i64"])
@@ -66,7 +68,7 @@ sumTypeTests =
               ),
       testCase
         "Dedup of array of tuple"
-        $ internaliseConstructors
+        $ constrs
           ( M.fromList
               [ ("foo", [Free [Pure "[?0]i64", Pure "[?0]i64"]]),
                 ("bar", [Pure "[?0]i64"])
@@ -78,6 +80,9 @@ sumTypeTests =
                 ]
               )
     ]
+  where
+    constrs :: M.Map Name [Tree ExtType] -> ([Tree ExtType], [(Name, [Int])])
+    constrs = internaliseConstructors
 
 -- Be aware that some of these tests simply reinforce current
 -- behaviour - it may be that we want to restrict aliasing even
@@ -153,12 +158,24 @@ inferAliasesTests =
         ]
     ]
   where
+    -- Result types are written with the source-level meaning of '*',
+    -- i.e. fresh, but are parsed with the 'Diet' parser.
+    asFreshness :: DeclExtType -> TypeBase ExtShape E.Freshness
+    asFreshness = second f
+      where
+        f Consume = E.Fresh
+        f Observe = E.Nonfresh
+    mkTest ::
+      [Tree String] ->
+      [Tree String] ->
+      [[(String, RetAls)]] ->
+      TestTree
     mkTest all_param_ts all_res_ts expected =
       testCase (show all_param_ts <> " " <> show all_res_ts) $
         inferAliases
           (map (fmap fromString) all_param_ts)
-          (map (fmap fromString) all_res_ts)
-          @?= expected
+          (map (fmap (asFreshness . fromString)) all_res_ts)
+          @?= map (map (first (asFreshness . fromString))) expected
 
 tests :: TestTree
 tests =

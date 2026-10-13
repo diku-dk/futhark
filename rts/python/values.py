@@ -51,7 +51,7 @@ def skip_spaces(f):
             # May be line comment.
             if f.peek_char() == b"-":
                 # Yes, line comment. Skip to end of line.
-                while c != b"\n" and c != None:
+                while c and c != b"\n":
                     c = f.get_char()
             else:
                 break
@@ -125,7 +125,7 @@ def sepEndBy(p, sep, *args):
 def parse_hex_int(f):
     s = b""
     c = f.get_char()
-    while c != None:
+    while c:
         if c in b"01234556789ABCDEFabcdef":
             s += c
             c = f.get_char()
@@ -140,7 +140,7 @@ def parse_hex_int(f):
 def parse_int(f):
     s = b""
     c = f.get_char()
-    if c == b"0" and f.peek_char() in b"xX":
+    if c == b"0" and f.peek_char() in (b"x", b"X"):
         c = f.get_char()  # skip X
         return parse_hex_int(f)
     else:

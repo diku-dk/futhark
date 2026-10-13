@@ -1,7 +1,7 @@
 -- Specific number of SegMaps in this test is not so important - we
 -- just shouldn't get rid of the versions.
 -- ==
--- structure gpu-mem { If/True/SegMap 3 If/False/If/True/SegMap 2 If/False/If/False/If/True/SegMap 1 }
+-- structure gpu-mem { If/True/SegMap 5 If/False/If/True/SegMap 2 If/False/If/False/If/True/SegMap 1 }
 
 module type rand = {
   type rng

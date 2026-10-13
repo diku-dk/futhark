@@ -6,5 +6,5 @@
 -- structure gpu { /SegMap/SegRed 1 SegMap 1 SegRed 1 }
 
 def main xsss =
-  #[incremental_flattening(only_intra)]
+  #[flattening(only_intra)]
   map (\xss -> map (map i32.abs >-> i32.sum) xss) xsss

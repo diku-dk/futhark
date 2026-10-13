@@ -88,7 +88,7 @@ matchAliases l =
 funcallAliases ::
   [PatElem dec] ->
   [(SubExp, Diet)] ->
-  [(TypeBase shape Uniqueness, RetAls)] ->
+  [(TypeBase shape NoMode, RetAls)] ->
   [Names]
 funcallAliases pes args = map onType
   where
@@ -138,7 +138,7 @@ expAliases pes (Loop merge _ loopbody) =
   mutualAliases (bound <> param_names) pes $ do
     (p, als) <-
       transitive . zip params $ zipWith (<>) arg_aliases (bodyAliases loopbody)
-    if unique $ paramDeclType p
+    if consuming $ paramDeclType p
       then pure mempty
       else pure als
   where
@@ -155,7 +155,7 @@ expAliases pes (Loop merge _ loopbody) =
         look v = maybe mempty snd $ find ((== v) . paramName . fst) merge_and_als
         expand als = als <> foldMap look (namesToList als)
 expAliases pes (Apply _ args t _) =
-  funcallAliases pes args $ map (first declExtTypeOf) t
+  funcallAliases pes args $ map (first extTypeOf) t
 expAliases _ (WithAcc inputs lam) =
   concatMap inputAliases inputs
     ++ drop num_accs (map (`namesSubtract` boundInBody body) $ bodyAliases body)
@@ -181,7 +181,7 @@ consumedInExp (Match _ cases defbody _) =
 consumedInExp (Loop merge _ _) =
   mconcat
     ( map (subExpAliases . snd) $
-        filter (unique . paramDeclType . fst) merge
+        filter (consuming . paramDeclType . fst) merge
     )
 consumedInExp (WithAcc inputs lam) =
   mconcat (map inputConsumed inputs)

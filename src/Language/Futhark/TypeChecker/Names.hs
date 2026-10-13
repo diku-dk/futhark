@@ -22,7 +22,6 @@ import Data.Map qualified as M
 import Data.Text qualified as T
 import Futhark.Util.Pretty
 import Language.Futhark
-import Language.Futhark.Semantic (includeToFilePath)
 import Language.Futhark.TypeChecker.Monad
 import Prelude hiding (mod)
 
@@ -63,7 +62,7 @@ checkForDuplicateNamesInType = check mempty
       check seen t1 >> check seen t2
     check seen (TETuple ts _) = mapM_ (check seen) ts
     check seen (TERecord fs _) = mapM_ (check seen . snd) fs
-    check seen (TEUnique t _) = check seen t
+    check seen (TEStar t _) = check seen t
     check seen (TESum cs _) = mapM_ (mapM (check seen) . snd) cs
     check seen (TEApply t1 (TypeArgExpType t2) _) =
       check seen t1 >> check seen t2
@@ -119,9 +118,8 @@ resolveQualName v loc = do
   v' <- checkValName v loc
   case v' of
     QualName (q : _) _
-      | isIntrinsic q -> do
-          me <- askImportName
-          unless (isBuiltin (includeToFilePath me)) $
+      | isIntrinsic q ->
+          unless (isBuiltinLoc loc) $
             warn loc "Using intrinsic functions directly can easily crash the compiler or result in wrong code generation."
     _ -> pure ()
   pure v'
@@ -129,13 +127,14 @@ resolveQualName v loc = do
 resolveName :: Name -> SrcLoc -> TypeM VName
 resolveName v loc = qualLeaf <$> resolveQualName (qualName v) loc
 
-resolveAttrAtom :: AttrAtom Name -> TypeM (AttrAtom VName)
-resolveAttrAtom (AtomName v) = pure $ AtomName v
-resolveAttrAtom (AtomInt x) = pure $ AtomInt x
+resolveAttrAtom :: AttrAtom Name -> SrcLoc -> TypeM (AttrAtom VName)
+resolveAttrAtom (AtomName v) _ = pure $ AtomName v
+resolveAttrAtom (AtomInt x) _ = pure $ AtomInt x
+resolveAttrAtom (AtomVar v) loc = AtomVar <$> resolveName v loc
 
 resolveAttrInfo :: AttrInfo Name -> TypeM (AttrInfo VName)
 resolveAttrInfo (AttrAtom atom loc) =
-  AttrAtom <$> resolveAttrAtom atom <*> pure loc
+  AttrAtom <$> resolveAttrAtom atom loc <*> pure loc
 resolveAttrInfo (AttrComp name infos loc) =
   AttrComp name <$> mapM resolveAttrInfo infos <*> pure loc
 
@@ -157,8 +156,8 @@ resolveTypeExp orig = checkForDuplicateNamesInType orig >> f orig
       TETuple <$> mapM f tes <*> pure loc
     f (TERecord fs loc) =
       TERecord <$> mapM (traverse f) fs <*> pure loc
-    f (TEUnique te loc) =
-      TEUnique <$> f te <*> pure loc
+    f (TEStar te loc) =
+      TEStar <$> f te <*> pure loc
     f (TEApply te1 args loc) =
       TEApply <$> f te1 <*> onArg args <*> pure loc
       where
@@ -498,10 +497,21 @@ resolveValBind (ValBind entry fname fname_loc ret NoInfo tparams params body doc
   attrs' <- mapM resolveAttrInfo attrs
   checkForDuplicateNames tparams params
   checkDoNotShadow loc fname
-  resolveTypeParams tparams $ \tparams' ->
-    resolveParams params $ \params' -> do
-      ret' <- traverse resolveTypeExp ret
-      body' <- resolveExp body
-      bindSpaced1 Term fname loc $ \fname' -> do
-        usedName fname'
-        pure $ ValBind entry fname' fname_loc ret' NoInfo tparams' params' body' doc attrs' loc
+  resolveTypeParams tparams $ \tparams' -> do
+    -- Allow self-reference (recursion) only for syntactic functions, i.e.
+    -- those with parameters. See Note [Checking recursive functions].
+    (fname', params', ret', body') <-
+      case params of
+        [] -> resolveParams params $ \params' -> do
+          ret' <- traverse resolveTypeExp ret
+          body' <- resolveExp body
+          bindSpaced1 Term fname loc $ \fname' -> do
+            usedName fname'
+            pure (fname', params', ret', body')
+        _ -> bindSpaced1 Term fname loc $ \fname' -> do
+          resolveParams params $ \params' -> do
+            ret' <- traverse resolveTypeExp ret
+            body' <- resolveExp body
+            usedName fname'
+            pure (fname', params', ret', body')
+    pure $ ValBind entry fname' fname_loc ret' NoInfo tparams' params' body' doc attrs' loc

@@ -1,6 +1,6 @@
 -- ==
 -- tags { autodiff }
---  entry: rev
+--  entry: rev rev_vec
 --  input {
 --    [ 0i64, 1i64, 2i64, 1i64, 0i64, 1i64, 2i64, 1i64, 0i64]
 --    [ 1f32, 2f32, 3f32, 4f32, 5f32, 6f32, 7f32, 8f32, 9f32]
@@ -17,6 +17,10 @@ def f [n] (is: [n]i64) (vs: [n](f32, f32)) =
 
 entry rev [n] (is: [n]i64) (vs0: [n]f32) (vs1: [n]f32) =
   vjp (f is) (zip vs0 vs1) (replicate 4 (1, 1))
+  |> unzip
+
+entry rev_vec [n] (is: [n]i64) (vs0: [n]f32) (vs1: [n]f32) =
+  (mjp (f is) (zip vs0 vs1) [replicate 4 (1, 1)])[0]
   |> unzip
 
 entry fwd [n] (is: [n]i64) (vs0: [n]f32) (vs1: [n]f32) =

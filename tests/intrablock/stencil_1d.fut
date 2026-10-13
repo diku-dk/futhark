@@ -7,5 +7,5 @@ def relax (xs: []f32) =
   map2 (+) xs (map2 (+) (rotate (-1) xs) (rotate 1 xs))
 
 def main (steps: i32) (xss: [][]f32) =
-  #[incremental_flattening(only_intra)]
+  #[flattening(only_intra)]
   map (iterate steps relax) xss

@@ -14,17 +14,17 @@ import Futhark.CodeGen.ImpGen.GPU.Base
 import Futhark.IR.GPUMem
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Transform.Rename
-import Futhark.Util.IntegralExp (divUp, quot, rem)
+import Futhark.Util.IntegralExp (ceilDiv, quot, rem)
 import Prelude hiding (quot, rem)
 
 -- Aggressively try to reuse memory for different SegBinOps, because
 -- we will run them sequentially after another.
 makeLocalArrays ::
+  Imp.TExp Int64 ->
   Count BlockSize SubExp ->
-  SubExp ->
   [SegBinOp GPUMem] ->
   InKernelGen [[VName]]
-makeLocalArrays (Count tblock_size) num_threads scans = do
+makeLocalArrays tblock_id (Count tblock_size) scans = do
   (arrs, mems_and_sizes) <- runStateT (mapM onScan scans) mempty
   let maxSize sizes = Imp.bytes $ L.foldl' sMax64 1 $ map Imp.unCount sizes
   forM_ mems_and_sizes $ \(sizes, mem) ->
@@ -34,26 +34,26 @@ makeLocalArrays (Count tblock_size) num_threads scans = do
     onScan (SegBinOp _ scan_op nes _) = do
       let (scan_x_params, _scan_y_params) =
             splitAt (length nes) $ lambdaParams scan_op
-      (arrs, used_mems) <- fmap unzip $
-        forM scan_x_params $ \p ->
-          case paramDec p of
-            MemArray pt shape _ (ArrayIn mem _) -> do
-              let shape' = Shape [num_threads] <> shape
-              arr <-
-                lift . sArray "scan_arr" pt shape' mem $
-                  LMAD.iota 0 (map pe64 $ shapeDims shape')
-              pure (arr, [])
-            _ -> do
-              let pt = elemType $ paramType p
-                  shape = Shape [tblock_size]
-              (sizes, mem') <- getMem pt shape
-              arr <- lift $ sArrayInMem "scan_arr" pt shape mem'
-              pure (arr, [(sizes, mem')])
+      (arrs, used_mems) <- fmap unzip . forM scan_x_params $ \p ->
+        case paramDec p of
+          MemArray pt shape _ (ArrayIn mem _) -> do
+            let shape' = Shape [tblock_size] <> shape
+            let shape_E = map pe64 $ shapeDims shape'
+            arr <-
+              lift . sArray "scan_arr" pt shape' mem $
+                LMAD.iota (tblock_id * product shape_E) shape_E
+            pure (arr, [])
+          _ -> do
+            let pt = elemType $ paramType p
+                shape = Shape [tblock_size]
+            (sizes, mem') <- getMem pt shape
+            arr <- lift $ sArrayInMem "scan_arr" pt shape mem'
+            pure (arr, [(sizes, mem')])
       modify (<> concat used_mems)
       pure arrs
 
     getMem pt shape = do
-      let size = typeSize $ Array pt shape NoUniqueness
+      let size = typeSize $ Array pt shape NoMode
       mems <- get
       case (L.find ((size `elem`) . fst) mems, mems) of
         (Just mem, _) -> do
@@ -68,11 +68,8 @@ makeLocalArrays (Count tblock_size) num_threads scans = do
 
 type CrossesSegment = Maybe (Imp.TExp Int64 -> Imp.TExp Int64 -> Imp.TExp Bool)
 
-localArrayIndex :: KernelConstants -> Type -> Imp.TExp Int64
-localArrayIndex constants t =
-  if primType t
-    then sExt64 (kernelLocalThreadId constants)
-    else sExt64 (kernelGlobalThreadId constants)
+localArrayIndex :: KernelConstants -> Imp.TExp Int64
+localArrayIndex constants = sExt64 (kernelLocalThreadId constants)
 
 barrierFor :: Lambda GPUMem -> (Bool, Imp.Fence, InKernelGen ())
 barrierFor scan_op = (array_scan, fence, sOp $ Imp.Barrier fence)
@@ -163,7 +160,7 @@ scanStage1 scan_out map_out num_tblocks tblock_size space scans kbody = do
   let (gtids, dims) = unzip $ unSegSpace space
       dims' = map pe64 dims
   let num_elements = product dims'
-      elems_per_thread = num_elements `divUp` sExt64 (tvExp num_threads)
+      elems_per_thread = num_elements `ceilDiv` sExt64 (tvExp num_threads)
       elems_per_group = unCount tblock_size' * elems_per_thread
 
   let crossesSegment =
@@ -174,7 +171,8 @@ scanStage1 scan_out map_out num_tblocks tblock_size space scans kbody = do
 
   sKernelThread "scan_stage1" (segFlat space) (defKernelAttrs num_tblocks tblock_size) $ do
     constants <- kernelConstants <$> askEnv
-    all_local_arrs <- makeLocalArrays tblock_size (tvSize num_threads) scans
+    let tblock_id = kernelBlockId constants
+    all_local_arrs <- makeLocalArrays (sExt64 tblock_id) tblock_size scans
 
     -- The variables from scan_op will be used for the carry and such
     -- in the big chunking loop.
@@ -229,8 +227,7 @@ scanStage1 scan_out map_out num_tblocks tblock_size space scans kbody = do
       forM_ (zip3 per_scan_pes scans all_local_arrs) $
         \(pes, scan@(SegBinOp _ scan_op nes vec_shape), local_arrs) ->
           sComment "do one intra-group scan operation" $ do
-            let rets = lambdaReturnType scan_op
-                scan_x_params = xParams scan
+            let scan_x_params = xParams scan
                 (array_scan, fence, barrier) = barrierFor scan_op
 
             when array_scan barrier
@@ -249,9 +246,9 @@ scanStage1 scan_out map_out num_tblocks tblock_size space scans kbody = do
 
               sComment "combine with carry and write to shared memory" $
                 compileStms mempty (bodyStms $ lambdaBody scan_op) $
-                  forM_ (zip3 rets local_arrs $ map resSubExp $ bodyResult $ lambdaBody scan_op) $
-                    \(t, arr, se) ->
-                      copyDWIMFix arr [localArrayIndex constants t] se []
+                  forM_ (zip local_arrs $ map resSubExp $ bodyResult $ lambdaBody scan_op) $
+                    \(arr, se) ->
+                      copyDWIMFix arr [localArrayIndex constants] se []
 
               let crossesSegment' = do
                     f <- crossesSegment
@@ -273,12 +270,12 @@ scanStage1 scan_out map_out num_tblocks tblock_size space scans kbody = do
 
               sComment "threads in bounds write partial scan result" $
                 sWhen in_bounds $
-                  forM_ (zip3 rets pes local_arrs) $ \(t, pe, arr) ->
+                  forM_ (zip pes local_arrs) $ \(pe, arr) ->
                     copyDWIMFix
                       pe
                       (map Imp.le64 gtids ++ vec_is)
                       (Var arr)
-                      [localArrayIndex constants t]
+                      [localArrayIndex constants]
 
               barrier
 
@@ -288,12 +285,7 @@ scanStage1 scan_out map_out num_tblocks tblock_size space scans kbody = do
                         (paramName p)
                         []
                         (Var arr)
-                        [ if primType $ paramType p
-                            then sExt64 (kernelBlockSize constants) - 1
-                            else
-                              (sExt64 (kernelBlockId constants) + 1)
-                                * sExt64 (kernelBlockSize constants)
-                                - 1
+                        [ sExt64 (kernelBlockSize constants) - 1
                         ]
                   load_neutral =
                     forM_ (zip nes scan_x_params) $ \(ne, p) ->
@@ -342,13 +334,13 @@ scanStage2 scan_out stage1_num_threads elems_per_group stage1_num_tblocks stage2
   -- Number of chunks needed to cover all stage-1 blocks.
   num_chunks <-
     dPrimVE "stage2_num_chunks" $
-      stage1_num_tblocks_e `divUp` stage2_tblock_size_e
+      stage1_num_tblocks_e `ceilDiv` stage2_tblock_size_e
 
   sKernelThread "scan_stage2" (segFlat space) (defKernelAttrs (Count (intConst Int64 1)) stage2_tblock_size) $ do
     constants <- kernelConstants <$> askEnv
-    per_scan_local_arrs <- makeLocalArrays stage2_tblock_size (tvSize stage1_num_threads) scans
-    let per_scan_rets = map (lambdaReturnType . segBinOpLambda) scans
-        per_scan_pes = segBinOpChunks scans scan_out
+    let tblock_id = kernelBlockId constants
+    per_scan_local_arrs <- makeLocalArrays (sExt64 tblock_id) stage2_tblock_size scans
+    let per_scan_pes = segBinOpChunks scans scan_out
 
     -- Declare lambda params and initialise carries (xParams) to the
     -- neutral element.  For scalar scans these persist across chunk
@@ -368,8 +360,8 @@ scanStage2 scan_out stage1_num_threads elems_per_group stage1_num_tblocks stage2
       -- Construct segment indices.
       zipWithM_ dPrimV_ gtids $ unflattenIndex dims' $ tvExp flat_idx
 
-      forM_ (L.zip4 scans per_scan_local_arrs per_scan_rets per_scan_pes) $
-        \(scan@(SegBinOp _ scan_op nes vec_shape), local_arrs, rets, pes) ->
+      forM_ (L.zip3 scans per_scan_local_arrs per_scan_pes) $
+        \(scan@(SegBinOp _ scan_op nes vec_shape), local_arrs, pes) ->
           sComment "do one stage-2 scan chunk" $ do
             let (array_scan, fence, barrier) = barrierFor scan_op
                 scan_x_params = xParams scan
@@ -429,9 +421,9 @@ scanStage2 scan_out stage1_num_threads elems_per_group stage1_num_tblocks stage2
               -- incorporates the inter-chunk carry; other threads have
               -- neutral in xParams, so the op is a no-op for them.
               compileStms mempty (bodyStms $ lambdaBody scan_op) $
-                forM_ (zip3 rets local_arrs $ map resSubExp $ bodyResult $ lambdaBody scan_op) $
-                  \(t, arr, se) ->
-                    copyDWIMFix arr [localArrayIndex constants t] se []
+                forM_ (zip local_arrs $ map resSubExp $ bodyResult $ lambdaBody scan_op) $
+                  \(arr, se) ->
+                    copyDWIMFix arr [localArrayIndex constants] se []
 
               sOp $ Imp.ErrorSync fence
 
@@ -454,12 +446,12 @@ scanStage2 scan_out stage1_num_threads elems_per_group stage1_num_tblocks stage2
 
               sComment "threads in bounds write scanned carries" $
                 sWhen in_bounds $
-                  forM_ (zip3 rets pes local_arrs) $ \(t, pe, arr) ->
+                  forM_ (zip pes local_arrs) $ \(pe, arr) ->
                     copyDWIMFix
                       pe
                       glob_is
                       (Var arr)
-                      [localArrayIndex constants t]
+                      [localArrayIndex constants]
 
               barrier
 
@@ -514,7 +506,7 @@ scanStage3 pat scan_out map_out num_tblocks tblock_size elems_per_group crossesS
   required_groups <-
     dPrimVE "required_groups" $
       sExt32 $
-        product dims' `divUp` sExt64 (unCount tblock_size')
+        product dims' `ceilDiv` sExt64 (unCount tblock_size')
 
   sKernelThread "scan_stage3" (segFlat space) (defKernelAttrs num_tblocks tblock_size) $
     virtualiseBlocks SegVirt required_groups $ \virt_tblock_id -> do

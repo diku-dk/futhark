@@ -98,7 +98,7 @@ instance Format UncheckedTypeExp where
     where
       fmtFieldType (L _ name', t) = fmtName mempty name' <> ":" <+> align (fmt t)
   fmt (TEArray se te loc) = addComments loc $ fmt se <> fmt te
-  fmt (TEUnique te loc) = addComments loc $ "*" <> fmt te
+  fmt (TEStar te loc) = addComments loc $ "*" <> fmt te
   fmt (TEApply te tArgE loc) = addComments loc $ fmt te <+> fmt tArgE
   fmt (TEArrow name te0 te1 loc) =
     addComments loc $
@@ -135,11 +135,12 @@ instance Format UncheckedTypeBind where
           <+> "="
           </> stdIndent (fmt e)
 
-instance Format (AttrAtom a) where
+instance Format (AttrAtom Name) where
   fmt (AtomName name) = fmt name
+  fmt (AtomVar name) = "$" <> fmt name
   fmt (AtomInt int) = text constantStyle $ prettyText int
 
-instance Format (AttrInfo a) where
+instance Format (AttrInfo Name) where
   fmt attr = "#" <> brackets (fmtAttrInfo attr)
     where
       fmtAttrInfo (AttrAtom attr' loc) = addComments loc $ fmt attr'

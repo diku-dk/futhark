@@ -841,9 +841,9 @@ wgslBinOp (Mul t _) = call2Suffix "mul" t
 wgslBinOp (FMul _) = WGSL.BinOpExp "*"
 -- Division is always safe in WGSL, so we can ignore the Safety parameter.
 wgslBinOp (UDiv t _) = call2Suffix "udiv" t
-wgslBinOp (UDivUp t _) = call2Suffix "udiv_up" t
+wgslBinOp (UCeilDiv t _) = call2Suffix "uceil_div" t
 wgslBinOp (SDiv t _) = call2Suffix "sdiv" t
-wgslBinOp (SDivUp t _) = call2Suffix "sdiv_up" t
+wgslBinOp (SCeilDiv t _) = call2Suffix "sceil_div" t
 wgslBinOp (FDiv _) = WGSL.BinOpExp "/"
 wgslBinOp (FMod _) = WGSL.BinOpExp "%"
 wgslBinOp (UMod t _) = call2Suffix "umod" t

@@ -6,30 +6,29 @@ Compiler Error Index
 Elaboration on type errors produced by the compiler.  Many error
 messages contain links to the sections below.
 
-Uniqueness errors
------------------
+Consumption errors
+------------------
 
 .. _use-after-consume:
 
 "Using *x*, but this was consumed at *y*."
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A core principle of uniqueness typing (see :ref:`in-place-updates`) is
-that after a variable is "consumed", it must not be used again.  For
-example, this is invalid, and will result in the error above:
+A core principle of type-checking in-place updates (see :ref:`in-place-updates`)
+is that after a variable is *consumed*, it must not be used again. For example,
+this is invalid, and will result in the error above:
 
 .. code-block:: futhark
 
   let y = x with [0] = 0
   in x
 
-Several operations can *consume* a variable: array update expressions,
-calling a function with unique-typed parameters, or passing it as the
-initial value of a unique-typed loop parameter.  When a variable is
-consumed, its *aliases* are also considered consumed.  Aliasing is the
-possibility of two variables occupying the same memory at run-time.
-For example, this will fail as above, because ``y`` and ``x`` are
-aliased:
+Several operations can *consume* a variable: array update expressions, calling a
+function with consumed parameters, or passing it as the initial value of a
+consuming loop parameter. When a variable is consumed, its *aliases* are also
+considered consumed. Aliasing is the possibility of two variables occupying the
+same memory at run-time. For example, this will fail as above, because ``y`` and
+``x`` are aliased:
 
 .. code-block:: futhark
 
@@ -60,9 +59,9 @@ consumable.  For example, it would occur for the following program:
     let a[0] = a[0]+1
     in a
 
-Only arrays with a a *unique array type* can be consumed.  Such a type
-is written by prefixing the array type with an asterisk.  The program
-could be fixed by writing it like this:
+Only parameters marked as *consumable* can be consumed. This is designated in
+the type by prefixing it with an asterisk. The program could be fixed by writing
+it like this:
 
 .. code-block:: futhark
 
@@ -74,8 +73,7 @@ Note that this places extra obligations on the caller of the ``f``
 function, since it now *consumes* its argument.  See
 :ref:`in-place-updates` for the full details.
 
-You can always obtain a unique copy of an array by using
-``copy``:
+You can always obtain a *fresh* copy of an array by using ``copy``:
 
 .. code-block:: futhark
 
@@ -89,8 +87,8 @@ purpose of using in-place updates in the first place.
 
 .. _return-aliased:
 
-"Unique-typed return value of *x* is aliased to *y*, which is not consumable"
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+"Fresh-declared return value of *x* is aliased to *y*, which is not consumable"
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This can be caused by a function like this:
 
@@ -98,13 +96,12 @@ This can be caused by a function like this:
 
   def f (xs: []i32) : *[]i32 = xs
 
-We are saying that ``f`` returns a *unique* array - meaning it has no
-aliases - but at the same time, it aliases the parameter *xs*, which
-is not marked as being unique (see :ref:`in-place-updates`).  This
-violates one of the core guarantees provided by uniqueness types,
-namely that a unique return value does not alias any value that might
-be used in the future.  Imagine if this was permitted, and we had a
-program that used ``f``:
+We are saying that ``f`` returns a *fresh* array - meaning it has no aliases -
+but at the same time, it aliases the parameter *xs*, which is not marked as
+being consumable (see :ref:`in-place-updates`). This violates one of the core
+safety guarantees for in-place updates, namely that a fresh return value does
+not alias any value that might be used in the future. Imagine if this was
+permitted, and we had a program that used ``f``:
 
 .. code-block:: futhark
 
@@ -116,9 +113,8 @@ The update of ``b`` is fine, but if ``b`` was allowed to alias ``a``
 (hence occupying the same memory), then we would be modifying ``a`` as
 well, which is a violation of referential transparency.
 
-As with most uniqueness errors, it can be fixed by using ``copy xs``
-to break the aliasing.  We can also change the type of ``f`` to take a
-unique array as input:
+As with most alias-related errors, it can be fixed by using ``copy xs`` to break
+the aliasing. We can also change the type of ``f`` to consume its parameter:
 
 .. code-block:: futhark
 
@@ -126,10 +122,10 @@ unique array as input:
 
 This makes ``xs`` "consumable", in the sense used by the error message.
 
-.. _unique-return-aliased:
+.. _fresh-return-aliased:
 
-"A unique-typed component of the return value of *x* is aliased to some other component"
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+"A fresh-declared component of the return value of *x* is aliased to some other component"
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Caused by programs like the following:
 
@@ -137,13 +133,12 @@ Caused by programs like the following:
 
   def main (xs: *[]i32) : (*[]i32, *[]i32) = (xs, xs)
 
-While we are allowed to "consume" ``xs``, as it is a unique parameter,
-this function is trying to return two unique values that alias each
-other.  This violates one of the core guarantees provided by
-uniqueness types, namely that a unique return value does not alias any
-value that might be used in the future (see :ref:`in-place-updates`) -
-and in this case, the two values alias each other.  We can fix this by
-inserting copies to break the aliasing:
+While we are allowed to "consume" ``xs``, as it is a consumed parameter, this
+function is trying to return two fresh values that alias each other. This
+violates one of the core safety guarantees for in-place updates, namely that a
+fresh return value does not alias any value that might be used in the future
+(see :ref:`in-place-updates`) - and in this case, the two values alias each
+other. We can fix this by inserting copies to break the aliasing:
 
 .. code-block:: futhark
 
@@ -184,41 +179,10 @@ Alternative, we could duplicate the expression producing the array:
   def f n =
     g (iota n, iota n))
 
-.. _consuming-parameter:
-
-"Consuming parameter passed non-unique argument"
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Caused by programs like the following:
-
-.. code-block:: futhark
-
-  def update (xs: *[]i32) = xs with [0] = 0
-
-  def f (ys: []i32) = update ys
-
-The update ``function`` *consumes* its ``xs`` argument to perform an
-:ref:`in-place update <in-place-updates>`, as denoted by the asterisk
-before the type.  However, the ``f`` function tries to pass an array
-that it is not allowed to consume (no asterisk before the type).
-
-One solution is to change the type of ``f`` so that it also consumes
-its input, which allows it to pass it on to ``update``:
-
-.. code-block:: futhark
-
-  def f (ys: *[]i32) = update ys
-
-Another solution to ``copy`` the array that we pass to ``update``:
-
-.. code-block:: futhark
-
-  def f (ys: []i32) = update (copy ys)
-
 .. _consuming-argument:
 
-"Non-consuming higher-order parameter passed consuming argument."
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+"Argument of functional type ... contains consumption"
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This error occurs when we have a higher-order function that expects a
 function that does *not* consume its arguments, and we pass it one
@@ -246,27 +210,6 @@ function:
 
   def apply 'a 'b (f: *a -> b) (x: *a) = f x
 
-.. _alias-free-variable:
-
-"Function result aliases the free variable *x*"
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Caused by definitions such as the following:
-
-.. code-block:: futhark
-
-  def x = [1,2,3]
-
-  def f () = x
-
-To simplify the tracking of aliases, the Futhark type system requires
-that the result of a function may only alias the function parameters,
-not any free variables.  Use ``copy`` to fix this:
-
-.. code-block:: futhark
-
-  def f () = copy x
-
 .. _size-expression-bind:
 
 "Size expression with binding is replaced by unknown size."
@@ -284,26 +227,6 @@ Intuitively, the type of ``a`` should be ``[let n = 10 in n+n]i32``,
 but this puts a binding into a size expression, which is invalid.
 Therefore, the type checker invents an :term:`unknown size`
 variable, say ``l``, and assigns ``a`` the type ``[l]i32``.
-
-.. _size-expression-consume:
-
-"Size expression with consumption is replaced by unknown size."
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-To illustrate this error, consider the following program
-
-.. code-block:: futhark
-
-   def consume (xs: *[]i64): i64 = xs[0]
-
-   def main (xs: *[]i64) =
-     let a = iota (consume xs)
-     in ...
-
-Intuitively, the type of ``a`` should be ``[consume ys]i32``, but this
-puts a consumption of the array ``ys`` into a size expression, which
-is invalid.  Therefore, the type checker invents an :term:`unknown
-size` variable, say ``l``, and assigns ``a`` the type ``[l]i32``.
 
 .. _inaccessible-size:
 
@@ -367,16 +290,36 @@ also be due to size inference:
 Here the type rules force ``A`` to have size ``x``, leading to a
 problematic type.  It can be fixed using the techniques above.
 
+.. _consuming-loop-param-aliases:
+
+"Return value for consuming loop parameter *x* aliases *y*"
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This occurs for expressions like the following::
+
+    loop xs for i < 10 do
+      -- Consume xs...
+      let xs[i] = 0
+      -- ys is some variable bound outside the loop
+      in ys
+
+
+This is not allowed, as the loop parameter ``xs`` is consumed, in this case
+implicitly due to the in-place update, but the loop body returns something that
+is not consumable, in this case ``ys``, which is bound outside the loop.
+
+You can solve this by copying one of the return values of the loop.
+
 .. _aliases-previously-returned:
 
-"Return value for consuming loop parameter *x* aliases previously returned value"
----------------------------------------------------------------------------------
+"Return value for consuming loop parameter *x* aliases another returned value"
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This error occurs when you have a loop with multiple loop parameters,
 at least one of which is consuming, and the values returned by the
 loop body alias each other. This would result in the consuming loop
 parameter aliasing another loop parameter, which is not allowed. It is
-essentially :ref:`unique-return-aliased` from a loop perspective.
+essentially :ref:`fresh-return-aliased` from a loop perspective.
 
 A (contrived) example of this error is the following:
 
@@ -388,6 +331,27 @@ A (contrived) example of this error is the following:
     -- is consumed.
     in (arr[i+1], arr)
 
+.. _contains-consumption:
+
+"Let-bound expression of higher-order type *t* contains consumption"
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This occurs when ``let``, ``def``, or ``case``-binding an expression that
+contains consumption and returns a function. The most common case is partial
+application of a consuming function::
+
+  def update (xs: *[]i32) (i: i32) (y: i32) =
+    xs with [i] = y
+
+  def main (xs: *[]i32) =
+    let f = update xs
+    in (f 0 0, f 0 0)
+
+The simplest solution is to remove the consumption by doing a ``copy``.
+
+The reason for this restriction is rooted in efficiency concerns.
+Defunctionalisation causes the two applications of ``f`` to both consume ``xs``,
+which is a violation of the safety requirements for :ref:`in-place updates`.
 
 Size errors
 -----------
@@ -720,6 +684,26 @@ Now we can say ``M.y``.  See :ref:`module-system` for more.
 Other errors
 ------------
 
+.. _scope-violation:
+
+"Scope violation"
+~~~~~~~~~~~~~~~~~
+
+These occurs when the type checker infers that the type (or size) of a variable
+``x`` is forced to be expressed using parameters or variables not in scope when
+``x`` is bound. This only occurs when mixing explicit parameters with inference.
+Contrived example::
+
+  def f x =
+    let g 'b (y: b) = if true then y else x
+    in g
+
+The ``if`` forces ``y`` and ``x`` to be the same type, but ``y`` has type ``b``,
+which is a type parameter bound in ``g``, and not in scope where ``x`` is bound.
+
+These errors usually imply some form of misdesign, and can be resolved by
+manually inserting type annotations until the conceptual mistake becomes clear.
+
 .. _literal-out-of-bounds:
 
 "Literal out of bounds"
@@ -878,6 +862,22 @@ The solution is to put a type annotation on the parameter instead:
 .. code-block:: futhark
 
   def f (r : {x:i32}) = r with x = 0
+
+.. _occurs-check:
+
+"Occurs check"
+~~~~~~~~~~~~~~
+
+Occurs check errors are reported whenever the type checker infers a type or size
+that is circular, meaning it would be infinitely large. Essentially, whenever
+the type checker infers that some ``x`` must be equal to some (compound)
+construct ``y``, it checks whether ``x`` is present inside ``y``. This is called
+the occurs check.
+
+Since it is such a general mechanism, there is no rule of thumb for how to avoid
+or fix errors that manifest as an occurs check. Since they are always the result
+of a misdesign, it can be useful to add explicit type annotations until the root
+cause is revealed.
 
 Entry points
 ------------

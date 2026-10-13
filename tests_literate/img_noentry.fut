@@ -1,1 +1,1 @@
--- > :img $loadimg "../assets/ohyes.png"
+-- > :img io.loadimg "../assets/ohyes.png"

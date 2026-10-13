@@ -14,4 +14,4 @@ explicitAllocations =
   explicitAllocationsGeneric
     DefaultSpace
     (const $ pure $ Inner NoOp)
-    defaultExpHints
+    scalarSpaceExpHints

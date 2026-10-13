@@ -36,6 +36,7 @@ module Futhark.IR.TypeCheck
     checkArg,
     checkSOACArrayArgs,
     checkLambda,
+    checkExtLambda,
     checkBody,
     consume,
     binding,
@@ -58,7 +59,7 @@ import Futhark.Analysis.PrimExp
 import Futhark.Construct (instantiateShapes)
 import Futhark.IR.Aliases hiding (lookupAliases)
 import Futhark.Util
-import Futhark.Util.Pretty (align, docText, indent, ppTuple', pretty, (<+>), (</>))
+import Futhark.Util.Pretty hiding (width)
 
 -- | Information about an error during type checking.  The 'Show'
 -- instance for this type produces a human-readable description.
@@ -75,8 +76,6 @@ data ErrorCase rep
   | ParameterMismatch (Maybe Name) [Type] [Type]
   | SlicingError Shape Int
   | BadAnnotation String Type Type
-  | ReturnAliased Name VName
-  | UniqueReturnAliased Name
   | NotAnArray VName Type
   | PermutationError [Int] Int (Maybe VName)
 
@@ -111,7 +110,7 @@ instance (Checkable rep) => Show (ErrorCase rep) where
   show (InvalidPatError pat t desc) =
     "Pat\n"
       ++ prettyString pat
-      ++ "\ncannot match value of type\n"
+      ++ "\ncannot match expression of type\n"
       ++ T.unpack (prettyTupleLines t)
       ++ end
     where
@@ -148,16 +147,6 @@ instance (Checkable rep) => Show (ErrorCase rep) where
       ++ ", but derived to be "
       ++ prettyString got
       ++ "."
-  show (ReturnAliased fname name) =
-    "Unique return value of function "
-      ++ nameToString fname
-      ++ " is aliased to "
-      ++ prettyString name
-      ++ ", which is not consumed."
-  show (UniqueReturnAliased fname) =
-    "A unique tuple element of return value of function "
-      ++ nameToString fname
-      ++ " is aliased to some other tuple component."
   show (NotAnArray e t) =
     "The expression "
       ++ prettyString e
@@ -537,7 +526,7 @@ checkAccIdent ::
 checkAccIdent v = do
   t <- lookupType v
   case t of
-    Acc _ ispace ts _ ->
+    Acc _ ispace ts ->
       pure (ispace, ts)
     _ ->
       bad . TypeError $
@@ -549,7 +538,7 @@ checkOpaques :: OpaqueTypes -> Either (TypeError rep) ()
 checkOpaques (OpaqueTypes types) = descend [] types
   where
     descend _ [] = pure ()
-    descend known ((name, t) : ts) = do
+    descend known ((name, (t, _)) : ts) = do
       check known t
       descend (name : known) ts
     check known (OpaqueRecord fs) =
@@ -561,8 +550,6 @@ checkOpaques (OpaqueTypes types) = descend [] types
     check known (OpaqueRecordArray _ v fs) = do
       checkEntryPointType known (TypeOpaque v)
       mapM_ (checkEntryPointType known . snd) fs
-    check _ (OpaqueType _) =
-      pure ()
     checkEntryPointType known (TypeOpaque s) =
       unless (s `elem` known) $
         Left . Error [] . TypeError $
@@ -623,7 +610,7 @@ checkFun (FunDef _ _ fname rettype params body) =
   context ("In function " <> nameToText fname)
     $ checkFun'
       ( fname,
-        map (first declExtTypeOf) rettype,
+        map (first extTypeOf) rettype,
         funParamsToNameInfos params
       )
       (Just consumable)
@@ -635,7 +622,7 @@ checkFun (FunDef _ _ fname rettype params body) =
     consumable =
       [ (paramName param, mempty)
       | param <- params,
-        unique $ paramDeclType param
+        consuming $ paramDeclType param
       ]
 
 funParamsToNameInfos ::
@@ -676,7 +663,7 @@ checkNoDuplicateParams fname = foldM_ expand []
 checkFun' ::
   (Checkable rep) =>
   ( Name,
-    [(DeclExtType, RetAls)],
+    [(ExtType, RetAls)],
     [(VName, NameInfo (Aliases rep))]
   ) ->
   Maybe [(VName, Names)] ->
@@ -697,13 +684,13 @@ checkFun' (fname, rettype, params) consumable check = do
 
     isParam = (`elem` param_names)
 
-    unique_names = namesFromList $ do
+    consumable_names = namesFromList $ do
       (v, FParamName t) <- params
-      guard $ unique $ declTypeOf t
+      guard $ consuming $ declTypeOf t
       pure v
 
     allowedArgAliases pals =
-      namesFromList (map (param_names !!) pals) <> unique_names
+      namesFromList (map (param_names !!) pals) <> consumable_names
 
     checkReturnAlias retals = zipWithM_ checkRet (zip [(0 :: Int) ..] rettype) retals
       where
@@ -738,7 +725,7 @@ checkSubExp (Var ident) = context ("In subexp " <> prettyText ident) $ do
   lookupType ident
 
 checkCerts :: (Checkable rep) => Certs -> TypeM rep ()
-checkCerts (Certs cs) = mapM_ (requireI (Prim Unit)) cs
+checkCerts = mapM_ lookupType . unCerts
 
 checkSubExpRes :: (Checkable rep) => SubExpRes -> TypeM rep Type
 checkSubExpRes (SubExpRes cs se) = do
@@ -760,10 +747,7 @@ checkStms origstms m = delve $ stmsToList origstms
     delve [] =
       m
 
-checkResult ::
-  (Checkable rep) =>
-  Result ->
-  TypeM rep ()
+checkResult :: (Checkable rep) => Result -> TypeM rep ()
 checkResult = mapM_ checkSubExpRes
 
 checkFunBody ::
@@ -779,40 +763,77 @@ checkFunBody rt (Body (_, rep) stms res) = do
       matchReturnType (map fst rt) res
     mapM (subExpAliasesM . resSubExp) res
 
-checkLambdaBody ::
-  (Checkable rep) =>
-  [Type] ->
-  Body (Aliases rep) ->
-  TypeM rep ()
-checkLambdaBody ret (Body (_, rep) stms res) = do
-  checkBodyDec rep
-  checkStms stms $ checkLambdaResult ret res
-
-checkLambdaResult ::
-  (Checkable rep) =>
-  [Type] ->
-  Result ->
-  TypeM rep ()
-checkLambdaResult ts es
-  | length ts /= length es =
+checkNumResults :: (Pretty t) => [t] -> Result -> TypeM rep ()
+checkNumResults ts res
+  | length ts /= length res =
       bad . TypeError $
         "Lambda has return type "
           <> prettyTuple ts
           <> " describing "
           <> prettyText (length ts)
           <> " values, but body returns "
-          <> prettyText (length es)
+          <> prettyText (length res)
           <> " values: "
-          <> prettyTuple es
-  | otherwise = forM_ (zip ts es) $ \(t, e) -> do
-      et <- checkSubExpRes e
-      unless (et == t) . bad . TypeError $
-        "Subexpression "
-          <> prettyText e
-          <> " has type "
-          <> prettyText et
-          <> " but expected "
-          <> prettyText t
+          <> prettyTuple res
+  | otherwise = pure ()
+
+checkLambdaResult :: (Checkable rep) => [Type] -> Result -> TypeM rep ()
+checkLambdaResult ts es = do
+  checkNumResults ts es
+  forM_ (zip ts es) $ \(t, e) -> do
+    et <- checkSubExpRes e
+    unless (et == t) . bad . TypeError $
+      "Subexpression "
+        <> prettyText e
+        <> " has type "
+        <> prettyText et
+        <> " but expected "
+        <> prettyText t
+
+checkLambdaBody ::
+  (Checkable rep) => [Type] -> Body (Aliases rep) -> TypeM rep ()
+checkLambdaBody ret (Body (_, rep) stms res) = do
+  mapM_ checkType ret
+  checkBodyDec rep
+  checkStms stms $ do
+    checkLambdaResult ret res
+
+checkExtLambdaResult :: (Checkable rep) => [ExtType] -> Result -> TypeM rep ()
+checkExtLambdaResult ts es = do
+  checkNumResults ts es
+  matchExtReturnType ts es
+
+checkExtLambdaBody ::
+  (Checkable rep) => [ExtType] -> Body (Aliases rep) -> TypeM rep ()
+checkExtLambdaBody ret (Body (_, rep) stms res) = do
+  mapM_ checkExtType ret
+  case ret of
+    Prim (IntType Int64) : ts -> mapM_ checkValueRet ts
+    _ ->
+      bad . TypeError $
+        "flatmap lambda must return a size of type i64 first, but returns "
+          <> prettyTuple ret
+  checkBodyDec rep
+  checkStms stms $ checkExtLambdaResult ret res
+  where
+    -- A result is either a segment, in which case the existential size is its
+    -- outermost size, or a value, in which case it has no existential size at
+    -- all.
+    checkValueRet t =
+      case shapeDims $ arrayShape t of
+        _ : inner
+          | any (isJust . isExt) inner ->
+              bad . TypeError $
+                "flatmap result type "
+                  <> prettyText t
+                  <> " has existential in inner dimension."
+        Ext i : _
+          | i /= 0 ->
+              bad . TypeError $
+                "flatmap result type "
+                  <> prettyText t
+                  <> " has an existential size other than the first result."
+        _ -> pure ()
 
 checkBody ::
   (Checkable rep) =>
@@ -871,14 +892,15 @@ checkBasicOp (Index ident slice) = do
 checkBasicOp (Update _ src slice se) = do
   (src_shape, src_pt) <- checkArrIdent src
 
+  src_aliases <- lookupAliases src
   se_aliases <- subExpAliasesM se
-  when (src `nameIn` se_aliases) $
+  when (src_aliases `namesIntersect` se_aliases) $
     bad $
       TypeError "The target of an Update must not alias the value to be written."
 
-  checkSlice (arrayOf (Prim src_pt) src_shape NoUniqueness) slice
-  require (arrayOf (Prim src_pt) (sliceShape slice) NoUniqueness) se
-  consume =<< lookupAliases src
+  checkSlice (arrayOf (Prim src_pt) src_shape NoMode) slice
+  require (arrayOf (Prim src_pt) (sliceShape slice) NoMode) se
+  consume src_aliases
 checkBasicOp (FlatIndex ident slice) = do
   vt <- lookupType ident
   observe ident
@@ -888,14 +910,15 @@ checkBasicOp (FlatUpdate src slice v) = do
   (src_shape, src_pt) <- checkArrIdent src
   when (shapeRank src_shape /= 1) $ bad $ SlicingError src_shape 1
 
+  src_aliases <- lookupAliases src
   v_aliases <- lookupAliases v
-  when (src `nameIn` v_aliases) $
+  when (src_aliases `namesIntersect` v_aliases) $
     bad $
       TypeError "The target of an Update must not alias the value to be written."
 
   checkFlatSlice slice
-  requireI (arrayOf (Prim src_pt) (Shape (flatSliceDims slice)) NoUniqueness) v
-  consume =<< lookupAliases src
+  requireI (arrayOf (Prim src_pt) (Shape (flatSliceDims slice)) NoMode) v
+  consume src_aliases
 checkBasicOp (Iota e x s et) = do
   require (Prim int64) e
   require (Prim $ IntType et) x
@@ -988,7 +1011,7 @@ matchLoopResultExt merge loopres = do
           rettype_ext
           (staticShapes bodyt)
     Just rettype' ->
-      unless (bodyt `subtypesOf` rettype') . bad $
+      unless (bodyt == rettype') . bad $
         ReturnTypeError
           (nameFromString "<loop body>")
           (staticShapes rettype')
@@ -1028,23 +1051,27 @@ checkExp (Apply fname args rettype_annot _) = do
   when (rettype_derived /= rettype_annot) $
     bad . TypeError . docText $
       "Expected apply result type:"
-        </> indent 2 (pretty $ map fst rettype_derived)
+        </> indent 2 (braces $ commasep $ map prettyRet rettype_derived)
         </> "But annotation is:"
-        </> indent 2 (pretty $ map fst rettype_annot)
+        </> indent 2 (braces $ commasep $ map prettyRet rettype_annot)
   consumeArgs paramtypes argflows
 checkExp (Loop merge form loopbody) = do
   let mergepat = map fst merge
 
   checkLoopArgs
 
+  -- The loop consumes the initial values of its consuming parameters when it
+  -- starts, so neither its body nor anything after it may use them.
+  consumeArgs (map paramDeclType mergepat) =<< mapM (checkArg . snd) merge
+
   binding (scopeOfLoopForm form) $ do
     checkForm form
 
-    let rettype = map paramDeclType mergepat
+    let rettype = map paramType mergepat
         consumable =
           [ (paramName param, mempty)
           | param <- mergepat,
-            unique $ paramDeclType param
+            consuming $ paramDeclType param
           ]
 
     context "Inside the loop body"
@@ -1134,9 +1161,10 @@ checkExp (WithAcc inputs lam) = do
       Nothing ->
         pure ()
 
-    pure (Acc (paramName p) shape elem_ts NoUniqueness, mempty)
+    pure (Acc (paramName p) shape elem_ts, mempty)
 
-  checkAnyLambda False lam $ replicate num_accs (Prim Unit, mempty) ++ acc_args
+  checkAnyLambda False checkLambdaBody lam $
+    replicate num_accs (Prim Unit, mempty) ++ acc_args
   where
     num_accs = length inputs
 checkExp (Op op) = do
@@ -1170,10 +1198,10 @@ checkSOACArrayArgs width = mapM checkSOACArrayArg
 
 checkType ::
   (Checkable rep) =>
-  TypeBase Shape u ->
+  TypeBase Shape o ->
   TypeM rep ()
 checkType (Mem (ScalarSpace d _)) = mapM_ (require (Prim int64)) d
-checkType (Acc cert shape ts _) = do
+checkType (Acc cert shape ts) = do
   requireI (Prim Unit) cert
   mapM_ (require (Prim int64)) $ shapeDims shape
   mapM_ checkType ts
@@ -1181,7 +1209,7 @@ checkType t = mapM_ checkSubExp $ arrayDims t
 
 checkExtType ::
   (Checkable rep) =>
-  TypeBase ExtShape u ->
+  TypeBase ExtShape o ->
   TypeM rep ()
 checkExtType = mapM_ checkExtDim . shapeDims . arrayShape
   where
@@ -1244,9 +1272,8 @@ checkStm ::
   TypeM rep a ->
   TypeM rep a
 checkStm stm@(Let pat aux e) m = do
-  let Certs cs = stmAuxCerts aux
-      (_, dec) = stmAuxDec aux
-  context "When checking certificates" $ mapM_ (requireI $ Prim Unit) cs
+  let (_, dec) = stmAuxDec aux
+  context "When checking certificates" $ checkCerts $ stmAuxCerts aux
   context "When checking expression annotation" $ checkExpDec dec
   context ("When matching\n" <> message "  " pat <> "\nwith\n" <> message "  " e) $
     matchPat pat e
@@ -1340,29 +1367,44 @@ checkFuncall fname paramts args = do
         map argType args
   consumeArgs paramts args
 
+-- | Consume the arguments passed for consuming parameters. A consumed argument
+-- may not alias any other argument.
 consumeArgs ::
   [DeclType] ->
   [Arg] ->
   TypeM rep ()
-consumeArgs paramts args =
-  forM_ (zip (map diet paramts) args) $ \(d, (_, als)) ->
-    occur [consumption (consumeArg als d)]
+consumeArgs paramts args = do
+  forM_ (zip [0 :: Int ..] args_cons) $ \(i, (cons_als, _)) ->
+    forM_ (map (snd . snd) . filter ((/= i) . fst) $ zip [0 ..] args_cons) $ \als ->
+      case namesToList $ cons_als `namesIntersection` als of
+        [] -> pure ()
+        v : _ ->
+          bad . TypeError $
+            "Consumed argument aliases another argument through " <> prettyText v <> "."
+  forM_ args_cons $ \(cons_als, _) ->
+    occur [consumption cons_als]
   where
-    consumeArg als Consume = als
-    consumeArg _ _ = mempty
+    args_cons = zipWith consumeArg (map diet paramts) args
+    consumeArg Consume (_, als) = (als, als)
+    consumeArg _ (_, als) = (mempty, als)
 
 -- The boolean indicates whether we only allow consumption of
 -- parameters.
 checkAnyLambda ::
-  (Checkable rep) => Bool -> Lambda (Aliases rep) -> [Arg] -> TypeM rep ()
-checkAnyLambda soac (Lambda params rettype body) args = do
+  (Checkable rep) =>
+  Bool ->
+  ([t] -> Body (Aliases rep) -> TypeM rep ()) ->
+  GLambda (Aliases rep) t ->
+  [Arg] ->
+  TypeM rep ()
+checkAnyLambda soac onBody (Lambda params rettype body) args = do
   let fname = nameFromString "<anonymous>"
   if length params == length args
     then do
       -- Consumption for this is done explicitly elsewhere.
       checkFuncall
         Nothing
-        (map ((`toDecl` Nonunique) . paramType) params)
+        (map ((`toDecl` Observe) . paramType) params)
         $ map noArgAliases args
       let consumable =
             if soac
@@ -1374,8 +1416,7 @@ checkAnyLambda soac (Lambda params rettype body) args = do
       binding (M.fromList params') $
         maybe id consumeOnlyParams consumable $ do
           checkLambdaParams params
-          mapM_ checkType rettype
-          checkLambdaBody rettype body
+          onBody rettype body
     else
       bad . TypeError $
         "Anonymous function defined with "
@@ -1387,7 +1428,10 @@ checkAnyLambda soac (Lambda params rettype body) args = do
           <> " arguments."
 
 checkLambda :: (Checkable rep) => Lambda (Aliases rep) -> [Arg] -> TypeM rep ()
-checkLambda = checkAnyLambda True
+checkLambda = checkAnyLambda True checkLambdaBody
+
+checkExtLambda :: (Checkable rep) => ExtLambda (Aliases rep) -> [Arg] -> TypeM rep ()
+checkExtLambda = checkAnyLambda True checkExtLambdaBody
 
 checkPrimExp :: (Checkable rep) => PrimExp VName -> TypeM rep ()
 checkPrimExp ValueExp {} = pure ()
@@ -1457,8 +1501,8 @@ class (AliasableRep rep, TypedOp (OpC rep)) => Checkable rep where
   default checkLetBoundDec :: (LetDec rep ~ Type) => VName -> LetDec rep -> TypeM rep ()
   checkLetBoundDec _ = checkType
 
-  default checkRetType :: (RetType rep ~ DeclExtType) => [RetType rep] -> TypeM rep ()
-  checkRetType = mapM_ $ checkExtType . declExtTypeOf
+  default checkRetType :: (RetType rep ~ ExtType) => [RetType rep] -> TypeM rep ()
+  checkRetType = mapM_ checkExtType
 
   default matchPat :: Pat (LetDec (Aliases rep)) -> Exp (Aliases rep) -> TypeM rep ()
   matchPat pat = matchExtPat pat <=< expExtType
@@ -1466,8 +1510,8 @@ class (AliasableRep rep, TypedOp (OpC rep)) => Checkable rep where
   default primFParam :: (FParamInfo rep ~ DeclType) => VName -> PrimType -> TypeM rep (FParam (Aliases rep))
   primFParam name t = pure $ Param mempty name (Prim t)
 
-  default matchReturnType :: (RetType rep ~ DeclExtType) => [RetType rep] -> Result -> TypeM rep ()
-  matchReturnType = matchExtReturnType . map fromDecl
+  default matchReturnType :: (RetType rep ~ ExtType) => [RetType rep] -> Result -> TypeM rep ()
+  matchReturnType = matchExtReturnType
 
   default matchBranchType :: (BranchType rep ~ ExtType) => [BranchType rep] -> Body (Aliases rep) -> TypeM rep ()
   matchBranchType = matchExtBranchType

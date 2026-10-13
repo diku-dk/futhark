@@ -5,5 +5,5 @@
 -- structure gpu { SegMap/SegRed 1 SegMap/SegRed/SegBinOp 2 }
 
 def main xs =
-  #[incremental_flattening(only_intra)]
+  #[flattening(only_intra)]
   unzip (map (\xs -> (i32.sum xs, i32.product xs)) xs)

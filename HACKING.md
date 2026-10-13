@@ -27,7 +27,7 @@ are bugs too.
 
 ## Building
 
-We include a `Makefile` with the following targets.
+We include a `Makefile` that includes the following targets.
 
 * `make build` (or just `make`) builds the compiler.
 
@@ -86,12 +86,11 @@ you are looking for.
 
 ## Testing
 
-### Only internal compilation
-
-This command tests compilation *without* compiling the generated C
-code, which speeds up testing for internal compiler errors:
-
-    futhark test -C tests --pass-compiler-option=--library
+The `Makefile` contains various targets for running the test suite. These
+targets are of the form `test-foo`, where `foo` varies. To avoid documentation
+drift, they are not documented here. Read the `Makefile` to see what is
+available. Feel free to extract the `futhark test` commands to run them on
+single programs.
 
 ### Running only a single unit test
 
@@ -235,13 +234,19 @@ $ futhark dev -a --backend=c tmp.fut_seq
 
 ## When you are about to have a bad day
 
-When using the `cuda` backend, you can use the `--dump-ptx` runtime
-option to dump PTX, a kind of high-level assembly for NVIDIA GPUs,
-corresponding to the GPU kernels. This can be used to investigate why
-the generated code isn\'t running as fast as you expect (not fun), or
-even whether NVIDIAs compiler is miscompiling something (extremely not
-fun). With the OpenCL backend, `--dump-opencl-binary` does the same
-thing.
+When using the `cuda` backend, you can use the `--dump-ptx` runtime option to
+dump PTX, a kind of high-level assembly for NVIDIA GPUs, corresponding to the
+GPU kernels. This can be used to investigate why the generated code isn\'t
+running as fast as you expect (not fun), or even whether NVIDIAs compiler is
+miscompiling something (extremely not fun). You can also use `--load-ptx` to
+load modified PTX if desired. With the OpenCL backend, the corresponding
+commands are `--dump-opencl-binary`/`--load-opencl-binary`.
+
+You can also dump and load the embedded GPU kernel source code, using
+`--dump-cuda`/`--load-cuda`, `--dump-opencl`/`--load-opencl`, and
+`--dump-hip`/`--load-hip`. It is generally an effective debugging technique to
+dump the GPU code for a reasonably minimal program and try to make repair by
+hand (or add print statements etc), before modifying the code generator.
 
 On AMD platforms, `--dump-opencl-binary` tends to produce an actual
 binary of some kind, and it is pretty tricky to obtain a debugger for it
@@ -320,34 +325,3 @@ execute](https://github.com/jrprice/Oclgrind/issues/204).  To work
 around this, disable optimisations in the OpenCL compiler:
 
     futhark test foo.fut --backend=opencl --runner=tools/oclgrindrunner.sh --pass-option=--build-option=-O0
-
-## Using `futhark script`
-
-The `futhark script` command is a handy way to run (server-mode)
-executables with arbitrary input, while also seeing logging output in
-real time. This is particularly useful for programs whose benchmarking
-input are complicated FutharkScript expressions.
-
-If you have a program `infinite.fut` containing
-
-```Futhark
-entry main n = iterate 1000000000 (map (+1)) (iota n)
-```
-
-then you can run
-
-```
-$ futhark script -D infinite.fut 'main 10i64'
-```
-
-to run it with debug prints. You can also use `-L` instead of `-D` to
-just enable logging. The `main 10i64` can be an arbitrary FutharkScript
-expression.
-
-The above will compile `infinite.fut` using the `c` backend before
-running it. Pass a `--backend` option to `futhark script` to use a
-different backend, or pass an already compiled program instead of a
-`.fut` file (e.g., `infinite`).
-
-See the manpages for `futhark script` and `futhark literate` for more
-information.

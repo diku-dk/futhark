@@ -29,7 +29,7 @@
 -- structure gpu-mem { /Alloc 0 }
 
 def main [n] (t1: *[n][n][n]i32) (i: i64) (xs: [n]i32) : *[n][n][n]i32 =
-  #[incremental_flattening(only_intra)]
+  #[flattening(only_intra)]
   let t0 =
     map (\x ->
            loop res = replicate n x

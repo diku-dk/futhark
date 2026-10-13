@@ -30,6 +30,7 @@ import Futhark.Optimise.TileLoops.Shared
 import Futhark.Tools
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
+import Futhark.Util.IntegralExp qualified as IE
 
 se0 :: SubExp
 se0 = intConst Int64 0
@@ -46,11 +47,12 @@ se4 = intConst Int64 4
 se8 :: SubExp
 se8 = intConst Int64 8
 
-isInnerCoal :: Env -> VName -> Stm GPU -> Bool
-isInnerCoal (_, ixfn_env) slc_X (Let (Pat [pe]) _ (BasicOp (Index x _)))
-  | slc_X == patElemName pe =
+isInnerCoal :: Env -> VName -> Stms GPU -> Bool
+isInnerCoal (_, ixfn_env) slc_X load_X
+  | Just (_, Let (Pat [pe]) _ (BasicOp (Index x slice))) <- stmsLast load_X,
+    slc_X == patElemName pe =
       -- if not in the table, we assume not-transposed!
-      maybe True innerHasStride1 $ M.lookup x ixfn_env
+      maybe True (innerHasStride1 . (`LMAD.slice` fmap pe64 slice)) $ M.lookup x ixfn_env
   where
     innerHasStride1 lmad =
       let lmad_dims = LMAD.dims lmad
@@ -70,7 +72,7 @@ kkLoopBody ::
     [Int],
     (VName, SubExp, VName, SubExp, SubExp),
     (VName, VName),
-    (Stm GPU, VName, PrimType, Stm GPU, VName, PrimType),
+    (Stms GPU, VName, PrimType, Stms GPU, VName, PrimType),
     (Lambda GPU, Lambda GPU)
   ) ->
   VName ->
@@ -79,10 +81,10 @@ kkLoopBody ::
   Builder GPU [VName]
 kkLoopBody
   env
-  ( (rx, ry, tx, ty, tk, tk_div_tx, _tk_div_ty, tx_rx),
+  ( (rx, ry, tx, ty, tk, tk_div_tx, _tk_div_ty, _tx_rx),
     segthd_lvl,
     var_dims,
-    (gtid_x, width_B, gtid_y, height_A, common_dim),
+    (gtid_x, height_A, gtid_y, width_B, common_dim),
     (iii, jjj),
     (load_A, inp_A, pt_A, load_B, inp_B, pt_B),
     (map_lam, red_lam)
@@ -94,39 +96,43 @@ kkLoopBody
     kk <- letExp "kk" =<< toExp (le64 kk0 * pe64 tk)
     -- copy A to shared memory
     (a_loc, aCopyLoc2Reg) <-
-      copyGlb2ShMem False kk (gtid_y, iii, map_t1, height_A, inp_A, load_A, a_loc_init')
+      copyGlb2ShMem False kk (gtid_x, iii, map_t1, height_A, inp_A, load_A, a_loc_init')
 
     -- copy B from global to shared memory
     (b_loc, bCopyLoc2Reg) <-
-      copyGlb2ShMem True kk (gtid_x, jjj, map_t2, width_B, inp_B, load_B, b_loc_init')
+      copyGlb2ShMem True kk (gtid_y, jjj, map_t2, width_B, inp_B, load_B, b_loc_init')
 
     -- inner loop updating this thread's accumulator (loop k in mmm_kernels).
     thd_acc <- mkRedomapOneTileBody kk thd_res_merge aCopyLoc2Reg bCopyLoc2Reg True
     pure [thd_acc, a_loc, b_loc]
     where
-      mk_ik is_B is_coal (thd_y, thd_x) (i0, k0)
+      mk_ik pad is_coal (thd_x, thd_y) (i0, k0)
         | is_coal = do
             -- not-transposed case (i.e., already coalesced)
             let (t_par, t_seq) = (tx, tk)
-            k <- letExp "k" =<< toExp (le64 thd_x + le64 k0 * pe64 t_par)
-            i <- letExp "i" =<< toExp (le64 thd_y + le64 i0 * pe64 t_par)
-            -- to optimize bank conflicts, we use padding only for B
-            -- iff B has the last dimension permuted.
-            let pad_term = if is_B then pe64 se1 else pe64 se0
-            let e = le64 k + le64 i * (pe64 t_seq + pad_term)
+            k <- letExp "k" =<< toExp (le64 thd_y + le64 k0 * pe64 t_par)
+            i <- letExp "i" =<< toExp (le64 thd_x + le64 i0 * pe64 t_par)
+            -- the rx rows of each thread form a block with a padded stride.
+            let e =
+                  le64 k
+                    + le64 i * pe64 t_seq
+                    + le64 i `IE.quot` pe64 rx * (pad (pe64 rx * pe64 t_seq) - pe64 rx * pe64 t_seq)
             pure (i, k, e)
-      mk_ik _ _ (thd_y, thd_x) (i0, k0) = do
+      mk_ik pad _ (thd_x, thd_y) (i0, k0) = do
         -- matrix is transposed case (i.e., uncoalesced):
-        let (t_par, tr_par) = (tx, tx_rx)
-        k <- letExp "k" =<< toExp (le64 thd_y + le64 k0 * pe64 t_par)
-        i <- letExp "i" =<< toExp (le64 thd_x + le64 i0 * pe64 t_par)
-        -- no padding
-        let e = le64 i + le64 k * pe64 tr_par
+        let t_par = tx
+        k <- letExp "k" =<< toExp (le64 thd_x + le64 k0 * pe64 t_par)
+        i <- letExp "i" =<< toExp (le64 thd_y + le64 i0 * pe64 t_par)
+        -- the rx elements of each thread form a block with a padded stride.
+        let e =
+              le64 i
+                + le64 i `IE.quot` pe64 rx * (pad (pe64 rx) - pe64 rx)
+                + le64 k * pe64 tx * pad (pe64 rx)
         pure (i, k, e)
       --
-      mkCompLoopRxRy fits_ij css_init (a_idx_fn, b_idx_fn) (ltid_y, ltid_x) = do
-        css <- forLoop ry [css_init] $ \i [css_merge] -> do
-          css <- forLoop rx [css_merge] $ \j [css_merge'] ->
+      mkCompLoopRxRy fits_ij css_init (a_idx_fn, b_idx_fn) (ltid_x, ltid_y) = do
+        css <- forLoop rx [css_init] $ \i [css_merge] -> do
+          css <- forLoop ry [css_merge] $ \j [css_merge'] ->
             (resultBodyM <=< letTupExp' "foo")
               =<< eIf
                 ( toExp $
@@ -136,12 +142,12 @@ kkLoopBody
                       -- if i and j are out of range than css[i,j]
                       -- is garbage anyways and should not be written.
                       -- so fits_ij should be always true!!!
-                        (le64 iii + le64 i + pe64 ry * le64 ltid_y .<. pe64 height_A)
-                          .&&. (le64 jjj + le64 j + pe64 rx * le64 ltid_x .<. pe64 width_B)
+                        (le64 iii + le64 i + pe64 rx * le64 ltid_x .<. pe64 height_A)
+                          .&&. (le64 jjj + le64 j + pe64 ry * le64 ltid_y .<. pe64 width_B)
                 )
                 ( do
-                    a <- a_idx_fn ltid_y i
-                    b <- b_idx_fn ltid_x j
+                    a <- a_idx_fn ltid_x i
+                    b <- b_idx_fn ltid_y j
                     c <- index "c" css_merge' [i, j]
 
                     map_lam' <- renameLambda map_lam
@@ -164,9 +170,9 @@ kkLoopBody
       --
       mkRedomapOneTileBody kk css_merge a_idx_fn b_idx_fn fits_ij = do
         -- the actual redomap.
-        redomap_res <- segMap2D "redomap_res" segthd_lvl ResultPrivate (ty, tx) $
-          \(ltid_y, ltid_x) -> do
-            css_init <- index "css_init" css_merge [ltid_y, ltid_x]
+        redomap_res <- segMap2D "redomap_res" segthd_lvl ResultPrivate (tx, ty) $
+          \(ltid_x, ltid_y) -> do
+            css_init <- index "css_init" css_merge [ltid_x, ltid_y]
 
             css <- forLoop tk [css_init] $ \k [acc_merge] ->
               (resultBodyM <=< letTupExp' "foo")
@@ -176,7 +182,7 @@ kkLoopBody
                         then le64 kk + le64 k .<. pe64 common_dim
                         else true -- if in prologue, always compute redomap.
                   )
-                  (mkCompLoopRxRy fits_ij acc_merge (a_idx_fn k, b_idx_fn k) (ltid_y, ltid_x))
+                  (mkCompLoopRxRy fits_ij acc_merge (a_idx_fn k, b_idx_fn k) (ltid_x, ltid_y))
                   (resultBodyM [Var acc_merge])
 
             pure [varRes css]
@@ -185,7 +191,7 @@ kkLoopBody
       copyGlb2ShMem ::
         Bool ->
         VName ->
-        (VName, VName, PrimType, SubExp, VName, Stm GPU, VName) ->
+        (VName, VName, PrimType, SubExp, VName, Stms GPU, VName) ->
         Builder GPU (VName, VName -> VName -> VName -> Builder GPU VName)
       copyGlb2ShMem is_B kk (gtid, ii, ptp_X_el, parlen_X, inp_X, load_X, x_loc_init') = do
         let (t_par, r_par, tseq_div_tpar) = (tx, rx, tk_div_tx)
@@ -196,6 +202,14 @@ kkLoopBody
             scatterFun is_inner_coal
         pure (x_loc, indexLocMem is_inner_coal str_A x_loc)
         where
+          -- The stride between the blocks of consecutive threads is padded
+          -- to be odd, avoiding bank conflicts.  A warp reads A at only a
+          -- few distinct addresses, which only conflict in the coalesced
+          -- layout.
+          pad
+            | is_B || isInnerCoal env inp_X load_X = oddUp
+            | otherwise = id
+          --
           indexLocMem ::
             Bool ->
             Name ->
@@ -204,15 +218,14 @@ kkLoopBody
             VName ->
             VName ->
             Builder GPU VName
-          indexLocMem is_inner_coal str_A x_loc k ltid_yx ij = do
-            let (r_par, t_seq, tr_par) = (rx, tk, tx_rx)
-            let pad_term = if is_B then pe64 se1 else pe64 se0
+          indexLocMem is_inner_coal str_A x_loc k ltid ij = do
+            let (r_par, t_seq) = (rx, tk)
             x_loc_ind_32 <-
               letExp (str_A <> "_loc_ind_64")
                 =<< toExp
                   ( if is_inner_coal -- ToDo: check this is correct + turn to i32
-                      then le64 k + (le64 ltid_yx * pe64 r_par + le64 ij) * (pe64 t_seq + pad_term)
-                      else le64 ij + le64 ltid_yx * pe64 r_par + le64 k * pe64 tr_par
+                      then le64 k + le64 ij * pe64 t_seq + le64 ltid * pad (pe64 r_par * pe64 t_seq)
+                      else le64 ij + le64 ltid * pad (pe64 r_par) + le64 k * pe64 tx * pad (pe64 r_par)
                   )
             index (str_A <> "_loc_elem") x_loc [x_loc_ind_32]
           --
@@ -221,10 +234,10 @@ kkLoopBody
             [VName] ->
             (VName, VName) ->
             Builder GPU (SubExp, SubExp)
-          scatterFun is_inner_coal [i0, k0] (thd_y, thd_x) = do
+          scatterFun is_inner_coal [i0, k0] (thd_x, thd_y) = do
             let str_A = baseName inp_X
                 t_seq = tk
-            (i, k, epx_loc_fi) <- mk_ik is_B is_inner_coal (thd_y, thd_x) (i0, k0)
+            (i, k, epx_loc_fi) <- mk_ik pad is_inner_coal (thd_x, thd_y) (i0, k0)
             letBindNames [gtid] =<< toExp (le64 ii + le64 i)
             a_seqdim_idx <- letExp (str_A <> "_seqdim_idx") =<< toExp (le64 kk + le64 k)
 
@@ -239,7 +252,7 @@ kkLoopBody
                           else true
                   )
                   ( do
-                      addStm load_X
+                      addStms load_X
                       res <- index "A_elem" inp_X [a_seqdim_idx]
                       resultBodyM [Var res]
                   )
@@ -274,7 +287,7 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
     isAcc res_tp,
     -- we get the global-thread id for the two inner dimensions,
     --   as we are probably going to use it in code generation
-    (gtid_x, width_B) : (gtid_y, height_A) : rem_outer_dims_rev <-
+    (gtid_y, width_B) : (gtid_x, height_A) : rem_outer_dims_rev <-
       reverse $ unSegSpace seg_space,
     rem_outer_dims <- reverse rem_outer_dims_rev,
     Just
@@ -287,21 +300,20 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
       matchesBlkRegTile seg_space kstms,
     checkAccumulatesRedomapRes res_nm code2' redomap_orig_res = do
       -- Here we start the implementation --
-      let is_B_coal = isInnerCoal env inp_B load_B
       ---- in this binder: host code and outer seggroup (ie. the new kernel) ----
       (new_kernel, host_stms) <- runBuilder $ do
         -- host code
         (rx, ry, tx, ty, tk, tk_div_tx, tk_div_ty, tx_rx, ty_ry, a_loc_sz, b_loc_sz) <-
-          mkTileMemSizes height_A width_B common_dim is_B_coal
+          mkTileMemSizes height_A width_B common_dim
 
         rk <- letSubExp "rk" $ BasicOp $ SubExp $ intConst Int64 8 -- 16 and 8 seem good values
         tk_rk <- letSubExp "tk_rk" =<< toExp (pe64 tk * pe64 rk)
 
         gridDim_t <- letSubExp "gridDim_t" =<< ceilDiv common_dim tk_rk
-        gridDim_y <- letSubExp "gridDim_y" =<< ceilDiv height_A ty_ry
-        gridDim_x <- letSubExp "gridDim_x" =<< ceilDiv width_B tx_rx
+        gridDim_x <- letSubExp "gridDim_x" =<< ceilDiv height_A tx_rx
+        gridDim_y <- letSubExp "gridDim_y" =<< ceilDiv width_B ty_ry
 
-        let gridxyt_pexp = pe64 gridDim_y * pe64 gridDim_x * pe64 gridDim_t
+        let gridxyt_pexp = pe64 gridDim_x * pe64 gridDim_y * pe64 gridDim_t
             grid_pexp =
               foldl (\x d -> pe64 d * x) gridxyt_pexp $
                 map snd rem_outer_dims_rev
@@ -312,8 +324,8 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
 
         ---- in this binder: outer seggroup ----
         (ret_seggroup, stms_seggroup) <- runBuilder $ do
-          iii <- letExp "iii" =<< toExp (le64 gid_y * pe64 ty_ry)
-          jjj <- letExp "jjj" =<< toExp (le64 gid_x * pe64 tx_rx)
+          iii <- letExp "iii" =<< toExp (le64 gid_x * pe64 tx_rx)
+          jjj <- letExp "jjj" =<< toExp (le64 gid_y * pe64 ty_ry)
           ttt <- letExp "ttt" =<< toExp (le64 gid_t * pe64 tk_rk)
 
           -- initialize register mem with neutral elements and create shmem
@@ -333,7 +345,7 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
                 ( (rx, ry, tx, ty, tk, tk_div_tx, tk_div_ty, tx_rx),
                   segthd_lvl,
                   var_dims,
-                  (gtid_x, width_B, gtid_y, height_A, common_dim),
+                  (gtid_x, height_A, gtid_y, width_B, common_dim),
                   (iii, jjj),
                   (load_A, inp_A, map_t1, load_B, inp_B, map_t2),
                   (map_lam, red_lam)
@@ -370,33 +382,33 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
           let redomap_res : _ = redomap_res_lst
 
           -- support for non-empty code2'
-          --  segmap (ltid_y < ty, ltid_x < tx) {
-          --    for i < ry do
-          --      for j < rx do
-          --        res = if (iii+ltid_y*ry+i < height_A && jjj+ltid_x*rx+j < width_B)
+          --  segmap (ltid_x < tx, ltid_y < ty) {
+          --    for i < rx do
+          --      for j < ry do
+          --        res = if (iii+ltid_x*rx+i < height_A && jjj+ltid_y*ry+j < width_B)
           --              then code2' else dummy
           --        final_res[i,j] = res
           mkEpilogueAccRes
             segthd_lvl
             (redomap_orig_res, redomap_res)
             (res_nm, res_tp)
-            (ty, tx, ry, rx)
+            (tx, ty, rx, ry)
             (iii, jjj)
-            (gtid_y, gtid_x)
+            (gtid_x, gtid_y)
             (height_A, width_B, rem_outer_dims)
             code2'
 
         let grid = KernelGrid (Count grid_size) (Count tblock_size)
             level' = SegBlock SegNoVirt (Just grid)
-            space' = SegSpace gid_flat (rem_outer_dims ++ [(gid_t, gridDim_t), (gid_y, gridDim_y), (gid_x, gridDim_x)])
+            space' = SegSpace gid_flat (rem_outer_dims ++ [(gid_t, gridDim_t), (gid_x, gridDim_x), (gid_y, gridDim_y)])
             kbody' = Body () stms_seggroup ret_seggroup
         pure $ Let pat aux $ Op $ SegOp $ SegMap level' space' ts kbody'
       pure $ Just (host_stms, new_kernel)
   where
-    sameAccType acc_sglton (Acc sglton _ _ _) =
+    sameAccType acc_sglton (Acc sglton _ _) =
       acc_sglton == sglton
     sameAccType _ _ = False
-    getAccumFV (Acc singleton _shp [_eltp] _) = do
+    getAccumFV (Acc singleton _shp [_eltp]) = do
       let fvs = namesToList $ freeIn old_kbody -- code
       tps <- localScope (scopeOfSegSpace seg_space) $ do
         mapM lookupType fvs
@@ -423,16 +435,16 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
       segthd_lvl
       (redomap_orig_res, redomap_res)
       (res_nm, res_tp)
-      (ty, tx, ry, rx)
+      (tx, ty, rx, ry)
       (iii, jjj)
-      (gtid_y, gtid_x)
+      (gtid_x, gtid_y)
       (height_A, width_B, _rem_outer_dims)
       code2' = do
         rss_init <- getAccumFV res_tp
-        rssss_list <- segMap2D "rssss" segthd_lvl ResultMaySimplify (ty, tx) $ \(ltid_y, ltid_x) -> do
+        rssss_list <- segMap2D "rssss" segthd_lvl ResultMaySimplify (tx, ty) $ \(ltid_x, ltid_y) -> do
           (css, ii, jj) <- getThdRedomapRes (rx, ry) (ltid_x, ltid_y) (iii, jjj, redomap_res)
-          rss <- forLoop ry [rss_init] $ \i [rss_merge] -> do
-            rss' <- forLoop rx [rss_merge] $ \j [rss_merge'] -> do
+          rss <- forLoop rx [rss_init] $ \i [rss_merge] -> do
+            rss' <- forLoop ry [rss_merge] $ \j [rss_merge'] -> do
               prereqAddCode2 (gtid_x, gtid_y) (ii, i, jj, j) (css, redomap_orig_res)
               let code2_subs = substituteNames (M.singleton rss_init rss_merge') code2'
 
@@ -440,9 +452,9 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
                 letSubExp "res_elem"
                   =<< eIf
                     ( toExp $
-                        le64 gtid_y
+                        le64 gtid_x
                           .<. pe64 height_A
-                          .&&. le64 gtid_x
+                          .&&. le64 gtid_y
                           .<. pe64 width_B
                     )
                     ( do
@@ -469,7 +481,7 @@ mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
     primType res_tp,
     -- we get the global-thread id for the two inner dimensions,
     --   as we are probably going to use it in code generation
-    (gtid_x, width_B) : (gtid_y, height_A) : rem_outer_dims_rev <-
+    (gtid_y, width_B) : (gtid_x, height_A) : rem_outer_dims_rev <-
       reverse $ unSegSpace seg_space,
     rem_outer_dims <- reverse rem_outer_dims_rev,
     Just
@@ -481,16 +493,15 @@ mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
         ) <-
       matchesBlkRegTile seg_space kstms = do
       -- Here we start the implementation
-      let is_B_coal = isInnerCoal env inp_B load_B
       ---- in this binder: host code and outer seggroup (ie. the new kernel) ----
       (new_kernel, host_stms) <- runBuilder $ do
         -- host code
         (rx, ry, tx, ty, tk, tk_div_tx, tk_div_ty, tx_rx, ty_ry, a_loc_sz, b_loc_sz) <-
-          mkTileMemSizes height_A width_B common_dim is_B_coal
+          mkTileMemSizes height_A width_B common_dim
 
-        gridDim_x <- letSubExp "gridDim_x" =<< ceilDiv width_B tx_rx
-        gridDim_y <- letSubExp "gridDim_y" =<< ceilDiv height_A ty_ry
-        let gridxy_pexp = pe64 gridDim_y * pe64 gridDim_x
+        gridDim_x <- letSubExp "gridDim_x" =<< ceilDiv height_A tx_rx
+        gridDim_y <- letSubExp "gridDim_y" =<< ceilDiv width_B ty_ry
+        let gridxy_pexp = pe64 gridDim_x * pe64 gridDim_y
         let grid_pexp =
               foldl (\x d -> pe64 d * x) gridxy_pexp $
                 map snd rem_outer_dims_rev
@@ -500,8 +511,8 @@ mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
 
         ---- in this binder: outer seggroup ----
         (ret_seggroup, stms_seggroup) <- runBuilder $ do
-          iii <- letExp "iii" =<< toExp (le64 gid_y * pe64 ty_ry)
-          jjj <- letExp "jjj" =<< toExp (le64 gid_x * pe64 tx_rx)
+          iii <- letExp "iii" =<< toExp (le64 gid_x * pe64 tx_rx)
+          jjj <- letExp "jjj" =<< toExp (le64 gid_y * pe64 ty_ry)
 
           -- initialize register mem with neutral elements and create shmem
           (cssss, a_loc_init, b_loc_init) <-
@@ -521,7 +532,7 @@ mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
                 ( (rx, ry, tx, ty, tk, tk_div_tx, tk_div_ty, tx_rx),
                   segthd_lvl,
                   var_dims,
-                  (gtid_x, width_B, gtid_y, height_A, common_dim),
+                  (gtid_x, height_A, gtid_y, width_B, common_dim),
                   (iii, jjj),
                   (load_A, inp_A, map_t1, load_B, inp_B, map_t2),
                   (map_lam, red_lam)
@@ -543,25 +554,25 @@ mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
           let redomap_res : _ = epilogue_res_list
 
           -- support for non-empty code2'
-          --  segmap (ltid_y < ty, ltid_x < tx) {
-          --    for i < ry do
-          --      for j < rx do
-          --        res = if (iii+ltid_y*ry+i < height_A && jjj+ltid_x*rx+j < width_B)
+          --  segmap (ltid_x < tx, ltid_y < ty) {
+          --    for i < rx do
+          --      for j < ry do
+          --        res = if (iii+ltid_x*rx+i < height_A && jjj+ltid_y*ry+j < width_B)
           --              then code2' else dummy
           --        final_res[i,j] = res
           mkEpiloguePrimRes
             segthd_lvl
             (redomap_orig_res, redomap_res)
             (res_nm, res_tp)
-            (ty, tx, ry, rx)
+            (tx, ty, rx, ry)
             (iii, jjj)
-            (gtid_y, gtid_x)
+            (gtid_x, gtid_y)
             (height_A, width_B, rem_outer_dims)
             code2'
 
         let grid = KernelGrid (Count grid_size) (Count tblock_size)
             level' = SegBlock SegNoVirt (Just grid)
-            space' = SegSpace gid_flat (rem_outer_dims ++ [(gid_y, gridDim_y), (gid_x, gridDim_x)])
+            space' = SegSpace gid_flat (rem_outer_dims ++ [(gid_x, gridDim_x), (gid_y, gridDim_y)])
             kbody' = Body () stms_seggroup ret_seggroup
         pure $ Let pat aux $ Op $ SegOp $ SegMap level' space' ts kbody'
       pure $ Just (host_stms, new_kernel)
@@ -570,29 +581,29 @@ mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
       segthd_lvl
       (redomap_orig_res, redomap_res)
       (res_nm, res_tp)
-      (ty, tx, ry, rx)
+      (tx, ty, rx, ry)
       (iii, jjj)
-      (gtid_y, gtid_x)
+      (gtid_x, gtid_y)
       (height_A, width_B, rem_outer_dims)
       code2' = do
         epilogue_res <-
           if redomap_orig_res == res_nm
             then pure redomap_res -- epilogue_res_list
             else do
-              rssss_list <- segMap2D "rssss" segthd_lvl ResultPrivate (ty, tx) $ \(ltid_y, ltid_x) -> do
-                rss_init <- scratch "rss_init" (elemType res_tp) [ry, rx]
+              rssss_list <- segMap2D "rssss" segthd_lvl ResultPrivate (tx, ty) $ \(ltid_x, ltid_y) -> do
+                rss_init <- scratch "rss_init" (elemType res_tp) [rx, ry]
                 (css, ii, jj) <- getThdRedomapRes (rx, ry) (ltid_x, ltid_y) (iii, jjj, redomap_res)
-                rss <- forLoop ry [rss_init] $ \i [rss_merge] -> do
-                  rss' <- forLoop rx [rss_merge] $ \j [rss_merge'] -> do
+                rss <- forLoop rx [rss_init] $ \i [rss_merge] -> do
+                  rss' <- forLoop ry [rss_merge] $ \j [rss_merge'] -> do
                     prereqAddCode2 (gtid_x, gtid_y) (ii, i, jj, j) (css, redomap_orig_res)
 
                     res_el <-
                       letSubExp "res_elem"
                         =<< eIf
                           ( toExp $
-                              le64 gtid_y
+                              le64 gtid_x
                                 .<. pe64 height_A
-                                .&&. le64 gtid_x
+                                .&&. le64 gtid_y
                                 .<. pe64 width_B
                           )
                           ( do
@@ -609,7 +620,7 @@ mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
 
         let regtile_ret_dims =
               map (\(_, sz) -> (sz, se1, se1)) rem_outer_dims
-                ++ [(height_A, ty, ry), (width_B, tx, rx)]
+                ++ [(height_A, tx, rx), (width_B, ty, ry)]
 
         -- Add dummy dimensions to tile to reflect the outer dimensions.
         epilogue_res' <-
@@ -633,7 +644,7 @@ matchesBlkRegTile ::
   Stms GPU ->
   Maybe
     ( Stms GPU,
-      (Stm GPU, VName, PrimType, Stm GPU, VName, PrimType),
+      (Stms GPU, VName, PrimType, Stms GPU, VName, PrimType),
       SubExp,
       [Int],
       (Lambda GPU, Lambda GPU, SubExp, VName, PrimType)
@@ -666,16 +677,11 @@ matchesBlkRegTile seg_space kstms
     [redomap_orig_res] <- patNames pat_redomap,
     Just res_red_var <- M.lookup redomap_orig_res variance, -- variance of the reduce result
 
-    -- we furthermore check that code1 is only formed by
-    -- 1. statements that slice some globally-declared arrays
-    --    to produce the input for the redomap, and
-    -- 2. potentially some statements on which the redomap
-    --    is independent; these are recorded in `code2''`
+    -- we furthermore check that code1 can be split into the
+    -- statements producing the input for the redomap, and some
+    -- statements that are moved after it; see `processIndirections`.
     Just (code2'', tab_inv_stm) <-
-      foldl
-        (processIndirections (namesFromList arrs) res_red_var)
-        (Just (Seq.empty, M.empty))
-        code1,
+      processIndirections (namesFromList arrs) res_red_var (freeIn screma_stmt) code1,
     -- identify load_A, load_B
     tmp_stms <- mapMaybe (`M.lookup` tab_inv_stm) arrs,
     length tmp_stms == length arrs,
@@ -700,15 +706,19 @@ matchesBlkRegTile seg_space kstms
             )
 matchesBlkRegTile _ _ = Nothing
 
--- ceiled division expression
+-- | Round up to an odd number.  Shared memory strides are padded like
+-- this to avoid bank conflicts.
+oddUp :: TPrimExp Int64 VName -> TPrimExp Int64 VName
+oddUp x = 2 * (x `IE.quot` 2) + 1
+
+-- | Ceiled division expression.
 ceilDiv :: (MonadBuilder m) => SubExp -> SubExp -> m (Exp (Rep m))
-ceilDiv x y = pure $ BasicOp $ BinOp (SDivUp Int64 Unsafe) x y
+ceilDiv x y = pure $ BasicOp $ BinOp (SCeilDiv Int64 Unsafe) x y
 
 mkTileMemSizes ::
   SubExp ->
   SubExp ->
   SubExp ->
-  Bool ->
   Builder
     GPU
     ( SubExp,
@@ -723,17 +733,17 @@ mkTileMemSizes ::
       SubExp,
       SubExp
     )
-mkTileMemSizes height_A _width_B common_dim is_B_not_transp = do
+mkTileMemSizes height_A _width_B common_dim = do
   tk_name <- nameFromText . prettyText <$> newVName "Tk"
-  ty_name <- nameFromText . prettyText <$> newVName "Ty"
-  ry_name <- nameFromText . prettyText <$> newVName "Ry"
+  tx_name <- nameFromText . prettyText <$> newVName "Tx"
+  rx_name <- nameFromText . prettyText <$> newVName "Rx"
 
   -- until we change the copying to use lmads we need to
   --   guarantee that Tx=Ty AND Rx = Ry AND Tx | Tk
   -- for matrix multiplication it would be safe if they aren't
   --   but not for any of the other three cases!
-  (ty, ry) <- getParTiles ("Ty", "Ry") (ty_name, ry_name) height_A
-  let (tx, rx) = (ty, ry)
+  (tx, rx) <- getParTiles ("Tx", "Rx") (tx_name, rx_name) height_A
+  let (ty, ry) = (tx, rx)
   tk <- getSeqTile "Tk" tk_name common_dim tx ty
 
   tk_div_tx <- letSubExp "tk_div_tx" =<< ceilDiv tk tx
@@ -742,19 +752,16 @@ mkTileMemSizes height_A _width_B common_dim is_B_not_transp = do
   tx_rx <- letSubExp "TxRx" =<< toExp (pe64 tx * pe64 rx)
   ty_ry <- letSubExp "TyRy" =<< toExp (pe64 ty * pe64 ry)
 
-  -- let pad_term = sMax64 (pe64 tk) (pe64 ty * pe64 ry)
-  let pad_term =
-        if is_B_not_transp
-          then pe64 ty * pe64 ry
-          else pe64 se0
+  -- Large enough for either layout, including padding (see mk_ik).
   a_loc_sz <-
     letSubExp "a_loc_sz"
-      =<< toExp (pe64 ty * pe64 ry * pe64 tk)
-  -- if B is transposed, its shmem should be [tk][tx*rx]
-  -- we pad as above, by assuming tx*rx == ty*ry >= tk
+      =<< toExp (pe64 tx * oddUp (pe64 rx * pe64 tk))
   b_loc_sz <-
     letSubExp "b_loc_sz"
-      =<< toExp (pe64 tx * pe64 rx * pe64 tk + pad_term)
+      =<< toExp
+        ( pe64 ty
+            * sMax64 (oddUp (pe64 ry * pe64 tk)) (oddUp (pe64 ry) * pe64 tk)
+        )
   pure (rx, ry, tx, ty, tk, tk_div_tx, tk_div_ty, tx_rx, ty_ry, a_loc_sz, b_loc_sz)
 
 mkNewSegthdLvl ::
@@ -764,14 +771,14 @@ mkNewSegthdLvl ::
   Builder GPU (SubExp, SubExp, SegLevel)
 mkNewSegthdLvl tx ty grid_pexp = do
   grid_size <- letSubExp "grid_size" =<< toExp grid_pexp
-  tblock_size <- letSubExp "tblock_size" =<< toExp (pe64 ty * pe64 tx)
+  tblock_size <- letSubExp "tblock_size" =<< toExp (pe64 tx * pe64 ty)
   let segthd_lvl = SegThreadInBlock (SegNoVirtFull (SegSeqDims []))
   pure (grid_size, tblock_size, segthd_lvl)
 
 mkGidsXYF :: Builder GPU (VName, VName, VName)
 mkGidsXYF = do
-  gid_y <- newVName "gid_y"
   gid_x <- newVName "gid_x"
+  gid_y <- newVName "gid_y"
   gid_flat <- newVName "gid_flat"
   pure (gid_x, gid_y, gid_flat)
 
@@ -787,10 +794,10 @@ initRegShmem
   segthd_lvl
   red_ne = do
     -- initialize register mem with neutral elements.
-    cssss_list <- segMap2D "cssss" segthd_lvl ResultPrivate (ty, tx) $ \_ -> do
-      css_init <- scratch "css_init" red_t [ry, rx]
-      css <- forLoop ry [css_init] $ \i [css_merge] -> do
-        css' <- forLoop rx [css_merge] $ \j [css_merge'] -> do
+    cssss_list <- segMap2D "cssss" segthd_lvl ResultPrivate (tx, ty) $ \_ -> do
+      css_init <- scratch "css_init" red_t [rx, ry]
+      css <- forLoop rx [css_init] $ \i [css_merge] -> do
+        css' <- forLoop ry [css_merge] $ \j [css_merge'] -> do
           css'' <- update "css" css_merge' [i, j] red_ne
           resultBodyM [Var css'']
         resultBodyM [Var css']
@@ -807,9 +814,9 @@ getThdRedomapRes ::
   (VName, VName, VName) ->
   Builder GPU (VName, VName, VName)
 getThdRedomapRes (rx, ry) (ltid_x, ltid_y) (iii, jjj, redomap_res) = do
-  css <- index "redomap_thd" redomap_res [ltid_y, ltid_x]
-  ii <- letExp "ii" =<< toExp (le64 iii + le64 ltid_y * pe64 ry)
-  jj <- letExp "jj" =<< toExp (le64 jjj + le64 ltid_x * pe64 rx)
+  css <- index "redomap_thd" redomap_res [ltid_x, ltid_y]
+  ii <- letExp "ii" =<< toExp (le64 iii + le64 ltid_x * pe64 rx)
+  jj <- letExp "jj" =<< toExp (le64 jjj + le64 ltid_y * pe64 ry)
   pure (css, ii, jj)
 
 prereqAddCode2 ::
@@ -821,8 +828,8 @@ prereqAddCode2 (gtid_x, gtid_y) (ii, i, jj, j) (css, redomap_orig_res) = do
   c <- index "redomap_elm" css [i, j]
   cpy_stm <- mkLetNamesM [redomap_orig_res] $ BasicOp $ SubExp $ Var c
   addStm cpy_stm
-  letBindNames [gtid_y] =<< toExp (le64 ii + le64 i)
-  letBindNames [gtid_x] =<< toExp (le64 jj + le64 j)
+  letBindNames [gtid_x] =<< toExp (le64 ii + le64 i)
+  letBindNames [gtid_y] =<< toExp (le64 jj + le64 j)
 
 -- | Tries to identify the following pattern:
 --   code followed by some Screma followed by more code.
@@ -879,24 +886,43 @@ isInvarTo1of2InnerDims branch_variant kspace variance arrs =
                 then Just 1
                 else Nothing
 
+-- | Split the statements preceding the redomap into
+--
+-- 1. the slices that produce the input arrays of the redomap, each
+--    preceded by the scalar statements computing its indices (these
+--    are re-executed when reading tiles), and
+--
+-- 2. the remaining statements, which are moved after the redomap.
+--    Except for those computing slice indices, the redomap must not
+--    depend on these.
 processIndirections ::
   Names -> -- input arrays to redomap
   Names -> -- variables on which the result of redomap depends on.
-  Maybe (Stms GPU, M.Map VName (Stm GPU)) ->
-  Stm GPU ->
-  Maybe (Stms GPU, M.Map VName (Stm GPU))
-processIndirections arrs _ acc stm@(Let patt _ (BasicOp (Index _ _)))
-  | Just (ss, tab) <- acc,
-    [p] <- patElems patt,
-    p_nm <- patElemName p,
-    p_nm `nameIn` arrs =
-      Just (ss, M.insert p_nm stm tab)
-processIndirections _ res_red_var acc stm'@(Let patt _ _)
-  | Just (ss, tab) <- acc,
-    ps <- patElems patt,
-    all (\p -> patElemName p `notNameIn` res_red_var) ps =
-      Just (ss Seq.|> stm', tab)
-  | otherwise = Nothing
+  Names -> -- free variables of the redomap
+  Stms GPU ->
+  Maybe (Stms GPU, M.Map VName (Stms GPU))
+processIndirections arrs res_red_var red_free code1 = do
+  let (loads, rest) = Seq.partition isLoad code1
+      withDeps stm = dependencies rest stm Seq.|> stm
+      deps = foldMap (dependencies rest) loads
+  guard $ all isScalarBasicOp deps
+  guard $ not $ boundByStms deps `namesIntersect` red_free
+  guard $ not $ (boundByStms rest `namesSubtract` boundByStms deps) `namesIntersect` res_red_var
+  pure (rest, M.fromList [(v, withDeps stm) | stm <- stmsToList loads, v <- patNames $ stmPat stm])
+  where
+    isLoad (Let (Pat [pe]) _ (BasicOp Index {})) = patElemName pe `nameIn` arrs
+    isLoad _ = False
+    isScalarBasicOp (Let pat _ BasicOp {}) = all primType $ patTypes pat
+    isScalarBasicOp _ = False
+
+-- | The statements among the given ones that the statement
+-- transitively depends on.
+dependencies :: Stms GPU -> Stm GPU -> Stms GPU
+dependencies stms stm = snd $ foldr f (freeIn stm, mempty) stms
+  where
+    f s (needed, deps)
+      | boundByStm s `namesIntersect` needed = (needed <> freeIn s, s Seq.<| deps)
+      | otherwise = (needed, deps)
 
 getParTiles :: (Name, Name) -> (Name, Name) -> SubExp -> Builder GPU (SubExp, SubExp)
 getParTiles (t_str, r_str) (t_name, r_name) len_dim =
@@ -912,9 +938,11 @@ getParTiles (t_str, r_str) (t_name, r_name) len_dim =
       r <- letSubExp r_str $ Op $ SizeOp $ GetSize r_name SizeRegTile
       pure (t, r)
 
+-- | The sequential tile size. It is rounded up to a multiple of @tx@, as the
+-- tile loops assume that @tx@ divides it.
 getSeqTile :: Name -> Name -> SubExp -> SubExp -> SubExp -> Builder GPU SubExp
-getSeqTile tk_str tk_name len_dim tx ty =
-  case (tx, ty) of
+getSeqTile tk_str tk_name len_dim tx ty = do
+  tk <- case (tx, ty) of
     (Constant (IntValue (Int64Value v_x)), Constant (IntValue (Int64Value v_y))) ->
       letSubExp tk_str . BasicOp . SubExp . constant $
         case len_dim of
@@ -922,6 +950,8 @@ getSeqTile tk_str tk_name len_dim tx ty =
           _ -> min v_x v_y
     _ ->
       letSubExp tk_str $ Op $ SizeOp $ GetSize tk_name SizeTile
+  tk_div_tx <- letSubExp "tk_div_tx" =<< ceilDiv tk tx
+  letSubExp tk_str =<< toExp (pe64 tk_div_tx * pe64 tx)
 
 ----------------------------------------------------------------------------------------------
 --- 3D Tiling (RegTiling for the outermost dimension & Block tiling for the innermost two) ---
@@ -990,9 +1020,7 @@ isInvarTo2of3InnerDims branch_variant kspace variance arrs =
 --              to exactly one of the three innermost-parallel dimension
 --              of the kernel. This condition can be relaxed by interchanging
 --              kernel dimensions whenever possible.
---     3. For scalar-code-1:
---          a) each of the statements is a slice that produces one of the
---             streamed arrays
+--     3. For scalar-code-1: see `processIndirections`.
 --
 -- mmBlkRegTiling :: Stm GPU -> TileM (Maybe (Stms GPU, Stm GPU))
 -- mmBlkRegTiling (Let pat aux (Op (SegOp (SegMap SegThread{} seg_space ts old_kbody))))
@@ -1005,7 +1033,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
     variance <- varianceInStms initial_variance kstms,
     -- we get the global-thread id for the two inner dimensions,
     --   as we are probably going to use it in code generation
-    (gtid_x, d_Kx) : (gtid_y, d_Ky) : (gtid_z, d_M) : rem_outer_dims_rev <- reverse $ unSegSpace space,
+    (gtid_z, d_Kz) : (gtid_y, d_Ky) : (gtid_x, d_Kx) : rem_outer_dims_rev <- reverse $ unSegSpace space,
     rem_outer_dims <- reverse rem_outer_dims_rev,
     -- check that the code fits the pattern having:
     -- some `code1`, followed by one Screma SOAC, followed by some `code2`
@@ -1031,57 +1059,52 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
     res_red_var <- -- variance of the reduce result
       mconcat $ mapMaybe ((`M.lookup` variance) . patElemName) redomap_orig_res,
     mempty /= res_red_var,
-    -- we furthermore check that code1 is only formed by
-    -- 1. statements that slice some globally-declared arrays
-    --    to produce the input for the redomap, and
-    -- 2. potentially some statements on which the redomap
-    --    is independent; these are recorded in `code2''`
+    -- we furthermore check that code1 can be split into the
+    -- statements producing the input for the redomap, and some
+    -- statements that are moved after it; see `processIndirections`.
     Just (code2'', arr_tab0) <-
-      foldl
-        (processIndirections (namesFromList inp_soac_arrs) res_red_var)
-        (Just (Seq.empty, M.empty))
-        code1,
+      processIndirections (namesFromList inp_soac_arrs) res_red_var (freeIn screma_stmt) code1,
     -- check that code1 contains exacly one slice for each of the input array to redomap
     tmp_stms <- mapMaybe (`M.lookup` arr_tab0) inp_soac_arrs,
     length tmp_stms == length inp_soac_arrs,
     -- code1' <- stmsFromList $ stmsToList code1 \\ stmsToList code2'',
     code2' <- code2'' <> code2,
-    -- we assume the kernel results are variant to the thrid-outer parallel dimension
-    -- (for sanity sake, they should be)
+    -- we assume the kernel results are variant to the outermost of the three
+    -- innermost parallel dimensions (for sanity sake, they should be)
     ker_res_nms <- mapMaybe getResNm kres,
     length ker_res_nms == length kres,
     all primType kertp,
-    all (variantToDim variance gtid_z) ker_res_nms = do
+    all (variantToDim variance gtid_x) ker_res_nms = do
       -- HERE STARTS THE IMPLEMENTATION:
       (new_kernel, host_stms) <- runBuilder $ do
         -- host code
-        -- process the z-variant arrays that need transposition;
+        -- process the x-variant arrays that need transposition;
         -- these "manifest" statements should come before the kernel
         (tab_inn, tab_out) <-
           foldM
-            (insertTranspose variance (gtid_z, d_M))
+            (insertTranspose variance (gtid_x, d_Kx))
             (M.empty, M.empty)
             $ M.toList arr_tab0
 
-        tx_name <- nameFromText . prettyText <$> newVName "Tx"
+        tz_name <- nameFromText . prettyText <$> newVName "Tz"
         ty_name <- nameFromText . prettyText <$> newVName "Ty"
 
-        tx0 <- letSubExp "Tx" $ Op $ SizeOp $ GetSize tx_name SizeTile
+        tz0 <- letSubExp "Tz" $ Op $ SizeOp $ GetSize tz_name SizeTile
         ty0 <- letSubExp "Ty" $ Op $ SizeOp $ GetSize ty_name SizeTile
+        tz <- limitTile "Tz" tz0 d_Kz
         ty <- limitTile "Ty" ty0 d_Ky
-        tx <- limitTile "Tx" tx0 d_Kx
-        let rz = reg_tile_se
+        let rx = reg_tile_se
 
-        gridDim_x <- letSubExp "gridDim_x" =<< ceilDiv d_Kx tx
+        gridDim_z <- letSubExp "gridDim_z" =<< ceilDiv d_Kz tz
         gridDim_y <- letSubExp "gridDim_y" =<< ceilDiv d_Ky ty
-        gridDim_z <- letSubExp "gridDim_z" =<< ceilDiv d_M rz
-        let gridxyz_pexp = pe64 gridDim_z * pe64 gridDim_y * pe64 gridDim_x
+        gridDim_x <- letSubExp "gridDim_x" =<< ceilDiv d_Kx rx
+        let gridxyz_pexp = pe64 gridDim_x * pe64 gridDim_y * pe64 gridDim_z
         let grid_pexp = product $ gridxyz_pexp : map (pe64 . snd) rem_outer_dims_rev
         grid_size <- letSubExp "grid_size_tile3d" =<< toExp grid_pexp
-        tblock_size <- letSubExp "tblock_size_tile3d" =<< toExp (pe64 ty * pe64 tx)
+        tblock_size <- letSubExp "tblock_size_tile3d" =<< toExp (pe64 ty * pe64 tz)
         let segthd_lvl = SegThreadInBlock (SegNoVirtFull (SegSeqDims []))
 
-        count_shmem <- letSubExp "count_shmem" =<< ceilDiv rz tblock_size
+        count_shmem <- letSubExp "count_shmem" =<< ceilDiv rx tblock_size
 
         gid_x <- newVName "gid_x"
         gid_y <- newVName "gid_y"
@@ -1090,15 +1113,15 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
 
         ---- in this binder: outer seggroup ----
         (ret_seggroup, stms_seggroup) <- runBuilder $ do
-          ii <- letExp "ii" =<< toExp (le64 gid_z * pe64 rz)
+          ii <- letExp "ii" =<< toExp (le64 gid_x * pe64 rx)
           jj1 <- letExp "jj1" =<< toExp (le64 gid_y * pe64 ty)
-          jj2 <- letExp "jj2" =<< toExp (le64 gid_x * pe64 tx)
+          jj2 <- letExp "jj2" =<< toExp (le64 gid_z * pe64 tz)
 
           -- initialize the register arrays corresponding to the result of redomap;
-          reg_arr_nms <- segMap2D "res" segthd_lvl ResultPrivate (ty, tx) $ \_ ->
+          reg_arr_nms <- segMap2D "res" segthd_lvl ResultPrivate (ty, tz) $ \_ ->
             forM (zip red_nes red_res_tps) $ \(red_ne, red_t) -> do
-              css_init <- scratch "res_init" (elemType red_t) [rz]
-              css <- forLoop rz [css_init] $ \i [css_merge] -> do
+              css_init <- scratch "res_init" (elemType red_t) [rx]
+              css <- forLoop rx [css_init] $ \i [css_merge] -> do
                 css' <- update "css" css_merge [i] red_ne
                 resultBodyM [Var css']
               pure $ varRes css
@@ -1106,7 +1129,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
           -- scratch the shared-memory arrays corresponding to the arrays that are
           --   input to the redomap and are invariant to the outermost parallel dimension.
           loc_arr_nms <- forM (M.toList tab_out) $ \(nm, (ptp, _)) ->
-            scratch (baseName nm <> "_loc") ptp [rz]
+            scratch (baseName nm <> "_loc") ptp [rx]
 
           prologue_res_list <-
             forLoop' common_dim (reg_arr_nms ++ loc_arr_nms) $
@@ -1126,14 +1149,14 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                           body <- runBodyBuilder $ do
                             offs <- letExp "offs" =<< toExp (pe64 tblock_size * le64 tt)
                             loc_ind <- letExp "loc_ind" =<< toExp (le64 ltid + le64 offs)
-                            letBindNames [gtid_z] =<< toExp (le64 ii + le64 loc_ind)
-                            let glb_ind = gtid_z
+                            letBindNames [gtid_x] =<< toExp (le64 ii + le64 loc_ind)
+                            let glb_ind = gtid_x
                             y_elm <-
                               letSubExp "y_elem"
                                 =<< eIf
-                                  (toExp $ le64 glb_ind .<. pe64 d_M)
+                                  (toExp $ le64 glb_ind .<. pe64 d_Kx)
                                   ( do
-                                      addStm load_Y
+                                      addStms load_Y
                                       res <- index "Y_elem" glb_Y_nm [q]
                                       resultBodyM [Var res]
                                   )
@@ -1141,7 +1164,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                             y_ind <-
                               letSubExp "y_loc_ind"
                                 =<< eIf
-                                  (toExp $ le64 loc_ind .<. pe64 rz)
+                                  (toExp $ le64 loc_ind .<. pe64 rx)
                                   (toExp loc_ind >>= letTupExp' "loc_fi" >>= resultBodyM)
                                   (eBody [pure $ BasicOp $ SubExp $ intConst Int64 (-1)])
                             acc' <- letExp (baseName acc) $ BasicOp $ UpdateAcc Safe acc [y_ind] [y_elm]
@@ -1155,34 +1178,34 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                     resultBodyM $ map Var loc_arr_merge2_nms'
 
                 redomap_res <-
-                  segMap2D "redomap_res" segthd_lvl ResultPrivate (ty, tx) $
-                    \(ltid_y, ltid_x) -> do
+                  segMap2D "redomap_res" segthd_lvl ResultPrivate (ty, tz) $
+                    \(ltid_y, ltid_z) -> do
                       letBindNames [gtid_y] =<< toExp (le64 jj1 + le64 ltid_y)
-                      letBindNames [gtid_x] =<< toExp (le64 jj2 + le64 ltid_x)
+                      letBindNames [gtid_z] =<< toExp (le64 jj2 + le64 ltid_z)
                       reg_arr_merge_nms_slc <- forM reg_arr_merge_nms $ \reg_arr_nm ->
-                        index "res_reg_slc" reg_arr_nm [ltid_y, ltid_x]
+                        index "res_reg_slc" reg_arr_nm [ltid_y, ltid_z]
                       fmap subExpsRes . letTupExp' "redomap_guarded"
                         =<< eIf
-                          (toExp $ le64 gtid_y .<. pe64 d_Ky .&&. le64 gtid_x .<. pe64 d_Kx)
+                          (toExp $ le64 gtid_y .<. pe64 d_Ky .&&. le64 gtid_z .<. pe64 d_Kz)
                           ( do
                               inp_scals_invar_outer <-
                                 forM (M.toList tab_inn) $ \(inp_arr_nm, load_stm) -> do
-                                  addStm load_stm
+                                  addStms load_stm
                                   index (baseName inp_arr_nm) inp_arr_nm [q]
                               -- build the loop of count R whose body is semantically the redomap code
                               reg_arr_merge_nms' <-
-                                forLoop' rz reg_arr_merge_nms_slc $ \i reg_arr_mm_nms -> do
-                                  letBindNames [gtid_z] =<< toExp (le64 ii + le64 i)
+                                forLoop' rx reg_arr_merge_nms_slc $ \i reg_arr_mm_nms -> do
+                                  letBindNames [gtid_x] =<< toExp (le64 ii + le64 i)
                                   resultBodyM
                                     =<< letTupExp' "redomap_lam"
                                     =<< eIf
-                                      (toExp $ le64 gtid_z .<. pe64 d_M)
+                                      (toExp $ le64 gtid_x .<. pe64 d_Kx)
                                       ( do
                                           -- read from shared memory
                                           ys <- forM loc_arr_nms' $ \loc_arr_nm ->
-                                            index "inp_reg_var2z" loc_arr_nm [i]
+                                            index "inp_reg_var2x" loc_arr_nm [i]
                                           cs <- forM reg_arr_mm_nms $ \reg_arr_nm ->
-                                            index "res_reg_var2z" reg_arr_nm [i]
+                                            index "res_reg_var2x" reg_arr_nm [i]
                                           -- here we need to put in order the scalar inputs to map:
                                           let tab_scals =
                                                 M.fromList $
@@ -1207,33 +1230,33 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                 resultBodyM $ map Var $ redomap_res ++ loc_arr_nms'
 
           -- support for non-empty code2'
-          --  segmap (ltid_y < ty, ltid_x < tx) {
-          --    for i < rz do
-          --        res = if (ii+i < d_M && jj1+ltid_y < d_Ky && jj2 + ltid_x < d_Kx)
+          --  segmap (ltid_y < ty, ltid_z < tz) {
+          --    for i < rx do
+          --        res = if (ii+i < d_Kx && jj1+ltid_y < d_Ky && jj2 + ltid_z < d_Kz)
           --              then code2' else dummy
           --        final_res[i] = res
           let redomap_res = take (length red_nes) prologue_res_list
           epilogue_res <-
             if length redomap_orig_res == length ker_res_nms
               && ker_res_nms == map patElemName redomap_orig_res
-              then segMap3D "rssss" segthd_lvl ResultPrivate (se1, ty, tx) $ \(_ltid_z, ltid_y, ltid_x) ->
+              then segMap3D "rssss" segthd_lvl ResultPrivate (se1, ty, tz) $ \(_ltid_x, ltid_y, ltid_z) ->
                 forM (zip kertp redomap_res) $ \(res_tp, res) -> do
-                  rss_init <- scratch "rss_init" (elemType res_tp) [rz, se1, se1]
+                  rss_init <- scratch "rss_init" (elemType res_tp) [rx, se1, se1]
                   fmap varRes $
-                    forLoop rz [rss_init] $ \i [rss] -> do
+                    forLoop rx [rss_init] $ \i [rss] -> do
                       let slice = Slice [DimFix $ Var i, DimFix se0, DimFix se0]
-                      thread_res <- index "thread_res" res [ltid_y, ltid_x, i]
+                      thread_res <- index "thread_res" res [ltid_y, ltid_z, i]
                       rss' <- letSubExp "rss" $ BasicOp $ Update Unsafe rss slice $ Var thread_res
                       resultBodyM [rss']
-              else segMap3D "rssss" segthd_lvl ResultPrivate (se1, ty, tx) $ \(_ltid_z, ltid_y, ltid_x) -> do
+              else segMap3D "rssss" segthd_lvl ResultPrivate (se1, ty, tz) $ \(_ltid_x, ltid_y, ltid_z) -> do
                 letBindNames [gtid_y] =<< toExp (le64 jj1 + le64 ltid_y)
-                letBindNames [gtid_x] =<< toExp (le64 jj2 + le64 ltid_x)
+                letBindNames [gtid_z] =<< toExp (le64 jj2 + le64 ltid_z)
                 rss_init <- forM kertp $ \res_tp ->
-                  scratch "rss_init" (elemType res_tp) [rz, se1, se1]
-                rss <- forLoop' rz rss_init $ \i rss_merge -> do
-                  letBindNames [gtid_z] =<< toExp (le64 ii + le64 i)
+                  scratch "rss_init" (elemType res_tp) [rx, se1, se1]
+                rss <- forLoop' rx rss_init $ \i rss_merge -> do
+                  letBindNames [gtid_x] =<< toExp (le64 ii + le64 i)
                   forM_ (zip redomap_orig_res redomap_res) $ \(o_res, n_res) -> do
-                    c <- index "redomap_thd" n_res [ltid_y, ltid_x, i]
+                    c <- index "redomap_thd" n_res [ltid_y, ltid_z, i]
                     letBindNames [patElemName o_res] =<< toExp (le64 c)
                     pure c
                   res_els <-
@@ -1242,10 +1265,10 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                         ( toExp $
                             le64 gtid_y
                               .<. pe64 d_Ky
+                              .&&. le64 gtid_z
+                              .<. pe64 d_Kz
                               .&&. le64 gtid_x
                               .<. pe64 d_Kx
-                              .&&. le64 gtid_z
-                              .<. pe64 d_M
                         )
                         ( do
                             addStms code2'
@@ -1263,7 +1286,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
           ----------------------------------------------------------------
           let regtile_ret_dims =
                 map (\(_, sz) -> (sz, se1, se1)) rem_outer_dims
-                  ++ [(d_M, se1, rz), (d_Ky, ty, se1), (d_Kx, tx, se1)]
+                  ++ [(d_Kx, se1, rx), (d_Ky, ty, se1), (d_Kz, tz, se1)]
 
           epilogue_res' <- forM epilogue_res $ \res ->
             if null rem_outer_dims
@@ -1281,7 +1304,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
         -- END (ret_seggroup, stms_seggroup) <- runBuilder $ do
         let grid = KernelGrid (Count grid_size) (Count tblock_size)
             level' = SegBlock SegNoVirt (Just grid)
-            space' = SegSpace gid_flat (rem_outer_dims ++ [(gid_z, gridDim_z), (gid_y, gridDim_y), (gid_x, gridDim_x)])
+            space' = SegSpace gid_flat (rem_outer_dims ++ [(gid_x, gridDim_x), (gid_y, gridDim_y), (gid_z, gridDim_z)])
             kbody' = Body () stms_seggroup ret_seggroup
 
         pure $ Let pat aux $ Op $ SegOp $ SegMap level' space' kertp kbody'
@@ -1296,15 +1319,16 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
     insertTranspose ::
       VarianceTable ->
       (VName, SubExp) ->
-      (M.Map VName (Stm GPU), M.Map VName (PrimType, Stm GPU)) ->
-      (VName, Stm GPU) ->
-      Builder GPU (M.Map VName (Stm GPU), M.Map VName (PrimType, Stm GPU))
-    insertTranspose variance (gidz, _) (tab_inn, tab_out) (p_nm, stm@(Let patt yy (BasicOp (Index arr_nm slc))))
-      | [p] <- patElems patt,
+      (M.Map VName (Stms GPU), M.Map VName (PrimType, Stms GPU)) ->
+      (VName, Stms GPU) ->
+      Builder GPU (M.Map VName (Stms GPU), M.Map VName (PrimType, Stms GPU))
+    insertTranspose variance (gidz, _) (tab_inn, tab_out) (p_nm, stms)
+      | Just (deps, Let patt yy (BasicOp (Index arr_nm slc))) <- stmsLast stms,
+        [p] <- patElems patt,
         ptp <- elemType $ patElemType p,
         p_nm == patElemName p =
           case L.findIndices (variantSliceDim variance gidz) (unSlice slc) of
-            [] -> pure (M.insert p_nm stm tab_inn, tab_out)
+            [] -> pure (M.insert p_nm stms tab_inn, tab_out)
             i : _ -> do
               arr_tp <- lookupType arr_nm
               let perm = [i + 1 .. arrayRank arr_tp - 1] ++ [0 .. i]
@@ -1312,7 +1336,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
               arr_tr_nm <- letExp arr_tr_str $ BasicOp $ Manifest arr_nm perm
               let e_ind' = BasicOp $ Index arr_tr_nm slc
               let stm' = Let patt yy e_ind'
-              pure (tab_inn, M.insert p_nm (ptp, stm') tab_out)
+              pure (tab_inn, M.insert p_nm (ptp, deps Seq.|> stm') tab_out)
     insertTranspose _ _ _ _ = error "\nUnreachable case reached in insertTranspose case, doRegTiling3D\n"
 
     variantSliceDim :: VarianceTable -> VName -> DimIndex SubExp -> Bool

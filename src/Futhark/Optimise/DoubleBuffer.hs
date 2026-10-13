@@ -33,7 +33,7 @@
 -- array is always stored in the "first" memory block at the beginning
 -- of the loop (and also in the final result).  We do need to add an
 -- extra element to the pattern, however.  The initial copy of @A@
--- could be elided if @A@ is unique (thus @A_in_mem=A_mem@).  This is
+-- could be elided if @A@ is consuming (thus @A_in_mem=A_mem@).  This is
 -- because only then is it safe to use @A_mem@ to store loop results.
 -- We don't currently do this.
 --
@@ -149,9 +149,12 @@ optimiseStm (Let pat aux e) = do
           mapOnOp = onOp
         }
 
+optLoops :: (Constraints rep inner) => DoubleBufferM rep m -> DoubleBufferM rep m
+optLoops = local $ \env -> env {envOptimiseLoop = optimiseLoop}
+
 optimiseGPUOp :: OptimiseOp GPUMem
 optimiseGPUOp (Inner (SegOp op)) =
-  local inSegOp $ Inner . SegOp <$> mapSegOpM mapper op
+  optLoops $ Inner . SegOp <$> mapSegOpM mapper op
   where
     mapper =
       identitySegOpMapper
@@ -159,12 +162,13 @@ optimiseGPUOp (Inner (SegOp op)) =
           mapOnSegPostOpLambda = optimiseLambda,
           mapOnSegOpBody = optimiseKernelBody
         }
-    inSegOp env = env {envOptimiseLoop = optimiseLoop}
+optimiseGPUOp (Inner (GPUBody ts body)) =
+  optLoops $ Inner . GPUBody ts <$> optimiseBody body
 optimiseGPUOp op = pure op
 
 optimiseMCOp :: OptimiseOp MCMem
 optimiseMCOp (Inner (ParOp par_op op)) =
-  local inSegOp $
+  optLoops $
     Inner
       <$> (ParOp <$> traverse (mapSegOpM mapper) par_op <*> mapSegOpM mapper op)
   where
@@ -174,7 +178,6 @@ optimiseMCOp (Inner (ParOp par_op op)) =
           mapOnSegPostOpLambda = optimiseLambda,
           mapOnSegOpBody = optimiseKernelBody
         }
-    inSegOp env = env {envOptimiseLoop = optimiseLoop}
 optimiseMCOp op = pure op
 
 optimiseKernelBody ::
@@ -286,17 +289,17 @@ optimiseLoop (Pat pes) merge body@(Body _ body_stms body_res) = do
           -- the same index function as the result.
           arr_v_copy <- newVName $ baseName arr_v <> "_db_copy"
           let arr_initial_info =
-                MemArray pt shape NoUniqueness $ ArrayIn arr_mem_in arr_lmad
+                MemArray pt shape NoMode $ ArrayIn arr_mem_in arr_lmad
               arr_initial_pe =
                 PatElem arr_v_copy arr_initial_info
           addStm . Let (Pat [arr_initial_pe]) (defAux ()) . BasicOp $
             Replicate mempty (Var arr_param_initial)
-          -- AS a trick we must make the array parameter Unique to
+          -- AS a trick we must make the array parameter Consume to
           -- avoid unfortunate hoisting (see #1533) because we are
           -- invalidating the underlying memory.
           let arr_param' =
                 Param mempty (paramName arr_param) $
-                  MemArray pt shape Unique (ArrayIn (paramName param) param_lmad)
+                  MemArray pt shape Consume (ArrayIn (paramName param) param_lmad)
 
           -- We must also update the initial values of the parameters
           -- used in the index function of this array parameter, such

@@ -34,14 +34,15 @@ import Futhark.CLI.Python qualified as Python
 import Futhark.CLI.Query qualified as Query
 import Futhark.CLI.REPL qualified as REPL
 import Futhark.CLI.Run qualified as Run
-import Futhark.CLI.Script qualified as Script
 import Futhark.CLI.Test qualified as Test
 import Futhark.CLI.WASM qualified as WASM
 import Futhark.CLI.WebGPU qualified as WebGPU
 import Futhark.Error
 import Futhark.Util (maxinum, showText)
 import Futhark.Util.Options
-import GHC.IO.Encoding (setLocaleEncoding)
+import GHC.IO.Encoding (setFileSystemEncoding, setForeignEncoding, setLocaleEncoding)
+import GHC.IO.Encoding.Failure (CodingFailureMode (RoundtripFailure))
+import GHC.IO.Encoding.UTF8 (mkUTF8)
 import GHC.IO.Exception (IOErrorType (..), IOException (..))
 import System.Environment
 import System.Exit
@@ -84,7 +85,6 @@ commands =
       ("defs", (Defs.main, "Show location and name of all definitions.")),
       ("query", (Query.main, "Query semantic information about program.")),
       ("literate", (Literate.main, "Process a literate Futhark program.")),
-      ("script", (Script.main, "Run FutharkScript expressions.")),
       ("lsp", (LSP.main, "Run LSP server.")),
       ("thanks", (Misc.mainThanks, "Express gratitude.")),
       ("tokens", (Misc.mainTokens, "Print tokens from Futhark file.")),
@@ -152,6 +152,10 @@ main = reportingIOErrors $ do
   hSetEncoding stdout utf8
   hSetEncoding stderr utf8
   setLocaleEncoding utf8
+  -- RoundtripFailure means file names that are not valid UTF-8 survive a
+  -- decode/encode cycle unharmed.
+  setFileSystemEncoding $ mkUTF8 RoundtripFailure
+  setForeignEncoding $ mkUTF8 RoundtripFailure
   args <- getArgs
   prog <- getProgName
   case args of

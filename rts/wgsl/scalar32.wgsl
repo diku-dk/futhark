@@ -16,7 +16,7 @@ fn udiv_i32(a: i32, b: i32) -> i32 {
   return bitcast<i32>(bitcast<u32>(a) / bitcast<u32>(b));
 }
 
-fn udiv_up_i32(a_s: i32, b_s: i32) -> i32 {
+fn uceil_div_i32(a_s: i32, b_s: i32) -> i32 {
   let a = bitcast<u32>(a_s);
   let b = bitcast<u32>(b_s);
   return bitcast<i32>((a + b - 1) / b);
@@ -29,7 +29,7 @@ fn sdiv_i32(a: i32, b: i32) -> i32 {
   return q;
 }
 
-fn sdiv_up_i32(a: i32, b: i32) -> i32 {
+fn sceil_div_i32(a: i32, b: i32) -> i32 {
   return sdiv_i32(a + b - 1, b);
 }
 
@@ -70,10 +70,10 @@ fn pow_i32(a_p: i32, b: i32) -> i32 {
 
   while rem != 0 {
     if (rem & 1) != 0 {
-      res = res * a;  
-	}
-	rem = rem >> 1;
-	a = a * a;
+      res = res * a;
+        }
+        rem = rem >> 1;
+        a = a * a;
   }
 
   return res;

@@ -132,8 +132,8 @@ analyseExp aliases e = mapExp analyse e
 analyseLambda ::
   (AliasableRep rep) =>
   AliasTable ->
-  Lambda rep ->
-  Lambda (Aliases rep)
+  GLambda rep t ->
+  GLambda (Aliases rep) t
 analyseLambda aliases lam =
   let body = analyseBody aliases $ lambdaBody lam
    in lam

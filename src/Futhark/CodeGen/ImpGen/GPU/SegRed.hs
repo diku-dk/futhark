@@ -56,18 +56,17 @@ module Futhark.CodeGen.ImpGen.GPU.SegRed
 where
 
 import Control.Monad
-import Data.List (genericLength, zip4)
+import Data.List (zip4)
 import Data.Map qualified as M
 import Data.Maybe
 import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.GPU.Base
-import Futhark.Error
 import Futhark.IR.GPUMem
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Transform.Rename
 import Futhark.Util (chunks, mapAccumLM)
-import Futhark.Util.IntegralExp (divUp, nextMul, quot, rem)
+import Futhark.Util.IntegralExp (ceilDiv, nextMul, quot, rem)
 import Prelude hiding (quot, rem)
 
 forM2_ :: (Monad m) => [a] -> [b] -> (a -> b -> m c) -> m ()
@@ -93,11 +92,6 @@ getRedChunkSize types = do
       mem_constraint = max k_mem sum_sizes `quot` max_size
       reg_constraint = (k_reg - 1 - sum_sizes') `quot` (2 * sum_sizes')
   untyped $ sMax64 1 $ sMin64 mem_constraint reg_constraint
-
--- | The maximum number of operators we support in a single SegRed.
--- This limit arises out of the static allocation of counters.
-maxNumOps :: Int
-maxNumOps = 20
 
 -- | Code generation for the body of the SegRed, taking a continuation
 -- for saving the results of the body.  The results should be
@@ -161,28 +155,18 @@ compileSegRed' ::
   [SegBinOp GPUMem] ->
   DoSegBody ->
   CallKernelGen ()
-compileSegRed' pat grid space segbinops map_body_cont
-  | genericLength segbinops > maxNumOps =
-      compilerLimitationS $
-        ( "compileSegRed': at most "
-            <> show maxNumOps
-            <> " reduction operators are supported,\nbut found kernel with "
-            <> show (length segbinops)
-            <> ".\n"
-        )
-          <> ("Pattern: " <> prettyString pat)
-  | otherwise = do
-      chunk_v <- dPrimV "chunk_size" . isInt64 =<< kernelConstToExp chunk_const
-      case unSegSpace space of
-        [(_, Constant (IntValue (Int64Value 1))), _] ->
-          compileReduction (chunk_v, chunk_const) nonsegmentedReduction
-        _ -> do
-          let segment_size = pe64 $ last $ segSpaceDims space
-              use_small_segments = segment_size * 2 .<. pe64 (unCount tblock_size)
-          sIf
-            use_small_segments
-            (compileReduction (chunk_v, chunk_const) smallSegmentsReduction)
-            (compileReduction (chunk_v, chunk_const) largeSegmentsReduction)
+compileSegRed' pat grid space segbinops map_body_cont = do
+  chunk_v <- dPrimV "chunk_size" . isInt64 =<< kernelConstToExp chunk_const
+  case unSegSpace space of
+    [(_, Constant (IntValue (Int64Value 1))), _] ->
+      compileReduction (chunk_v, chunk_const) nonsegmentedReduction
+    _ -> do
+      let segment_size = pe64 $ last $ segSpaceDims space
+          use_small_segments = segment_size * 2 .<. pe64 (unCount tblock_size)
+      sIf
+        use_small_segments
+        (compileReduction (chunk_v, chunk_const) smallSegmentsReduction)
+        (compileReduction (chunk_v, chunk_const) largeSegmentsReduction)
   where
     compileReduction chunk f =
       f pat num_tblocks tblock_size chunk space segbinops map_body_cont
@@ -218,7 +202,7 @@ makeIntermArrays tblock_id tblock_size chunk segbinops
     all isPrimSegBinOp segbinops =
       noncommPrimSegRedInterms
   | otherwise =
-      generalSegRedInterms False tblock_id tblock_size segbinops
+      generalSegRedInterms tblock_id tblock_size segbinops
   where
     params = map paramOf segbinops
 
@@ -272,24 +256,18 @@ makeIntermArrays tblock_id tblock_size chunk segbinops
     forAccumLM2D acc ls f = mapAccumLM (mapAccumLM f) acc ls
 
 generalSegRedInterms ::
-  Bool ->
   Imp.TExp Int64 ->
   SubExp ->
   [SegBinOp GPUMem] ->
   InKernelGen [SegRedIntermediateArrays]
-generalSegRedInterms segmented tblock_id tblock_size segbinops =
+generalSegRedInterms tblock_id tblock_size segbinops =
   fmap (map GeneralSegRedInterms) . forM (map paramOf segbinops) . mapM $ \p ->
     case paramDec p of
-      MemArray pt shape _ (ArrayIn mem ixfun) -> do
+      MemArray pt shape _ (ArrayIn mem _) -> do
         let shape' = Shape [tblock_size] <> shape
         let shape_E = map pe64 $ shapeDims shape'
         sArray ("red_arr_" <> nameFromText (prettyText pt)) pt shape' mem $
-          -- This 'segmented' thing here is a hack, related to #2227.
-          -- There absolutely must be some unifying principle we are
-          -- missing.
-          if segmented
-            then ixfun
-            else LMAD.iota (tblock_id * product shape_E) shape_E
+          LMAD.iota (tblock_id * product shape_E) shape_E
       _ -> do
         let pt = elemType $ paramType p
             shape = Shape [tblock_size]
@@ -340,7 +318,7 @@ nonsegmentedReduction (Pat segred_pes) num_tblocks tblock_size (chunk_v, chunk_c
       global_tid = Imp.le64 $ segFlat space
       n = pe64 $ last dims
 
-  counters <- genZeroes "counters" maxNumOps
+  counters <- genZeroes "counters" $ length segbinops
 
   reds_block_res_arrs <- groupResultArrays num_tblocks_se tblock_size_se segbinops
 
@@ -364,7 +342,7 @@ nonsegmentedReduction (Pat segred_pes) num_tblocks tblock_size (chunk_v, chunk_c
     -- necessarily be 0.
     forM_ gtids $ \v -> dPrimV_ v (0 :: Imp.TExp Int64)
 
-    q <- dPrimVE "q" $ n `divUp` (sExt64 (kernelNumThreads constants) * chunk)
+    q <- dPrimVE "q" $ n `ceilDiv` (sExt64 (kernelNumThreads constants) * chunk)
 
     slugs <-
       mapM (segBinOpSlug ltid tblock_id) $
@@ -416,7 +394,7 @@ smallSegmentsReduction (Pat segred_pes) num_tblocks tblock_size _ space segbinop
   num_threads <- fmap tvSize $ dPrimV "num_threads" $ num_tblocks' * tblock_size'
   let num_segments = product $ init dims'
       segments_per_block = tblock_size' `quot` segment_size_nonzero
-      required_blocks = sExt32 $ num_segments `divUp` segments_per_block
+      required_blocks = sExt32 $ num_segments `ceilDiv` segments_per_block
 
   emit $ Imp.DebugPrint "# SegRed-small" Nothing
   emit $ Imp.DebugPrint "num_segments" $ Just $ untyped num_segments
@@ -426,10 +404,10 @@ smallSegmentsReduction (Pat segred_pes) num_tblocks tblock_size _ space segbinop
 
   sKernelThread "segred_small" (segFlat space) (defKernelAttrs num_tblocks tblock_size) $ do
     constants <- kernelConstants <$> askEnv
-    let tblock_id = kernelBlockSize constants
+    let tblock_id = kernelBlockId constants
         ltid = sExt64 $ kernelLocalThreadId constants
 
-    interms <- generalSegRedInterms True tblock_id tblock_size_se segbinops
+    interms <- generalSegRedInterms (sExt64 tblock_id) tblock_size_se segbinops
     let reds_arrs = map blockRedArrs interms
 
     -- We probably do not have enough actual threadblocks to cover the
@@ -449,10 +427,9 @@ smallSegmentsReduction (Pat segred_pes) num_tblocks tblock_size _ space segbinop
 
       let in_bounds =
             map_body_cont $ \red_res ->
-              sComment "save results to be reduced" $ do
-                let red_dests = map (,[ltid]) (concat reds_arrs)
-                forM2_ red_dests red_res $ \(d, d_is) (res, res_is) ->
-                  copyDWIMFix d d_is res res_is
+              sComment "save results to be reduced" $
+                forM2_ (concat reds_arrs) red_res $ \d (res, res_is) ->
+                  copyDWIMFix d [ltid] res res_is
           out_of_bounds =
             forM2_ segbinops reds_arrs $ \(SegBinOp _ _ nes _) red_arrs ->
               forM2_ red_arrs nes $ \arr ne ->
@@ -524,11 +501,11 @@ largeSegmentsReduction (Pat segred_pes) num_tblocks tblock_size (chunk_v, chunk_
 
   blocks_per_segment <-
     dPrimVE "blocks_per_segment" $
-      num_tblocks' `divUp` sMax64 1 num_segments
+      num_tblocks' `ceilDiv` sMax64 1 num_segments
 
   q <-
     dPrimVE "q" $
-      segment_size `divUp` (tblock_size' * blocks_per_segment * chunk)
+      segment_size `ceilDiv` (tblock_size' * blocks_per_segment * chunk)
 
   num_virtblocks <-
     dPrimV "num_virtblocks" $
@@ -558,8 +535,9 @@ largeSegmentsReduction (Pat segred_pes) num_tblocks tblock_size (chunk_v, chunk_
   -- anywhere?  There are other places in the compiler that will fail
   -- if the block count exceeds the maximum block size, which is at
   -- most 1024 anyway.
-  let num_counters = maxNumOps * 1024
-  counters <- genZeroes "counters" $ fromIntegral num_counters
+  let counters_per_op = 1024
+  counters <-
+    genZeroes "counters" $ fromIntegral $ length segbinops * counters_per_op
 
   let attrs =
         (defKernelAttrs num_tblocks tblock_size)
@@ -617,9 +595,9 @@ largeSegmentsReduction (Pat segred_pes) num_tblocks tblock_size (chunk_v, chunk_
             forM_ (zip4 segred_pess slugs new_lambdas [0 ..]) $
               \(pes, slug, new_lambda, i) -> do
                 let counter_idx =
-                      fromIntegral (i * num_counters)
+                      fromIntegral (i * counters_per_op)
                         + flat_segment_id
-                          `rem` fromIntegral num_counters
+                          `rem` fromIntegral counters_per_op
                 reductionStageTwo
                   pes
                   virttblock_id
@@ -1015,7 +993,7 @@ reductionStageTwo segred_pes tblock_id segment_gtids first_block_for_segment blo
       sComment "read in the per-block-results" $ do
         read_per_thread <-
           dPrimVE "read_per_thread" $
-            blocks_per_segment `divUp` sExt64 tblock_size
+            blocks_per_segment `ceilDiv` sExt64 tblock_size
 
         forM2_ acc_params nes $ \p ne ->
           copyDWIM (paramName p) [] ne []

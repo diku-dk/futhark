@@ -14,13 +14,15 @@ module Futhark.Transform.FirstOrderTransform
     transformLambda,
     transformSOAC,
     transformScrema,
+    transformFlatMap,
   )
 where
 
 import Control.Monad
 import Control.Monad.State
-import Data.List (find, zip4)
+import Data.List (find, uncons, zip4)
 import Data.Map.Strict qualified as M
+import Data.Maybe
 import Futhark.Analysis.Alias qualified as Alias
 import Futhark.IR qualified as AST
 import Futhark.IR.Prop.Aliases
@@ -88,7 +90,11 @@ transformStmRecursively ::
 transformStmRecursively (Let pat aux (Op soac)) =
   auxing aux $ transformSOAC pat =<< mapSOACM soacTransform soac
   where
-    soacTransform = identitySOACMapper {mapOnSOACLambda = transformLambda}
+    soacTransform =
+      identitySOACMapper
+        { mapOnSOACLambda = transformLambda,
+          mapOnSOACExtLambda = transformLambda
+        }
 transformStmRecursively (Let pat aux e) =
   auxing aux $ letBind pat =<< mapExpM transform e
   where
@@ -114,6 +120,194 @@ resultArray arrs ts = do
         letExp "result" =<< eBlank t
   mapM oneArray ts
 
+-- | Sequentialise a single FlatMap. The size of the nonuniform results produced
+-- by the lambda is not known until it has been run, so each of them is
+-- accumulated in a scratch buffer that is doubled whenever it runs out of
+-- space, and finally truncated to the actual size. The value results need no
+-- such treatment, as there is exactly one per iteration. The shape and offset
+-- arrays are filled in as we go, and the flag array is then a scatter of the
+-- segment starts.
+transformFlatMap ::
+  (Transformer m) =>
+  Pat (LetDec (Rep m)) ->
+  SubExp ->
+  [VName] ->
+  ExtLambda (Rep m) ->
+  m ()
+transformFlatMap pat w arrs lam = do
+  let irreg_ts = flatMapRowTypes lam
+      reg_ts = flatMapUniformTypes lam
+  arrs_ts <- mapM lookupType arrs
+
+  -- Loop parameters: the current filled size, the current capacity, the
+  -- per-element shape and offset arrays, one scratch buffer per nonuniform
+  -- result, and one array per uniform result.
+  size_p <- newParam "flatmap_size" $ toDecl (Prim int64) Observe
+  cap_p <- newParam "flatmap_cap" $ toDecl (Prim int64) Observe
+  shape_p <- newParam "flatmap_shape" $ toDecl (arrayOfRow (Prim int64) w) Consume
+  offset_p <- newParam "flatmap_offset" $ toDecl (arrayOfRow (Prim int64) w) Consume
+  scratch_ps <-
+    forM irreg_ts $ \et ->
+      newParam "flatmap_res" $ toDecl (arrayOfRow et (Var (paramName cap_p))) Consume
+  reg_ps <-
+    forM reg_ts $ \rt ->
+      newParam "flatmap_reg" $ toDecl (arrayOfRow rt w) Consume
+
+  -- The capacity initially matches the input size.
+  shape_init <- letExp "flatmap_shape" $ BasicOp $ Scratch int64 [w]
+  offset_init <- letExp "flatmap_offset" $ BasicOp $ Scratch int64 [w]
+  scratch_init <- forM irreg_ts $ \et -> letExp "flatmap_res" =<< eBlank (arrayOfRow et w)
+  reg_init <- forM reg_ts $ \rt -> letExp "flatmap_reg" =<< eBlank (arrayOfRow rt w)
+
+  let merge =
+        (size_p, intConst Int64 0)
+          : (cap_p, w)
+          : (shape_p, Var shape_init)
+          : (offset_p, Var offset_init)
+          : zip scratch_ps (map Var scratch_init)
+            <> zip reg_ps (map Var reg_init)
+      merge_params = map fst merge
+
+  i <- newVName "i"
+  let loop_form = ForLoop i Int64 w
+      loop_scope = scopeOfLoopForm loop_form <> scopeOfFParams merge_params
+  loop_body <- runBodyBuilder . localScope loop_scope $ do
+    -- Apply the lambda to the current elements.
+    let arg arr arr_t = BasicOp $ Index arr $ fullSlice arr_t [DimFix $ Var i]
+        size = Var $ paramName size_p
+    lam_res <- map resSubExp <$> bindLambda lam (zipWith arg arrs arrs_ts)
+
+    -- The lambda produces the common length of its segment results first.
+    let (k, ys) =
+          fromMaybe (error "transformFlatMap: malformed FlatMap.") $
+            uncons lam_res
+        (irreg_ys, reg_ys) = flatMapSplitValues lam ys
+    new_size <-
+      letSubExp "flatmap_new_size" . BasicOp $
+        BinOp (Add Int64 OverflowUndef) size k
+    grow <-
+      letSubExp "flatmap_grow" . BasicOp $
+        CmpOp (CmpSlt Int64) (Var (paramName cap_p)) new_size
+
+    -- New capacity: double it (but at least fit) when it overflows.
+    new_cap <-
+      letSubExp "flatmap_new_cap"
+        =<< eIf
+          (eSubExp grow)
+          ( buildBody_ $ do
+              doubled <-
+                letSubExp "doubled" . BasicOp $
+                  BinOp (Mul Int64 OverflowUndef) (Var (paramName cap_p)) (intConst Int64 2)
+              fmap (pure . subExpRes) . letSubExp "atleast" . BasicOp $
+                BinOp (SMax Int64) doubled new_size
+          )
+          (buildBody_ $ pure [subExpRes $ Var (paramName cap_p)])
+
+    let lowSlice t =
+          fullSlice t [DimSlice (intConst Int64 0) size (intConst Int64 1)]
+
+    -- Grow (and copy) each scratch buffer when necessary, then write the
+    -- new elements at the end.
+    scratch_res <- forM (zip3 scratch_ps irreg_ts irreg_ys) $ \(sp, et, ys_j) -> do
+      let full_t = arrayOfRow et new_cap
+      base <-
+        letExp "flatmap_grown"
+          =<< eIf
+            (eSubExp grow)
+            ( buildBody_ $ do
+                fresh <-
+                  letExp "flatmap_fresh" . BasicOp $
+                    Scratch (elemType full_t) (arrayDims full_t)
+                old_t <- lookupType $ paramName sp
+                copied <-
+                  letInPlace "flatmap_fresh" fresh (lowSlice full_t) $
+                    BasicOp (Index (paramName sp) (lowSlice old_t))
+                pure [varRes copied]
+            )
+            ( buildBody_ $
+                fmap (pure . varRes) . letExp "flatmap_kept" $
+                  shapeCoerce (arrayDims full_t) (paramName sp)
+            )
+      letInPlace "flatmap_res" base (fullSlice full_t [DimSlice size k (intConst Int64 1)]) $
+        BasicOp (SubExp ys_j)
+
+    -- The segment's size and its offset (the running total before it).
+    shape' <-
+      letInPlace "flatmap_shape" (paramName shape_p) (fullSlice (paramType shape_p) [DimFix $ Var i]) $
+        BasicOp (SubExp k)
+    offset' <-
+      letInPlace "flatmap_offset" (paramName offset_p) (fullSlice (paramType offset_p) [DimFix $ Var i]) $
+        BasicOp (SubExp size)
+
+    -- The uniform results are simply written at this iteration's index.
+    reg_res <- forM (zip reg_ps reg_ys) $ \(rp, reg_y) ->
+      letInPlace "flatmap_reg" (paramName rp) (fullSlice (paramType rp) [DimFix $ Var i]) $
+        BasicOp (SubExp reg_y)
+
+    pure $
+      subExpsRes [new_size, new_cap]
+        <> varsRes (shape' : offset' : scratch_res <> reg_res)
+
+  loop_res <- letTupExp "flatmap" $ Loop merge loop_form loop_body
+  case (loop_res, patNames pat) of
+    (size_res : _cap_res : shape_res : offset_res : value_res, m_pat : shape_pat : flag_pat : offset_pat : out_pats) -> do
+      -- Bind the total size and the shape/offset arrays, then truncate each
+      -- buffer. The uniform results are already of the right size.
+      letBindNames [m_pat] $ BasicOp $ SubExp $ Var size_res
+      letBindNames [shape_pat] $ BasicOp $ SubExp $ Var shape_res
+      letBindNames [offset_pat] $ BasicOp $ SubExp $ Var offset_res
+      let (scratch_res, reg_res) = splitAt (length irreg_ts) value_res
+          (data_pats, reg_pats) = flatMapSplitValues lam out_pats
+      forM_ (zip data_pats scratch_res) $ \(out, scratch) -> do
+        scratch_t <- lookupType scratch
+        letBindNames [out] . BasicOp . Index scratch $
+          fullSlice scratch_t [DimSlice (intConst Int64 0) (Var m_pat) (intConst Int64 1)]
+      forM_ (zip reg_pats reg_res) $ \(out, reg) ->
+        letBindNames [out] $ BasicOp $ SubExp $ Var reg
+      -- The flag array: scatter a 'true' at the offset of each non-empty
+      -- segment, over an otherwise 'false' array.
+      transformFlatMapFlags flag_pat w (Var m_pat) shape_res offset_res
+    _ ->
+      error "transformFlatMap: malformed FlatMap."
+
+-- | Compute a 'FlatMap' flag array of length @m@: 'true' at the start of each
+-- non-empty segment, 'false' elsewhere. Emitted as a sequential scatter loop.
+transformFlatMapFlags ::
+  (Transformer m) =>
+  VName ->
+  SubExp ->
+  SubExp ->
+  VName ->
+  VName ->
+  m ()
+transformFlatMapFlags flag_pat w m shape offset = do
+  let flag_t = arrayOfRow (Prim Bool) m
+  flags_init <- letExp "flatmap_flags" $ BasicOp $ Replicate (Shape [m]) (constant False)
+  flags_p <- newParam "flatmap_flags" $ toDecl flag_t Consume
+  j <- newVName "j"
+  let flag_form = ForLoop j Int64 w
+  shape_t <- lookupType shape
+  offset_t <- lookupType offset
+  flag_body <- runBodyBuilder $
+    localScope (scopeOfLoopForm flag_form <> scopeOfFParams [flags_p]) $ do
+      sz <- letSubExp "flatmap_sz" $ BasicOp $ Index shape $ fullSlice shape_t [DimFix $ Var j]
+      off <- letSubExp "flatmap_off" $ BasicOp $ Index offset $ fullSlice offset_t [DimFix $ Var j]
+      nonempty <-
+        letSubExp "flatmap_nonempty" . BasicOp $
+          CmpOp (CmpSlt Int64) (intConst Int64 0) sz
+      flags' <-
+        letSubExp "flatmap_flags"
+          =<< eIf
+            (eSubExp nonempty)
+            ( buildBody_
+                $ fmap (pure . varRes)
+                  . letInPlace "flatmap_flags" (paramName flags_p) (fullSlice flag_t [DimFix off])
+                $ BasicOp (SubExp (constant True))
+            )
+            (buildBody_ $ pure [varRes $ paramName flags_p])
+      pure [subExpRes flags']
+  letBindNames [flag_pat] $ Loop [(flags_p, Var flags_init)] flag_form flag_body
+
 -- | Sequentialise a single Screma.
 transformScrema ::
   (Transformer m) =>
@@ -129,19 +323,19 @@ transformScrema pat w arrs form@(ScremaForm map_lam scans reds post_lam) = do
   -- operator
   let Reduce _ red_lam red_nes = singleReduce reds
       Scan scan_lam scan_nes = singleScan scans
-      (_red_ts, post_ts) =
+      (red_ts, post_ts) =
         splitAt (length red_nes) $ scremaType w form
 
   post_arrs <- resultArray arrs post_ts
 
-  scanacc_params <- mapM (newParam "scanacc" . flip toDecl Nonunique) $ lambdaReturnType scan_lam
-  redout_params <- mapM (newParam "redout" . flip toDecl Nonunique) $ lambdaReturnType red_lam
-  out_params <- mapM (newParam "out" . flip toDecl Unique) post_ts
+  scanacc_params <- mapM (newParam "scanacc" . flip toDecl Observe) $ lambdaReturnType scan_lam
+  redout_params <- mapM (newParam "redout" . flip toDecl Observe) $ lambdaReturnType red_lam
+  out_params <- mapM (newParam "out" . flip toDecl Consume) post_ts
 
   arr_ts <- mapM lookupType arrs
-  let paramForAcc (Acc c _ _ _) = find (f . paramType) out_params
+  let paramForAcc (Acc c _ _) = find (f . paramType) out_params
         where
-          f (Acc c2 _ _ _) = c == c2
+          f (Acc c2 _ _) = c == c2
           f _ = False
       paramForAcc _ = Nothing
 
@@ -216,12 +410,21 @@ transformScrema pat w arrs form@(ScremaForm map_lam scans reds post_lam) = do
           varsRes outarrs
         ]
 
-  -- We need to discard the final scan accumulators, as they are not
-  -- bound in the original pattern.
-  names <-
-    (++ patNames pat)
-      <$> replicateM (length scanacc_params) (newVName "discard")
-  letBindNames names $ Loop merge loopform loop_body
+  discards <- replicateM (length scanacc_params) (newVName "discard")
+
+  -- Screma requires alias-free results, so reduction results are bound to fresh
+  -- names, so that we can copy the array-typed ones.
+  let (red_pat_names, post_pat_names) = splitAt (length red_nes) $ patNames pat
+  red_names <- mapM newName red_pat_names
+
+  letBindNames (discards ++ red_names ++ post_pat_names) $
+    Loop merge loopform loop_body
+
+  forM_ (zip3 red_pat_names red_names red_ts) $ \(to, from, t) ->
+    letBindNames [to] . BasicOp $
+      case t of
+        Array {} -> Replicate mempty $ Var from
+        _ -> SubExp $ Var from
 
 -- | Transform a single 'SOAC' into a do-loop.  The body of the lambda
 -- is untouched, and may or may not contain further 'SOAC's depending
@@ -237,6 +440,8 @@ transformSOAC _ VJP {} =
   error "transformSOAC: unhandled VJP"
 transformSOAC _ WithVJP {} =
   error "transformSOAC: unhandled WithVJP"
+transformSOAC pat (FlatMap w arrs lam) =
+  transformFlatMap pat w arrs lam
 transformSOAC pat (Screma w arrs form) =
   transformScrema pat w arrs form
 transformSOAC pat (Stream w arrs nes lam) = do
@@ -250,12 +455,12 @@ transformSOAC pat (Stream w arrs nes lam) = do
 
   mapout_initial <- resultArray arrs mapout_ts
   mapout_params <- forM mapout_ts $ \t ->
-    newParam "stream_mapout" $ toDecl t Unique
+    newParam "stream_mapout" $ toDecl t Consume
   let mapout_merge = zip mapout_params $ map Var mapout_initial
 
-  let paramForAcc (Acc c _ _ _) = find (f . paramType) mapout_params
+  let paramForAcc (Acc c _ _) = find (f . paramType) mapout_params
         where
-          f (Acc c2 _ _ _) = c == c2
+          f (Acc c2 _ _) = c == c2
           f _ = False
       paramForAcc _ = Nothing
 
@@ -269,7 +474,7 @@ transformSOAC pat (Stream w arrs nes lam) = do
           _ -> pure se
   nes' <- mapM copyIfArray nes
 
-  let onType t = t `toDecl` Unique
+  let onType t = t `toDecl` Consume
       merge = zip (map (fmap onType) fold_params) nes' ++ mapout_merge
       merge_params = map fst merge
 
@@ -373,8 +578,8 @@ transformLambda ::
     LetDec rep ~ LetDec SOACS,
     Alias.AliasableRep rep
   ) =>
-  Lambda SOACS ->
-  m (AST.Lambda rep)
+  GLambda SOACS t ->
+  m (AST.GLambda rep t)
 transformLambda (Lambda params rettype body) = do
   body' <-
     fmap fst . runBuilder $
@@ -395,7 +600,7 @@ letwith ks i vs = do
 
 bindLambda ::
   (Transformer m) =>
-  AST.Lambda (Rep m) ->
+  AST.GLambda (Rep m) t ->
   [AST.Exp (Rep m)] ->
   m Result
 bindLambda (Lambda params _ body) args = do
@@ -406,12 +611,12 @@ bindLambda (Lambda params _ body) args = do
   bodyBind body
 
 loopMerge :: [Ident] -> [SubExp] -> [(Param DeclType, SubExp)]
-loopMerge vars = loopMerge' $ map (,Unique) vars
+loopMerge vars = loopMerge' $ map (,Consume) vars
 
-loopMerge' :: [(Ident, Uniqueness)] -> [SubExp] -> [(Param DeclType, SubExp)]
+loopMerge' :: [(Ident, Diet)] -> [SubExp] -> [(Param DeclType, SubExp)]
 loopMerge' vars vals =
-  [ (Param mempty pname $ toDecl ptype u, val)
-  | ((Ident pname ptype, u), val) <- zip vars vals
+  [ (Param mempty pname $ toDecl ptype o, val)
+  | ((Ident pname ptype, o), val) <- zip vars vals
   ]
 
 -- Note [Translation of Screma]
@@ -429,15 +634,15 @@ loopMerge' vars vals =
 -- However, category (3) is a little more tricky in the case where one
 -- of the results is an Acc.  In that case, the result is not an
 -- array, but another Acc.  Any Acc result of a Map must correspond to
--- an Acc that is an input to the map, and the result is initialised
+-- an Acc that is an to the map, and the result is initialised
 -- to be that input.  This requires a 1:1 relationship between Acc
 -- inputs and Acc outputs, which the type checker should enforce.
 -- There is no guarantee that the map results appear in any particular
 -- order (e.g. accumulator results before non-accumulator results), so
 -- we need to do a little sleuthing to establish the relationship.
 --
--- Inside the loop, the non-Acc parameters to map_lam become for-in
--- parameters.  Acc parameters refer to the loop parameters for the
+-- Inside the loop, the non-Acc parameters to map_lam for-in
+-- parameters.  Acc parameters refer to loop parameters for the
 -- corresponding Map result instead.
 --
 -- Intuitively, a Screma(w,

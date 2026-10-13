@@ -295,7 +295,7 @@ analyseStms hof usage stms =
 isScalar :: (Typed t) => t -> Bool
 isScalar = isScalarType . typeOf
 
-isScalarType :: TypeBase shape u -> Bool
+isScalarType :: TypeBase shape o -> Bool
 isScalarType (Prim Unit) = False
 isScalarType (Prim _) = True
 isScalarType _ = False
@@ -303,7 +303,7 @@ isScalarType _ = False
 isArray :: (Typed t) => t -> Bool
 isArray = isArrayType . typeOf
 
-isArrayType :: (ArrayShape shape) => TypeBase shape u -> Bool
+isArrayType :: (ArrayShape shape) => TypeBase shape o -> Bool
 isArrayType = (0 <) . arrayRank
 
 --------------------------------------------------------------------------------
@@ -580,7 +580,7 @@ graphHostOnly e = do
 
 -- | Graph an 'UpdateAcc' statement.
 graphUpdateAcc :: Binding -> Exp GPU -> Grapher ()
-graphUpdateAcc b e | (_, Acc a _ _ _) <- b =
+graphUpdateAcc b e | (_, Acc a _ _) <- b =
   -- The actual graphing is delayed to the corrensponding 'WithAcc' parent.
   modify $ \st ->
     let accs = stateUpdateAccs st
@@ -915,7 +915,7 @@ graphWithAcc bs inputs f = do
   ret <- mapM (onlyGraphedScalarSubExp . resSubExp) res
   mapM_ (uncurry createNode) $ zip (drop (length arrs) bs) ret
   where
-    graph (Acc a _ types _, (_, _, comb)) = do
+    graph (Acc a _ types, (_, _, comb)) = do
       let i = nameToId a
 
       delayed <- fromMaybe [] <$> gets (IM.lookup i . stateUpdateAccs)
@@ -1042,7 +1042,7 @@ graphedScalarOperands e =
     collectStm (Let pat _ ua)
       | BasicOp UpdateAcc {} <- ua,
         Pat [pe] <- pat,
-        Acc a _ _ _ <- typeOf pe =
+        Acc a _ _ <- typeOf pe =
           -- Capture the tokens of accumulators used on host.
           captureAcc a >> collectBasic ua
     collectStm stm = collect (stmExp stm)
@@ -1058,7 +1058,7 @@ graphedScalarOperands e =
       collectBody (lambdaBody f)
       used_accs <- gets snd
       let accs = take (length inputs) (lambdaReturnType f)
-      let used = map (\(Acc a _ _ _) -> S.member a used_accs) accs
+      let used = map (\(Acc a _ _) -> S.member a used_accs) accs
       mapM_ collectAcc (zip used inputs)
 
     collectAcc (_, (_, _, Nothing)) = pure ()

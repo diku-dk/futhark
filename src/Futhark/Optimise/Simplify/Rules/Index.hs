@@ -15,7 +15,7 @@ import Data.Maybe
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Construct
-import Futhark.IR
+import Futhark.IR hiding (consuming)
 import Futhark.Optimise.Simplify.Rules.Simple
 import Futhark.Util
 
@@ -56,15 +56,10 @@ simplifyIndexing ::
   Maybe (m IndexResult)
 simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
   case defOf idd of
-    -- FIXME: This is a special case to avoid simplifying away a slice of a
-    -- rearrange. This is because register tiling cannot otherwise properly
-    -- detect what is going on.
     Just (Rearrange src perm, cs)
       | rearrangeReach perm <= length (takeWhile isIndex inds) ->
           let inds' = rearrangeShape (rearrangeInverse perm) inds
            in Just $ pure $ IndexResult cs src $ Slice inds'
-      | any isIndex inds ->
-          Nothing
       where
         isIndex DimFix {} = True
         isIndex _ = False
@@ -101,6 +96,7 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
         not consuming,
         not $ consumed arr,
         Just (ordering, inds''') <- first concat . unzip <$> mapM okIdx inds'',
+        length ordering == length matches,
         Just perm <- L.sort ordering `isPermutationOf` ordering ->
           if isIdentityPerm perm
             then Just $ IndexResult cs arr . Slice <$> sequence inds'''
@@ -196,20 +192,6 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
         not consuming,
         ST.available src vtable ->
           Just $ pure $ IndexResult cs src $ Slice inds
-    Just (Reshape src newshape, cs)
-      | ReshapeCoerce <- reshapeKind newshape,
-        Just olddims <- arrayDims <$> seType (Var src),
-        changed_dims <- zipWith (/=) (shapeDims (newShape newshape)) olddims,
-        not $ or $ drop (length inds) changed_dims ->
-          Just $ pure $ IndexResult cs src $ Slice inds
-      | Just olddims <- arrayDims <$> seType (Var src),
-        length newshape == length inds,
-        length olddims == length (shapeDims (newShape newshape)) ->
-          Just $ pure $ IndexResult cs src $ Slice inds
-    Just (Reshape v2 newshape, cs)
-      | Shape [_] <- newShape newshape,
-        Just [_] <- arrayDims <$> seType (Var v2) ->
-          Just $ pure $ IndexResult cs v2 $ Slice inds
     Just (Concat d (x :| xs) _, cs)
       | -- HACK: simplifying the indexing of an N-array concatenation
         -- is going to produce an N-deep if expression, which is bad
@@ -249,14 +231,15 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
           SubExpResult mempty <$> mkBranch xs_and_starts
     Just (ArrayLit ses _, cs)
       | DimFix (Constant (IntValue (Int64Value i))) : inds' <- inds,
-        Just se <- maybeNth i ses ->
+        Just se <- maybeNth i ses,
+        forwardable se ->
           case inds' of
             [] -> Just $ pure $ SubExpResult cs se
             _ | Var v2 <- se -> Just $ pure $ IndexResult cs v2 $ Slice inds'
             _ -> Nothing
     Just (Update Unsafe _ (Slice update_inds) se, cs)
       | inds == update_inds,
-        ST.subExpAvailable se vtable ->
+        forwardable se ->
           Just $ pure $ SubExpResult cs se
     -- Indexing single-element arrays.  We know the index must be 0.
     _
@@ -271,6 +254,15 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
     defOf v = do
       (BasicOp op, def_cs) <- ST.lookupExp v vtable
       pure (op, def_cs)
+
+    -- Whether the result may be replaced by 'se' (or a slice of it),
+    -- which makes the result alias 'se'. This is only valid if 'se'
+    -- has not been consumed already, is not consumed later, and the
+    -- result itself is not consumed.
+    forwardable (Constant _) = True
+    forwardable (Var v) =
+      not consuming && not (consumed v) && ST.available v vtable
+
     worthInlining e
       | primExpSizeAtLeast 20 e = False -- totally ad-hoc.
       | otherwise = worthInlining' e
@@ -280,7 +272,11 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
     worthInlining' (CmpOpExp _ x y) = worthInlining' x && worthInlining' y
     worthInlining' (ConvOpExp _ x) = worthInlining' x
     worthInlining' (UnOpExp _ x) = worthInlining' x
-    worthInlining' FunExp {} = False
+    -- A conditional is a cheap select, unlike the transcendental functions
+    -- that a 'FunExp' otherwise denotes.
+    worthInlining' (FunExp f args _)
+      | isJust $ isCondFun f = all worthInlining' args
+      | otherwise = False
     worthInlining' _ = True
 
     isConcat v
@@ -333,3 +329,8 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
 --
 -- In such cases we must actually insert a Rearrange operation to move
 -- the dimensions of the result appropriately.
+--
+-- Similarly, Every sliced dimension must correspond to exactly one dimension of
+-- the result. If the indexing does not depend on one of them at all (e.g.
+-- because the source array is a replicate), replacing the indexes with the
+-- original slices would change the shape of the result.

@@ -42,6 +42,8 @@ module Futhark.Optimise.Simplify.Engine
     asksEngineEnv,
     askVtable,
     localVtable,
+    Protect,
+    protectIf,
 
     -- * Building blocks
     SimplifiableRep,
@@ -253,14 +255,14 @@ bindLoopVar var it bound =
 makeSafe :: Exp rep -> Maybe (Exp rep)
 makeSafe (BasicOp (BinOp (SDiv t _) x y)) =
   Just $ BasicOp (BinOp (SDiv t Safe) x y)
-makeSafe (BasicOp (BinOp (SDivUp t _) x y)) =
-  Just $ BasicOp (BinOp (SDivUp t Safe) x y)
+makeSafe (BasicOp (BinOp (SCeilDiv t _) x y)) =
+  Just $ BasicOp (BinOp (SCeilDiv t Safe) x y)
 makeSafe (BasicOp (BinOp (SQuot t _) x y)) =
   Just $ BasicOp (BinOp (SQuot t Safe) x y)
 makeSafe (BasicOp (BinOp (UDiv t _) x y)) =
   Just $ BasicOp (BinOp (UDiv t Safe) x y)
-makeSafe (BasicOp (BinOp (UDivUp t _) x y)) =
-  Just $ BasicOp (BinOp (UDivUp t Safe) x y)
+makeSafe (BasicOp (BinOp (UCeilDiv t _) x y)) =
+  Just $ BasicOp (BinOp (UCeilDiv t Safe) x y)
 makeSafe (BasicOp (BinOp (SMod t _) x y)) =
   Just $ BasicOp (BinOp (SMod t Safe) x y)
 makeSafe (BasicOp (BinOp (SRem t _) x y)) =
@@ -284,6 +286,8 @@ emptyOfType ctx_names (Array et shape _) = do
     zeroIfContext (Var v) | v `elem` ctx_names = intConst Int64 0
     zeroIfContext se = se
 
+-- | Protect a hoisted statement by enclosing it in a branch (or doing something
+-- smarter for certain statements).
 protectIf ::
   (MonadBuilder m) =>
   Protect m ->
@@ -426,7 +430,7 @@ nonrecSimplifyStm ::
 nonrecSimplifyStm (Let pat (StmAux cs attrs loc (_, dec)) e) = do
   cs' <- simplify cs
   e' <- simplifyExpBase e
-  (pat', pat_cs) <- collectCerts $ traverse simplify $ removePatWisdom pat
+  (pat', pat_cs) <- collectCerts $ traverse (simplify . snd) pat
   let aux' = StmAux (cs' <> pat_cs) attrs loc dec
   pure $ mkWiseStm pat' aux' e'
 
@@ -750,10 +754,6 @@ simplifyBodyNoHoisting ::
 simplifyBodyNoHoisting usage res_usages body =
   snd <$> simplifyBody (isFalse False) usage res_usages body
 
-usageFromDiet :: Diet -> UT.Usages
-usageFromDiet Consume = UT.consumedU
-usageFromDiet _ = mempty
-
 -- | Simplify a single 'Result'.
 simplifyResult ::
   (SimplifiableRep rep) => [UT.Usages] -> Result -> SimpleM rep (Result, UT.UsageTable)
@@ -871,7 +871,7 @@ simplifyExp _ _ (Loop merge form loopbody) = do
       $ do
         let params_usages =
               map
-                (\p -> if unique (paramDeclType p) then UT.consumedU else mempty)
+                (\p -> if consuming (paramDeclType p) then UT.consumedU else mempty)
                 params'
         (res, uses) <- simplifyResult params_usages $ bodyResult loopbody
         pure (res, uses <> isLoopResult res)
@@ -883,7 +883,7 @@ simplifyExp _ _ (Loop merge form loopbody) = do
     consumeMerge =
       localVtable $ flip (foldl' (flip ST.consume)) $ namesToList consumed_by_merge
     consumed_by_merge =
-      freeIn $ map snd $ filter (unique . paramDeclType . fst) merge
+      freeIn $ map snd $ filter (consuming . paramDeclType . fst) merge
     withRes (p, x) y = (p, x, y)
 simplifyExp _ _ (Op op) = do
   (op', stms) <- simplifyOp op
@@ -1052,11 +1052,11 @@ instance Simplifiable Space where
 instance Simplifiable PrimType where
   simplify = pure
 
-instance (Simplifiable shape) => Simplifiable (TypeBase shape u) where
-  simplify (Array et shape u) =
-    Array <$> simplify et <*> simplify shape <*> pure u
-  simplify (Acc acc ispace ts u) =
-    Acc <$> simplify acc <*> simplify ispace <*> simplify ts <*> pure u
+instance (Simplifiable shape) => Simplifiable (TypeBase shape o) where
+  simplify (Array et shape o) =
+    Array <$> simplify et <*> simplify shape <*> pure o
+  simplify (Acc acc ispace ts) =
+    Acc <$> simplify acc <*> simplify ispace <*> simplify ts
   simplify (Mem space) =
     Mem <$> simplify space
   simplify (Prim bt) =
@@ -1070,36 +1070,36 @@ instance (Simplifiable d) => Simplifiable (Slice d) where
   simplify = traverse simplify
 
 simplifyLambda ::
-  (SimplifiableRep rep) =>
+  (SimplifiableRep rep, Simplifiable t) =>
   Names ->
-  Lambda (Wise rep) ->
-  SimpleM rep (Lambda (Wise rep), Stms (Wise rep))
+  GLambda (Wise rep) t ->
+  SimpleM rep (GLambda (Wise rep) t, Stms (Wise rep))
 simplifyLambda extra_bound lam = do
   par_blocker <- asksEngineEnv $ blockHoistPar . envHoistBlockers
   simplifyLambdaMaybeHoist (par_blocker `orIf` hasFree extra_bound) mempty lam
 
 simplifyLambdaNoHoisting ::
-  (SimplifiableRep rep) =>
-  Lambda (Wise rep) ->
-  SimpleM rep (Lambda (Wise rep))
+  (SimplifiableRep rep, Simplifiable t) =>
+  GLambda (Wise rep) t ->
+  SimpleM rep (GLambda (Wise rep) t)
 simplifyLambdaNoHoisting lam =
   fst <$> simplifyLambdaMaybeHoist (isFalse False) mempty lam
 
 simplifyLambdaMaybeHoist ::
-  (SimplifiableRep rep) =>
+  (SimplifiableRep rep, Simplifiable t) =>
   BlockPred (Wise rep) ->
   UT.UsageTable ->
-  Lambda (Wise rep) ->
-  SimpleM rep (Lambda (Wise rep), Stms (Wise rep))
+  GLambda (Wise rep) t ->
+  SimpleM rep (GLambda (Wise rep) t, Stms (Wise rep))
 simplifyLambdaMaybeHoist = simplifyLambdaWith id
 
 simplifyLambdaWith ::
-  (SimplifiableRep rep) =>
+  (SimplifiableRep rep, Simplifiable t) =>
   (ST.SymbolTable (Wise rep) -> ST.SymbolTable (Wise rep)) ->
   BlockPred (Wise rep) ->
   UT.UsageTable ->
-  Lambda (Wise rep) ->
-  SimpleM rep (Lambda (Wise rep), Stms (Wise rep))
+  GLambda (Wise rep) t ->
+  SimpleM rep (GLambda (Wise rep) t, Stms (Wise rep))
 simplifyLambdaWith f blocked usage lam@(Lambda params rettype body) = do
   params' <- mapM (traverse simplify) params
   let paramnames = namesFromList $ boundByLambda lam
@@ -1114,6 +1114,7 @@ simplifyLambdaWith f blocked usage lam@(Lambda params rettype body) = do
   pure (Lambda params' rettype' body', hoisted)
 
 instance Simplifiable Certs where
+  simplify (Certs []) = pure (Certs [])
   simplify (Certs ocs) = Certs . nubOrd . concat <$> mapM check ocs
     where
       check idd = do
@@ -1141,9 +1142,16 @@ simplifyFun (FunDef entry attrs fname rettype params body) = do
     aliasable_rets =
       map snd $ filter (aliasable . extTypeOf . fst . fst) $ zip rettype [0 ..]
     restricted als = any (`notElem` als)
-    usageFromRet (t, RetAls pals rals) =
-      usageFromDiet (diet $ declExtTypeOf t)
-        <> if restricted pals aliasable_params
-          || restricted rals aliasable_rets
-          then UT.consumedU
-          else mempty
+    -- A non-Prim result is marked consumed when simplification must not
+    -- introduce aliasing at that position. For arrays the 'RetAls' decide this
+    -- on their own: a fresh result has empty alias sets, which is the maximally
+    -- restricted case, so it needs no separate test. An accumulator is
+    -- different - it carries no aliasing information at all, being linear
+    -- rather than aliased - and every use of one consumes it.
+    usageFromRet (t, RetAls pals rals)
+      | isAcc $ extTypeOf t = UT.consumedU
+      | primType $ extTypeOf t = mempty
+      | restricted pals aliasable_params
+          || restricted rals aliasable_rets =
+          UT.consumedU
+      | otherwise = mempty

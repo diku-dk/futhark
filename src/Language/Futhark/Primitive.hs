@@ -456,14 +456,14 @@ data BinOp
     UDiv IntType Safety
   | -- | Unsigned integer division.  Rounds towards positive
     -- infinity.
-    UDivUp IntType Safety
+    UCeilDiv IntType Safety
   | -- | Signed integer division.  Rounds towards
     -- negativity infinity.  Note: this is different
     -- from LLVM.
     SDiv IntType Safety
   | -- | Signed integer division.  Rounds towards positive
     -- infinity.
-    SDivUp IntType Safety
+    SCeilDiv IntType Safety
   | -- | Floating-point division.
     FDiv FloatType
   | -- | Floating-point modulus.
@@ -608,9 +608,9 @@ allBinOps =
       Mul <$> allIntTypes <*> [OverflowWrap, OverflowUndef],
       map FMul allFloatTypes,
       UDiv <$> allIntTypes <*> [Unsafe, Safe],
-      UDivUp <$> allIntTypes <*> [Unsafe, Safe],
+      UCeilDiv <$> allIntTypes <*> [Unsafe, Safe],
       SDiv <$> allIntTypes <*> [Unsafe, Safe],
-      SDivUp <$> allIntTypes <*> [Unsafe, Safe],
+      SCeilDiv <$> allIntTypes <*> [Unsafe, Safe],
       map FDiv allFloatTypes,
       map FMod allFloatTypes,
       UMod <$> allIntTypes <*> [Unsafe, Safe],
@@ -731,9 +731,9 @@ doBinOp FSub {} = doFloatBinOp (-) (-) (-)
 doBinOp Mul {} = doIntBinOp doMul
 doBinOp FMul {} = doFloatBinOp (*) (*) (*)
 doBinOp UDiv {} = doRiskyIntBinOp doUDiv
-doBinOp UDivUp {} = doRiskyIntBinOp doUDivUp
+doBinOp UCeilDiv {} = doRiskyIntBinOp doUCeilDiv
 doBinOp SDiv {} = doRiskyIntBinOp doSDiv
-doBinOp SDivUp {} = doRiskyIntBinOp doSDivUp
+doBinOp SCeilDiv {} = doRiskyIntBinOp doSCeilDiv
 doBinOp FDiv {} = doFloatBinOp (/) (/) (/)
 doBinOp FMod {} = doFloatBinOp mod' mod' mod'
 doBinOp UMod {} = doRiskyIntBinOp doUMod
@@ -831,8 +831,8 @@ doUDiv v1 v2
         intToWord64 v1 `div` intToWord64 v2
 
 -- | Unsigned integer division.  Rounds towards positive infinity.
-doUDivUp :: IntValue -> IntValue -> Maybe IntValue
-doUDivUp v1 v2
+doUCeilDiv :: IntValue -> IntValue -> Maybe IntValue
+doUCeilDiv v1 v2
   | zeroIshInt v2 = Nothing
   | otherwise =
       Just . intValue (intValueType v1) $
@@ -849,8 +849,8 @@ doSDiv v1 v2
           intToInt64 v1 `div` intToInt64 v2
 
 -- | Signed integer division.  Rounds towards positive infinity.
-doSDivUp :: IntValue -> IntValue -> Maybe IntValue
-doSDivUp v1 v2
+doSCeilDiv :: IntValue -> IntValue -> Maybe IntValue
+doSCeilDiv v1 v2
   | zeroIshInt v2 = Nothing
   | otherwise =
       Just . intValue (intValueType v1) $
@@ -1004,15 +1004,59 @@ doFPConv v Float16 = Float16Value $ floatToHalf v
 doFPConv v Float32 = Float32Value $ floatToFloat v
 doFPConv v Float64 = Float64Value $ floatToDouble v
 
+-- | Minimum and maximum value of this signed integer type.
+signedMinMax :: (Num a) => IntType -> (a, a)
+signedMinMax Int8 =
+  ( fromIntegral (minBound :: Int8),
+    fromIntegral (maxBound :: Int8)
+  )
+signedMinMax Int16 =
+  ( fromIntegral (minBound :: Int16),
+    fromIntegral (maxBound :: Int16)
+  )
+signedMinMax Int32 =
+  ( fromIntegral (minBound :: Int32),
+    fromIntegral (maxBound :: Int32)
+  )
+signedMinMax Int64 =
+  ( fromIntegral (minBound :: Int64),
+    fromIntegral (maxBound :: Int64)
+  )
+
+-- | Maximum value of this unsigned integer type.
+unsignedMax :: (Num a) => IntType -> a
+unsignedMax Int8 =
+  fromIntegral (maxBound :: Word8)
+unsignedMax Int16 =
+  fromIntegral (minBound :: Word16)
+unsignedMax Int32 =
+  fromIntegral (maxBound :: Word32)
+unsignedMax Int64 =
+  fromIntegral (maxBound :: Word64)
+
 -- | Convert a floating-point value to the nearest
 -- unsigned integer (rounding towards zero).
 doFPToUI :: FloatValue -> IntType -> IntValue
-doFPToUI v t = intValue t (truncate $ floatToDouble v :: Word64)
+doFPToUI v t =
+  intValue t $
+    if v' < 0 || v' > high || isNaN v'
+      then 0
+      else truncate v' :: Word64
+  where
+    v' = floatToDouble v
+    high = unsignedMax t
 
 -- | Convert a floating-point value to the nearest
 -- signed integer (rounding towards zero).
 doFPToSI :: FloatValue -> IntType -> IntValue
-doFPToSI v t = intValue t (truncate $ floatToDouble v :: Word64)
+doFPToSI v t =
+  intValue t $
+    if v' < low || v' > high || isNaN v'
+      then 0
+      else truncate v' :: Word64
+  where
+    v' = floatToDouble v
+    (low, high) = signedMinMax t
 
 -- | Convert an unsigned integer to a floating-point value.
 doUIToFP :: IntValue -> FloatType -> FloatValue
@@ -1130,12 +1174,12 @@ binOpType (Add t _) = IntType t
 binOpType (Sub t _) = IntType t
 binOpType (Mul t _) = IntType t
 binOpType (SDiv t _) = IntType t
-binOpType (SDivUp t _) = IntType t
+binOpType (SCeilDiv t _) = IntType t
 binOpType (SMod t _) = IntType t
 binOpType (SQuot t _) = IntType t
 binOpType (SRem t _) = IntType t
 binOpType (UDiv t _) = IntType t
-binOpType (UDivUp t _) = IntType t
+binOpType (UCeilDiv t _) = IntType t
 binOpType (UMod t _) = IntType t
 binOpType (SMin t) = IntType t
 binOpType (UMin t) = IntType t
@@ -1863,14 +1907,14 @@ instance Pretty BinOp where
   pretty (FMul t) = taggedF "fmul" t
   pretty (UDiv t Safe) = taggedI "udiv_safe" t
   pretty (UDiv t Unsafe) = taggedI "udiv" t
-  pretty (UDivUp t Safe) = taggedI "udiv_up_safe" t
-  pretty (UDivUp t Unsafe) = taggedI "udiv_up" t
+  pretty (UCeilDiv t Safe) = taggedI "uceil_div_safe" t
+  pretty (UCeilDiv t Unsafe) = taggedI "uceil_div" t
   pretty (UMod t Safe) = taggedI "umod_safe" t
   pretty (UMod t Unsafe) = taggedI "umod" t
   pretty (SDiv t Safe) = taggedI "sdiv_safe" t
   pretty (SDiv t Unsafe) = taggedI "sdiv" t
-  pretty (SDivUp t Safe) = taggedI "sdiv_up_safe" t
-  pretty (SDivUp t Unsafe) = taggedI "sdiv_up" t
+  pretty (SCeilDiv t Safe) = taggedI "sceil_div_safe" t
+  pretty (SCeilDiv t Unsafe) = taggedI "sceil_div" t
   pretty (SMod t Safe) = taggedI "smod_safe" t
   pretty (SMod t Unsafe) = taggedI "smod" t
   pretty (SQuot t Safe) = taggedI "squot_safe" t

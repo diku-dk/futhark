@@ -8,6 +8,7 @@ module Language.Futhark.TypeChecker.Types
     TypeSubs,
     Substitutable (..),
     substTypesAny,
+    substTyVars,
 
     -- * Witnesses
     mustBeExplicitInType,
@@ -22,6 +23,7 @@ import Control.Monad.State
 import Data.Bifunctor
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
+import Data.Maybe (fromMaybe, isNothing)
 import Data.Set qualified as S
 import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty
@@ -59,7 +61,7 @@ mustBeExplicitInBinding :: StructType -> S.Set VName
 mustBeExplicitInBinding bind_t =
   let (ts, ret) = unfoldFunType bind_t
       alsoRet = M.unionWith (&&) $ M.fromList $ map (,True) (S.toList (fvVars (freeInType ret)))
-   in S.fromList $ M.keys $ M.filter id $ alsoRet $ L.foldl' onType mempty $ map toStruct ts
+   in S.fromList $ M.keys $ M.filter id $ alsoRet $ L.foldl' onType mempty $ map (toStruct . snd) ts
   where
     onType uses t = uses <> mustBeExplicitAux t -- Left-biased union.
 
@@ -89,7 +91,7 @@ evalTypeExp ::
   m (TypeExp Exp VName, [VName], ResRetType, Liftedness)
 evalTypeExp _ (TEVar name loc) = do
   (ps, t, l) <- lookupType name
-  t' <- renameRetType $ toResRet Nonunique t
+  t' <- renameRetType $ toResRet Nonfresh t
   case ps of
     [] -> pure (TEVar name loc, [], t', l)
     _ ->
@@ -135,7 +137,7 @@ evalTypeExp df t@(TERecord fs loc) = do
 evalTypeExp df (TEArray d t loc) = do
   (d_svars, d', d'') <- checkSizeExp d
   (t', svars, RetType dims st, l) <- evalTypeExp df t
-  case (l, arrayOfWithAliases Nonunique (Shape [d'']) st) of
+  case (l, arrayOfWithAliases Nonfresh (Shape [d'']) st) of
     (Unlifted, st') ->
       pure
         ( TEArray d' t' loc,
@@ -161,12 +163,12 @@ evalTypeExp df (TEArray d t loc) = do
       e' <- df e
       pure ([], SizeExp e' dloc, e')
 --
-evalTypeExp df (TEUnique t loc) = do
+evalTypeExp df (TEStar t loc) = do
   (t', svars, RetType dims st, l) <- evalTypeExp df t
   unless (mayContainArray st) $
     warn loc $
-      "Declaring" <+> dquotes (pretty st) <+> "as unique has no effect."
-  pure (TEUnique t' loc, svars, RetType dims $ st `setUniqueness` Unique, l)
+      "The star in" <+> dquotes (pretty st) <+> "has no effect."
+  pure (TEStar t' loc, svars, RetType dims $ st `setMode` Fresh, l)
   where
     mayContainArray (Scalar Prim {}) = False
     mayContainArray Array {} = True
@@ -182,7 +184,7 @@ evalTypeExp df (TEArrow (Just v) t1 t2 loc) = do
     pure
       ( TEArrow (Just v) t1' t2' loc,
         svars1 ++ dims1 ++ svars2,
-        RetType [] $ Scalar $ Arrow Nonunique (Named v) (diet $ resToParam st1) (toStruct st1) (RetType dims2 st2),
+        RetType [] $ Scalar $ Arrow Nonfresh (Named v) (diet $ resToParam st1) (toStruct st1) (RetType dims2 st2),
         Lifted
       )
 --
@@ -193,7 +195,7 @@ evalTypeExp df (TEArrow Nothing t1 t2 loc) = do
     ( TEArrow Nothing t1' t2' loc,
       svars1 ++ dims1 ++ svars2,
       RetType [] . Scalar $
-        Arrow Nonunique Unnamed (diet $ resToParam st1) (toStruct st1) $
+        Arrow Nonfresh Unnamed (diet $ resToParam st1) (toStruct st1) $
           RetType dims2 st2,
       Lifted
     )
@@ -246,7 +248,7 @@ evalTypeExp df t@(TESum cs loc) = do
 evalTypeExp df ote@TEApply {} = do
   (tname, tname_loc, targs) <- rootAndArgs ote
   (ps, tname_t, l) <- lookupType tname
-  RetType t_dims t <- renameRetType $ toResRet Nonunique tname_t
+  RetType t_dims t <- renameRetType $ toResRet Nonfresh tname_t
   if length ps /= length targs
     then
       typeError tloc mempty $
@@ -361,14 +363,14 @@ type TypeSubs = VName -> Maybe (Subst StructRetType)
 class Substitutable a where
   applySubst :: TypeSubs -> a -> a
 
-instance Substitutable (RetTypeBase Size Uniqueness) where
+instance Substitutable (RetTypeBase Size Freshness) where
   applySubst f (RetType dims t) =
     let RetType more_dims t' = substTypesRet f' t
      in RetType (dims ++ more_dims) t'
     where
       f' = fmap (fmap (second (const mempty))) . f
 
-instance Substitutable (RetTypeBase Size NoUniqueness) where
+instance Substitutable (RetTypeBase Size NoMode) where
   applySubst f (RetType dims t) =
     let RetType more_dims t' = substTypesRet f t
      in RetType (dims ++ more_dims) t'
@@ -379,8 +381,8 @@ instance Substitutable StructType where
 instance Substitutable ParamType where
   applySubst f = substTypesAny $ fmap (fmap $ second $ const Observe) . f
 
-instance Substitutable (TypeBase Size Uniqueness) where
-  applySubst f = substTypesAny $ fmap (fmap $ second $ const Nonunique) . f
+instance Substitutable (TypeBase Size Freshness) where
+  applySubst f = substTypesAny $ fmap (fmap $ second $ const Nonfresh) . f
 
 instance Substitutable Exp where
   applySubst f = runIdentity . mapOnExp
@@ -426,11 +428,11 @@ instance Substitutable (Pat ParamType) where
           }
 
 applyType ::
-  (Monoid u) =>
+  (Monoid o) =>
   [TypeParam] ->
-  TypeBase Size u ->
+  TypeBase Size o ->
   [StructTypeArg] ->
-  TypeBase Size u
+  TypeBase Size o
 applyType ps t args = substTypesAny (`M.lookup` substs) t
   where
     substs = M.fromList $ zipWith mkSubst ps args
@@ -442,89 +444,137 @@ applyType ps t args = substTypesAny (`M.lookup` substs) t
     mkSubst p a =
       error $ "applyType mkSubst: cannot substitute " ++ prettyString a ++ " for " ++ prettyString p
 
+-- In case we are substituting the same RetType in multiple
+-- places, we must ensure each instance is given distinct
+-- dimensions.  E.g. substituting 'a ↦ ?[n].[n]bool' into '(a,a)'
+-- should give '?[n][m].([n]bool,[m]bool)'.
+--
+-- XXX: the size names we invent here not globally unique.  This
+-- is _probably_ not a problem, since substituting types with
+-- outermost non-null existential sizes is done only when type
+-- checking modules and monomorphising.
+freshDims ::
+  (Monoid o) =>
+  RetTypeBase Size o ->
+  State [VName] (RetTypeBase Size o)
+freshDims (RetType [] t) = pure $ RetType [] t
+freshDims (RetType ext t) = do
+  seen_ext <- get
+  if not $ any (`elem` seen_ext) ext
+    then pure $ RetType ext t
+    else do
+      let start = maximum $ map baseTag seen_ext
+          ext' = zipWith VName (map baseName ext) [start + 1 ..]
+          mkSubst = ExpSubst . flip sizeFromName mempty . qualName
+          extsubsts = M.fromList $ zip ext $ map mkSubst ext'
+          RetType [] t' = substTypesRet (`M.lookup` extsubsts) t
+      pure $ RetType ext' t'
+
 substTypesRet ::
-  (Monoid u) =>
-  (VName -> Maybe (Subst (RetTypeBase Size u))) ->
-  TypeBase Size u ->
-  RetTypeBase Size u
+  (Monoid o) =>
+  (VName -> Maybe (Subst (RetTypeBase Size o))) ->
+  TypeBase Size o ->
+  RetTypeBase Size o
 substTypesRet lookupSubst ot =
-  uncurry (flip RetType) $ runState (onType ot) []
+  let (t', dims) = runState (onType ot) []
+   in RetType dims (fromMaybe ot t')
   where
-    -- In case we are substituting the same RetType in multiple
-    -- places, we must ensure each instance is given distinct
-    -- dimensions.  E.g. substituting 'a ↦ ?[n].[n]bool' into '(a,a)'
-    -- should give '?[n][m].([n]bool,[m]bool)'.
-    --
-    -- XXX: the size names we invent here not globally unique.  This
-    -- is _probably_ not a problem, since substituting types with
-    -- outermost non-null existential sizes is done only when type
-    -- checking modules and monomorphising.
-    freshDims (RetType [] t) = pure $ RetType [] t
-    freshDims (RetType ext t) = do
-      seen_ext <- get
-      if not $ any (`elem` seen_ext) ext
-        then pure $ RetType ext t
-        else do
-          let start = maximum $ map baseTag seen_ext
-              ext' = zipWith VName (map baseName ext) [start + 1 ..]
-              mkSubst = ExpSubst . flip sizeFromName mempty . qualName
-              extsubsts = M.fromList $ zip ext $ map mkSubst ext'
-              RetType [] t' = substTypesRet (`M.lookup` extsubsts) t
-          pure $ RetType ext' t'
-
+    -- 'onType' returns 'Nothing' when the substitution does not change
+    -- the type, so that the (very common) unchanged parts are shared
+    -- rather than reconstructed. 'fromMaybe' at each level splices in
+    -- the original subterm for unchanged children.
     onType ::
-      forall as.
-      (Monoid as) =>
-      TypeBase Size as ->
-      State [VName] (TypeBase Size as)
+      forall o.
+      (Monoid o) =>
+      TypeBase Size o ->
+      State [VName] (Maybe (TypeBase Size o))
 
-    onType (Array u shape et) =
-      arrayOfWithAliases u (applySubst lookupSubst' shape)
-        <$> onType (Scalar et)
-    onType (Scalar (Prim t)) = pure $ Scalar $ Prim t
-    onType (Scalar (TypeVar u v targs)) = do
+    onType (Array o shape et) = do
+      et' <- onType (Scalar et)
+      let shape' = onShape shape
+      pure $ case (shape', et') of
+        (Nothing, Nothing) -> Nothing
+        _ ->
+          Just $
+            arrayOfWithAliases o (fromMaybe shape shape') (fromMaybe (Scalar et) et')
+    onType (Scalar (Prim _)) = pure Nothing
+    onType (Scalar (TypeVar o v targs)) = do
       targs' <- mapM subsTypeArg targs
       case lookupSubst $ qualLeaf v of
         Just (Subst ps rt) -> do
           RetType ext t <- freshDims rt
           modify (ext ++)
-          pure $ second (<> u) $ applyType ps (second (const u) t) targs'
+          let targs'' = zipWith fromMaybe targs targs'
+          pure $ Just $ second (<> o) $ applyType ps (second (const o) t) targs''
         _ ->
-          pure $ Scalar $ TypeVar u v targs'
-    onType (Scalar (Record ts)) =
-      Scalar . Record <$> traverse onType ts
-    onType (Scalar (Arrow u v d t1 t2)) =
-      Scalar <$> (Arrow u v d <$> onType t1 <*> onRetType t2)
-    onType (Scalar (Sum ts)) =
-      Scalar . Sum <$> traverse (traverse onType) ts
+          pure $
+            if all isNothing targs'
+              then Nothing
+              else Just $ Scalar $ TypeVar o v (zipWith fromMaybe targs targs')
+    onType (Scalar (Record ts)) = do
+      ts' <- traverse onType ts
+      pure $
+        if all isNothing ts'
+          then Nothing
+          else Just $ Scalar $ Record $ M.intersectionWith fromMaybe ts ts'
+    onType (Scalar (Arrow o v d t1 t2)) = do
+      t1' <- onType t1
+      t2' <- onRetType t2
+      pure $ case (t1', t2') of
+        (Nothing, Nothing) -> Nothing
+        _ -> Just $ Scalar $ Arrow o v d (fromMaybe t1 t1') (fromMaybe t2 t2')
+    onType (Scalar (Sum ts)) = do
+      ts' <- traverse (traverse onType) ts
+      pure $
+        if all (all isNothing) ts'
+          then Nothing
+          else Just $ Scalar $ Sum $ M.intersectionWith (zipWith fromMaybe) ts ts'
 
     onRetType (RetType dims t) = do
       ext <- get
-      let (t', ext') = runState (onType t) ext
-          new_ext = ext' L.\\ ext
-      case t of
-        Scalar Arrow {} -> do
-          put ext'
-          pure $ RetType dims t'
-        _ ->
-          pure $ RetType (new_ext <> dims) t'
+      case runState (onType t) ext of
+        (Nothing, _) -> pure Nothing
+        (Just t', ext') -> do
+          let new_ext = ext' L.\\ ext
+          case t of
+            Scalar Arrow {} -> do
+              put ext'
+              pure $ Just $ RetType dims t'
+            _ ->
+              pure $ Just $ RetType (new_ext <> dims) t'
 
+    -- Applied type arguments are rare; substitute conservatively (do
+    -- not bother sharing them).
     subsTypeArg (TypeArgType t) = do
       let RetType dims t' = substTypesRet lookupSubst' t
       modify (dims ++)
-      pure $ TypeArgType t'
+      pure $ Just $ TypeArgType t'
     subsTypeArg (TypeArgDim v) =
-      pure $ TypeArgDim $ applySubst lookupSubst' v
+      pure $ TypeArgDim <$> onSize v
 
-    lookupSubst' = fmap (fmap $ second (const NoUniqueness)) . lookupSubst
+    onShape (Shape ds) =
+      let ds' = map onSize ds
+       in if all isNothing ds'
+            then Nothing
+            else Just $ Shape $ zipWith fromMaybe ds ds'
+
+    -- A bare size variable is either substituted or unchanged (its own
+    -- type is always i64). Anything more complex is substituted
+    -- conservatively (rare in types).
+    onSize (Var (QualName _ v) _ _)
+      | Just (ExpSubst e') <- lookupSubst' v = Just e'
+    onSize (Var {}) = Nothing
+    onSize e = Just $ applySubst lookupSubst' e
+
+    lookupSubst' = fmap (fmap $ second (const NoMode)) . lookupSubst
 
 -- | Perform substitutions, from type names to types, on a type. Works
--- regardless of what shape and uniqueness information is attached to the type.
+-- regardless of what shape and freshness information is attached to the type.
 substTypesAny ::
-  (Monoid u) =>
-  (VName -> Maybe (Subst (RetTypeBase Size u))) ->
-  TypeBase Size u ->
-  TypeBase Size u
+  (Monoid o) =>
+  (VName -> Maybe (Subst (RetTypeBase Size o))) ->
+  TypeBase Size o ->
+  TypeBase Size o
 substTypesAny lookupSubst ot =
   case substTypesRet lookupSubst ot of
     RetType [] ot' -> ot'
@@ -538,6 +588,26 @@ substTypesAny lookupSubst ot =
                 anySize (baseTag (qualLeaf v))
           toAny d = d
        in first toAny ot'
+
+-- | Substitution without caring about sizes.
+substTyVars :: (Monoid o) => (VName -> Maybe (TypeBase d NoMode)) -> TypeBase d o -> TypeBase d o
+substTyVars f (Scalar (TypeVar o qn args)) =
+  case f $ qualLeaf qn of
+    Just t' -> second (const mempty) $ substTyVars f t'
+    Nothing -> Scalar (TypeVar o qn (map onArg args))
+      where
+        onArg (TypeArgType t) = TypeArgType $ substTyVars f t
+        onArg (TypeArgDim e) = TypeArgDim e
+substTyVars _ (Scalar (Prim pt)) = Scalar $ Prim pt
+substTyVars f (Scalar (Record fs)) = Scalar $ Record $ M.map (substTyVars f) fs
+substTyVars f (Scalar (Sum cs)) = Scalar $ Sum $ M.map (map $ substTyVars f) cs
+substTyVars f (Scalar (Arrow o pname d t1 (RetType ext t2))) =
+  Scalar $
+    Arrow o pname d (substTyVars f t1) $
+      RetType ext $
+        substTyVars f t2 `setMode` freshness t2
+substTyVars f (Array o shape elemt) =
+  arrayOfWithAliases o shape $ substTyVars f $ Scalar elemt
 
 -- Note [AnySize]
 --

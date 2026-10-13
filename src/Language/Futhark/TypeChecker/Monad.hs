@@ -11,6 +11,7 @@ module Language.Futhark.TypeChecker.Monad
     bindSpaced1,
     bindIdents,
     qualifyTypeVars,
+    qualifyTypeVarsWith,
     lookupMTy,
     lookupImport,
     lookupMod,
@@ -28,6 +29,7 @@ module Language.Futhark.TypeChecker.Monad
     MonadTypeChecker (..),
     TypeState (stateNameSource),
     addTySet,
+    getTySet,
     collectTySet,
     usedName,
     checkName,
@@ -65,6 +67,7 @@ import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Either
+import Data.IntSet qualified as IS
 import Data.List (find)
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -176,8 +179,8 @@ data Context = Context
 data TypeState = TypeState
   { stateNameSource :: VNameSource,
     stateWarnings :: Warnings,
-    -- | Which names have been used.
-    stateUsed :: S.Set VName,
+    -- | Which names have been used?
+    stateUsed :: IS.IntSet,
     -- | Known abstract type names.
     stateTySet :: TySet,
     stateCounter :: Int
@@ -255,14 +258,20 @@ lookupMTy loc qn = do
 addTySet :: TySet -> TypeM ()
 addTySet tys = modify $ \s -> s {stateTySet = tys <> stateTySet s}
 
+-- | Retrieve set of abstract types.
+getTySet :: TypeM TySet
+getTySet = gets stateTySet
+
 -- | Run type checking command while accumulating (and returning) all new
--- abstract types, then reset to known abstract types afterwards.
+-- abstract types.  Abstract types are uniquely named and their liftedness
+-- never changes, so the set of known abstract types only ever grows; an
+-- abstract type created inside a module expression is still nameable
+-- afterwards (as @m.t@), and so must remain known.
 collectTySet :: TypeM a -> TypeM (a, TySet)
 collectTySet m = do
   old <- gets stateTySet
   x <- m
   new <- gets stateTySet
-  modify $ \s -> s {stateTySet = old}
   pure (x, new `M.difference` old)
 
 -- | Look up the liftedness of an abstract type.
@@ -308,10 +317,11 @@ incCounter = do
   put s {stateCounter = stateCounter s + 1}
   pure $ stateCounter s
 
-bindNameMap :: NameMap -> TypeM a -> TypeM a
-bindNameMap m = local $ \ctx ->
+-- | Run the given action with the name map transformed by the given function.
+withNameMap :: (NameMap -> NameMap) -> TypeM a -> TypeM a
+withNameMap f = local $ \ctx ->
   let env = contextEnv ctx
-   in ctx {contextEnv = env {envNameMap = m <> envNameMap env}}
+   in ctx {contextEnv = env {envNameMap = f (envNameMap env)}}
 
 -- | Monads that support type checking.  The reason we have this
 -- internal interface is because we use distinct monads for checking
@@ -331,10 +341,10 @@ class (Monad m) => MonadTypeChecker m where
 
   typeError :: (Located loc) => loc -> Notes -> Doc () -> m a
 
-warnIfUnused :: (Namespace, VName, SrcLoc) -> TypeM ()
-warnIfUnused (ns, name, loc) = do
+warnIfUnused :: Namespace -> VName -> SrcLoc -> TypeM ()
+warnIfUnused ns name loc = do
   used <- gets stateUsed
-  unless (name `S.member` used || "_" `T.isPrefixOf` nameToText (baseName name)) $
+  unless (baseTag name `IS.member` used || "_" `T.isPrefixOf` nameToText (baseName name)) $
     warn loc $
       "Unused" <+> pretty ns <+> dquotes (prettyName name) <> "."
 
@@ -343,35 +353,32 @@ warnIfUnused (ns, name, loc) = do
 bindSpaced :: [(Namespace, Name, SrcLoc)] -> ([VName] -> TypeM a) -> TypeM a
 bindSpaced names body = do
   names' <- mapM (\(_, v, _) -> newID v) names
-  let mapping = M.fromList $ zip (map (\(ns, v, _) -> (ns, v)) names) $ map qualName names'
-  bindNameMap mapping (body names')
-    <* mapM_ warnIfUnused [(ns, v, loc) | ((ns, _, loc), v) <- zip names names']
+  let ins nm ((ns, v, _), v') = M.insert (ns, v) (qualName v') nm
+  withNameMap (\nm -> foldl' ins nm (zip names names')) (body names')
+    <* zipWithM_ (\(ns, _, loc) v -> warnIfUnused ns v loc) names names'
 
 -- | Map single source-level name to fresh unique internal names, and
 -- evaluate a type checker context with the mapping active.
 bindSpaced1 :: Namespace -> Name -> SrcLoc -> (VName -> TypeM a) -> TypeM a
 bindSpaced1 ns name loc body = do
   name' <- newID name
-  let mapping = M.singleton (ns, name) $ qualName name'
-  bindNameMap mapping (body name') <* warnIfUnused (ns, name', loc)
+  withNameMap (M.insert (ns, name) (qualName name')) (body name')
+    <* warnIfUnused ns name' loc
 
 -- | Bind these identifiers in the name map and also check whether
 -- they have been used.
 bindIdents :: [IdentBase NoInfo VName t] -> TypeM a -> TypeM a
 bindIdents idents body = do
-  let mapping =
-        M.fromList $
-          zip
-            (map ((Term,) . (baseName . identName)) idents)
-            (map (qualName . identName) idents)
-  bindNameMap mapping body <* mapM_ warnIfUnused [(Term, v, loc) | Ident v _ loc <- idents]
+  let ins nm (Ident v _ _) = M.insert (Term, baseName v) (qualName v) nm
+  withNameMap (\nm -> foldl' ins nm idents) body
+    <* mapM_ (\(Ident v _ loc) -> warnIfUnused Term v loc) idents
 
 -- | Indicate that this name has been used. This is usually done
 -- implicitly by other operations, but sometimes we want to make a
 -- "fake" use to avoid things like top level functions being
 -- considered unused.
 usedName :: VName -> TypeM ()
-usedName name = modify $ \s -> s {stateUsed = S.insert name $ stateUsed s}
+usedName name = modify $ \s -> s {stateUsed = IS.insert (baseTag name) $ stateUsed s}
 
 instance MonadTypeChecker TypeM where
   warnings ws =
@@ -492,22 +499,43 @@ qualifyTypeVars ::
   Env ->
   [VName] ->
   [VName] ->
-  TypeBase Size as ->
-  TypeBase Size as
-qualifyTypeVars outer_env orig_except ref_qs = onType (S.fromList orig_except)
+  TypeBase Size o ->
+  TypeBase Size o
+qualifyTypeVars = qualifyTypeVarsWith onDim
+  where
+    onDim qual except e = runIdentity $ onDimM except e
+      where
+        onDimM except' (Var qn typ loc) = pure $ Var (qual except' qn) typ loc
+        onDimM except' e' = astMap (identityMapper {mapOnExp = onDimM except'}) e'
+
+-- | Like 'qualifyTypeVars', but generic in the representation of
+-- sizes, which are handled by the given function (that is passed the
+-- qualification function and the set of names not to qualify).
+qualifyTypeVarsWith ::
+  forall dim o.
+  ((S.Set VName -> QualName VName -> QualName VName) -> S.Set VName -> dim -> dim) ->
+  Env ->
+  [VName] ->
+  [VName] ->
+  TypeBase dim o ->
+  TypeBase dim o
+qualifyTypeVarsWith onDim outer_env orig_except ref_qs
+  | null ref_qs = id
+  | otherwise = onType (S.fromList orig_except)
   where
     onType ::
+      forall o'.
       S.Set VName ->
-      TypeBase Size as ->
-      TypeBase Size as
-    onType except (Array u shape et) =
-      Array u (fmap (onDim except) shape) (onScalar except et)
+      TypeBase dim o' ->
+      TypeBase dim o'
+    onType except (Array o shape et) =
+      Array o (fmap (onDim qual except) shape) (onScalar except et)
     onType except (Scalar t) =
       Scalar $ onScalar except t
 
     onScalar _ (Prim t) = Prim t
-    onScalar except (TypeVar u qn targs) =
-      TypeVar u (qual except qn) (map (onTypeArg except) targs)
+    onScalar except (TypeVar o qn targs) =
+      TypeVar o (qual except qn) (map (onTypeArg except) targs)
     onScalar except (Record m) =
       Record $ M.map (onType except) m
     onScalar except (Sum m) =
@@ -520,13 +548,9 @@ qualifyTypeVars outer_env orig_except ref_qs = onType (S.fromList orig_except)
           Unnamed -> except
 
     onTypeArg except (TypeArgDim d) =
-      TypeArgDim $ onDim except d
+      TypeArgDim $ onDim qual except d
     onTypeArg except (TypeArgType t) =
       TypeArgType $ onType except t
-
-    onDim except e = runIdentity $ onDimM except e
-    onDimM except (Var qn typ loc) = pure $ Var (qual except qn) typ loc
-    onDimM except e = astMap (identityMapper {mapOnExp = onDimM except}) e
 
     qual except (QualName orig_qs name)
       | name `elem` except || reachable orig_qs name outer_env =
@@ -624,3 +648,5 @@ checkAttr (AttrAtom (AtomName v) loc) =
   pure $ AttrAtom (AtomName v) loc
 checkAttr (AttrAtom (AtomInt x) loc) =
   pure $ AttrAtom (AtomInt x) loc
+checkAttr (AttrAtom (AtomVar v) loc) =
+  pure $ AttrAtom (AtomVar v) loc

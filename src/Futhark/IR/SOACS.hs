@@ -45,16 +45,21 @@ instance BuilderOps SOACS
 
 instance PrettyRep SOACS
 
+instance TraverseOpStms SOACS where
+  traverseOpStms = traverseSOACStms
+
 usesAD :: Prog SOACS -> Bool
 usesAD prog = any stmUsesAD (progConsts prog) || any funUsesAD (progFuns prog)
   where
     funUsesAD = bodyUsesAD . funDefBody
     bodyUsesAD = any stmUsesAD . bodyStms
     stmUsesAD = expUsesAD . stmExp
+    lamUsesAD :: GLambda SOACS t -> Bool
     lamUsesAD = bodyUsesAD . lambdaBody
     expUsesAD (Op JVP {}) = True
     expUsesAD (Op VJP {}) = True
     expUsesAD (Op WithVJP {}) = True
+    expUsesAD (Op (FlatMap _ _ lam)) = lamUsesAD lam
     expUsesAD (Op (Stream _ _ _ lam)) = lamUsesAD lam
     expUsesAD (Op (Screma _ _ (ScremaForm lam scans reds post_lam))) =
       lamUsesAD lam

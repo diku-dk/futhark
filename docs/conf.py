@@ -506,6 +506,13 @@ man_pages: List[Tuple[str, str, str, List[Any], int]] = [
         1,
     ),
     (
+        "man/futhark-benchcmp",
+        "futhark-benchcmp",
+        "compare Futhark benchmark results",
+        [],
+        1,
+    ),
+    (
         "man/futhark-doc",
         "futhark-doc",
         "generate documentation for Futhark code",
@@ -538,13 +545,6 @@ man_pages: List[Tuple[str, str, str, List[Any], int]] = [
         "man/futhark-literate",
         "futhark-literate",
         "execute literate Futhark program",
-        [],
-        1,
-    ),
-    (
-        "man/futhark-script",
-        "futhark-script",
-        "execute FutharkScript expression",
         [],
         1,
     ),

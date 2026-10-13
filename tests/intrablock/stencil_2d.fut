@@ -51,5 +51,5 @@ def life (iterations: i32) (board: [][]bool) =
   loop board for _i < iterations do iteration board
 
 def main (iterations: i32) (board: [][][]bool) =
-  #[incremental_flattening(only_intra)]
+  #[flattening(only_intra)]
   map (life iterations) board

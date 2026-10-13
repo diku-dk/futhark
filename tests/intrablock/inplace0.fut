@@ -5,7 +5,7 @@
 -- structure gpu { SegMap/SegScan 2 SegMap/Update 1 }
 
 def main (xss: [][]f32) =
-  #[incremental_flattening(only_intra)]
+  #[flattening(only_intra)]
   map (\xs ->
          let ys = scan (+) 0 xs
          let ys[0] = ys[0] + 1

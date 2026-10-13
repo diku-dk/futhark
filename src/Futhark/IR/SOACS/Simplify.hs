@@ -18,6 +18,7 @@ module Futhark.IR.SOACS.Simplify
     simplifyMapIota,
     SOACS,
     eliminate,
+    eliminateWithDeps,
     eliminateByRes,
     prunePreLambdaResults,
     dedupInput,
@@ -91,21 +92,28 @@ simplifyConsts =
 simplifySOAC ::
   (Simplify.SimplifiableRep rep) =>
   Simplify.SimplifyOp rep (SOAC (Wise rep))
-simplifySOAC (VJP arr vec lam) = do
-  (lam', hoisted) <- Engine.simplifyLambda mempty lam
+simplifySOAC (VJP shape arr vec lam) = do
+  shape' <- traverse Engine.simplify shape
   arr' <- mapM Engine.simplify arr
   vec' <- mapM Engine.simplify vec
-  pure (VJP arr' vec' lam', hoisted)
-simplifySOAC (JVP arr vec lam) = do
-  (lam', hoisted) <- Engine.simplifyLambda mempty lam
+  (lam', hoisted) <- Engine.enterLoop $ Engine.simplifyLambda mempty lam
+  pure (VJP shape' arr' vec' lam', hoisted)
+simplifySOAC (JVP shape arr vec lam) = do
+  shape' <- traverse Engine.simplify shape
   arr' <- mapM Engine.simplify arr
   vec' <- mapM Engine.simplify vec
-  pure (JVP arr' vec' lam', hoisted)
+  (lam', hoisted) <- Engine.enterLoop $ Engine.simplifyLambda mempty lam
+  pure (JVP shape' arr' vec' lam', hoisted)
 simplifySOAC (WithVJP args lam lam_adj) = do
   args' <- mapM Engine.simplify args
   (lam', hoisted) <- Engine.simplifyLambda mempty lam
   (lam_adj', hoisted_adj) <- Engine.simplifyLambda mempty lam_adj
   pure (WithVJP args' lam' lam_adj', hoisted <> hoisted_adj)
+simplifySOAC (FlatMap w arrs lam) = do
+  w' <- Engine.simplify w
+  arrs' <- mapM Engine.simplify arrs
+  (lam', hoisted_lam) <- Engine.enterLoop $ Engine.simplifyLambda mempty lam
+  pure (FlatMap w' arrs' lam', hoisted_lam)
 simplifySOAC (Stream outerdim arr nes lam) = do
   outerdim' <- Engine.simplify outerdim
   nes' <- mapM Engine.simplify nes
@@ -143,7 +151,7 @@ simplifyScan ::
   (Simplify.SimplifiableRep rep) =>
   Simplify.SimplifyOp rep (Scan (Wise rep))
 simplifyScan (Scan lam nes) = do
-  (lam', hoisted) <- Engine.simplifyLambda mempty lam
+  (lam', hoisted) <- Engine.enterLoop $ Engine.simplifyLambda mempty lam
   nes' <- Engine.simplify nes
   pure (Scan lam' nes', hoisted)
 
@@ -151,7 +159,7 @@ simplifyReduce ::
   (Simplify.SimplifiableRep rep) =>
   Simplify.SimplifyOp rep (Reduce (Wise rep))
 simplifyReduce (Reduce comm lam nes) = do
-  (lam', hoisted) <- Engine.simplifyLambda mempty lam
+  (lam', hoisted) <- Engine.enterLoop $ Engine.simplifyLambda mempty lam
   nes' <- Engine.simplify nes
   pure (Reduce comm lam' nes', hoisted)
 
@@ -412,6 +420,10 @@ removeUnusedSOACInput _ pat aux op
     Just (used_arrs, map_lam') <- remove map_lam arrs =
       Simplify . auxing aux . letBind pat . Op $
         soacOp (Screma w used_arrs (ScremaForm map_lam' scan reduce post_lam))
+  | Just (Hist w arrs ops map_lam :: SOAC rep) <- asSOAC op,
+    Just (used_arrs, map_lam') <- remove map_lam arrs =
+      Simplify . auxing aux . letBind pat . Op $
+        soacOp (Hist w used_arrs ops map_lam')
   where
     used_in_body map_lam = freeIn $ lambdaBody map_lam
     usedInput map_lam (param, _) = paramName param `nameIn` used_in_body map_lam
@@ -1166,16 +1178,32 @@ moveTransformToOutput _ _ _ _ =
 -- | Eliminate statements if it is not an dependency used to form the
 -- names given.
 eliminate :: (Buildable rep) => Names -> Stms rep -> Stms rep
-eliminate = auxiliary (stmsFromList [])
+eliminate deps = snd . eliminateWithDeps deps
+
+-- | As 'eliminate', but also return everything the retained statements and the
+-- results depend upon. A lambda parameter is live exactly when it is in this
+-- set, which saves traversing the pruned body again just to find its free
+-- variables. The pair is lazy in its second component, so a caller that only
+-- wants to know what is live need not pay for rebuilding the statements.
+eliminateWithDeps :: (Buildable rep) => Names -> Stms rep -> (Names, Stms rep)
+eliminateWithDeps deps stms
+  -- If nothing needs preserving then nothing is live, as a statement is kept
+  -- only when it binds a name already needed, and the set of needed names grows
+  -- only from statements we keep.
+  | namesNull deps = (mempty, mempty)
+  | otherwise = (final_deps, stmsFromList kept)
   where
-    auxiliary stms' deps stms
-      | Just (stms'', stm@(Let v aux e)) <- stmsLast stms =
-          if namesIntersect deps $ namesFromList $ patNames v
-            then
-              auxiliary (oneStm stm <> stms') (freeIn (aux, e) <> deps) stms''
-            else
-              auxiliary stms' deps stms''
-      | otherwise = stms'
+    -- Walking the statements as a list and rebuilding the sequence once is much
+    -- cheaper than peeling them off the right of the sequence, which allocates
+    -- a new sequence per statement in both directions.
+    (final_deps, kept) = auxiliary deps (reverse (stmsToList stms)) []
+
+    auxiliary deps' [] kept' = (deps', kept')
+    auxiliary deps' (stm@(Let v aux e) : stms') kept'
+      | any (`nameIn` deps') (patNames v) =
+          auxiliary (freeIn (aux, e) <> deps') stms' (stm : kept')
+      | otherwise =
+          auxiliary deps' stms' kept'
 
 -- | Eliminate statements inside a lambda if they are not used to
 -- compute the result.
@@ -1277,8 +1305,8 @@ prunePreLambdaScanResults (ScremaForm pre_lam scan red post_lam) =
     temp_post_lam = eliminateByRes post_lam
     deps = freeIn $ lambdaBody temp_post_lam
 
--- | Prunes all unused results from the pre-lambda in a ScremaForm
--- (fixed-point).
+-- | Prunes all unused results from the pre-lambda in a ScremaForm with scans or
+-- reduces (fixed-point).
 --
 -- Repeatedly prunes unused scan and map results until no further
 -- changes occur.  This is necessary because eliminating some results
@@ -1292,16 +1320,33 @@ prunePreLambdaScanResults (ScremaForm pre_lam scan red post_lam) =
 -- Returns: A ScremaForm with all transitively unused pre-lambda
 -- results eliminated.
 prunePreLambdaResults :: (Buildable rep) => ScremaForm rep -> ScremaForm rep
-prunePreLambdaResults form =
-  if form == form' then form' else prunePreLambdaResults form'
+prunePreLambdaResults form
+  -- Performance weak: without scans or reductions, every pre-lambda result is a
+  -- map result that the post-lambda consumes directly, so there is nothing here
+  -- that the ordinary simplifier will not remove later.
+  | null (scremaScans form), null (scremaReduces form) = form
+  | otherwise =
+      if extent form == extent form' then form' else prunePreLambdaResults form'
   where
     form' = prunePreLambdaScanResults $ prunePreLambdaMapResults form
+    -- Both prunings only ever remove results, parameters and statements, so a
+    -- round that changes nothing leaves all of these counts alone.  Comparing
+    -- them detects a change without comparing the lambda bodies, which may be
+    -- very large when this is called on a repeatedly fused SOAC.
+    extent (ScremaForm pre scan red post) =
+      ( length $ bodyResult $ lambdaBody pre,
+        length $ bodyStms $ lambdaBody pre,
+        length $ lambdaParams post,
+        length $ bodyStms $ lambdaBody post,
+        scanResults scan,
+        redResults red
+      )
 
 -- | Removes duplicate inputs from a ScremaForm's lambda parameters.
 --
 -- When the same input appears multiple times in the input list (with
 -- corresponding duplicate lambda parameters), this function: 1. Keeps
--- only one copy of each unique input 2. Creates let-bindings in the
+-- only one copy of each distinct input 2. Creates let-bindings in the
 -- lambda body to alias the duplicates
 --
 -- Example: If inputs [x, y, x] map to lambda params [a, b, c], the

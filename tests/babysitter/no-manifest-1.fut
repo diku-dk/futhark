@@ -44,5 +44,5 @@ def mat_inv [n] (A: [n][n]f32) : [n][n]f32 =
   in Ap'[0:n, n:n * 2] :> [n][n]f32
 
 def main [m] [n] (X: [m][n][n]f32) : [m][n][n]f32 =
-  #[incremental_flattening(only_inner)]
+  #[flattening(only_inner)]
   map mat_inv X

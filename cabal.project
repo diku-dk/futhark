@@ -1,5 +1,5 @@
 packages: futhark.cabal, language-wgsl
-index-state: 2026-05-14T15:59:02Z
+index-state: 2026-10-07T07:37:17Z
 multi-repl: True
 
 package futhark

@@ -1,6 +1,6 @@
 -- A consuming function must not be passed as a higher-order argument!
 -- ==
--- error: consumption
+-- error: contains-consumption
 
 def zero (xs: *[]i32) (i: i32) =
   xs with [i] = 0

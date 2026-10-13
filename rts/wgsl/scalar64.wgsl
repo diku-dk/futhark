@@ -2,7 +2,7 @@
 
 alias i64 = vec2<i32>; // (low, high)
 
-const zero_i64: i64 = i64(0, 0); 
+const zero_i64: i64 = i64(0, 0);
 const one_i64: i64 = i64(1, 0);
 
 fn read_i64(buffer: ptr<storage, array<i64>, read_write>, i: i32) -> i64 {
@@ -55,16 +55,16 @@ fn udiv_i64(a: i64, b: i64) -> i64 {
   return i64(udiv_i32(a.x, b.y), 0);
 }
 
-fn udiv_up_i64(a: i64, b: i64) -> i64 {
-  return i64(udiv_up_i32(a.x, b.x), 0);
+fn uceil_div_i64(a: i64, b: i64) -> i64 {
+  return i64(uceil_div_i32(a.x, b.x), 0);
 }
 
 fn sdiv_i64(a: i64, b: i64) -> i64 {
   return sext_i32_i64(sdiv_i32(a.x, b.x));
 }
 
-fn sdiv_up_i64(a: i64, b: i64) -> i64 {
-  return sext_i32_i64(sdiv_up_i32(a.x, b.x));
+fn sceil_div_i64(a: i64, b: i64) -> i64 {
+  return sext_i32_i64(sceil_div_i32(a.x, b.x));
 }
 
 fn umod_i64(a: i64, b: i64) -> i64 {
@@ -134,8 +134,8 @@ fn ashr_i64(a: i64, b_full: i64) -> i64 {
 
   if b == 0 { return a; }
   if b >= 32 {
-	var high: i32;
-	if a.y < 0 { high = -1; } else { high = 0; }
+        var high: i32;
+        if a.y < 0 { high = -1; } else { high = 0; }
     return i64(a.y >> (b - 32), high);
   }
 

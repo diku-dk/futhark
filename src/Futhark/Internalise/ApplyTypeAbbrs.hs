@@ -43,8 +43,8 @@ removeTypeVariablesInType types =
   applySubst (`M.lookup` types)
 
 substEntry :: Types -> EntryPoint -> EntryPoint
-substEntry types (EntryPoint params ret) =
-  EntryPoint (map onEntryParam params) (onEntryType ret)
+substEntry types (EntryPoint params ret doc) =
+  EntryPoint (map onEntryParam params) (onEntryType ret) doc
   where
     onEntryParam (EntryParam v t) =
       EntryParam v $ onEntryType t

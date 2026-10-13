@@ -7,14 +7,13 @@
 --
 -- == Types and values
 --
--- The core language type system is much more restricted than the core
--- language.  This is a theme that repeats often.  The only types that
--- are supported in the core language are various primitive types
--- t'PrimType' which can be combined in arrays (ignore v'Mem' and
--- v'Acc' for now).  Types are represented as t'TypeBase', which is
--- parameterised by the shape of the array and whether we keep
--- uniqueness information.  The t'Type' alias, which is the most
--- commonly used, uses t'Shape' and t'NoUniqueness'.
+-- The core language type system is much more restricted than the core language.
+-- This is a theme that repeats often. The only types that are supported in the
+-- core language are various primitive types t'PrimType' which can be combined
+-- in arrays (ignore v'Mem' and v'Acc' for now). Types are represented as
+-- t'TypeBase', which is parameterised by the shape of the array and whether we
+-- keep a mode. The t'Type' alias, which is the most commonly used, uses
+-- t'Shape' and t'NoMode'.
 --
 -- This means that the records, tuples, and sum types of the source
 -- language are represented merely as collections of primitives and
@@ -107,8 +106,8 @@ module Futhark.IR.Syntax
     module Futhark.IR.Syntax.Core,
 
     -- * Types
-    Uniqueness (..),
-    NoUniqueness (..),
+    Diet (..),
+    NoMode (..),
     Rank (..),
     ArrayShape (..),
     Space (..),
@@ -142,7 +141,9 @@ module Futhark.IR.Syntax
     MatchDec (..),
     MatchSort (..),
     Safety (..),
-    Lambda (..),
+    GLambda (..),
+    Lambda,
+    ExtLambda,
     RetAls (..),
 
     -- * Definitions
@@ -556,18 +557,26 @@ data MatchSort
     MatchEquiv
   deriving (Eq, Show, Ord)
 
--- | Anonymous function for use in a SOAC.
-data Lambda rep = Lambda
+-- | A generalised lambda consists of parameters, some kind of return type, and
+-- a body.
+data GLambda rep t = Lambda
   { lambdaParams :: [LParam rep],
-    lambdaReturnType :: [Type],
+    lambdaReturnType :: [t],
     lambdaBody :: Body rep
   }
 
-deriving instance (RepTypes rep) => Eq (Lambda rep)
+deriving instance (RepTypes rep, Eq t) => Eq (GLambda rep t)
 
-deriving instance (RepTypes rep) => Show (Lambda rep)
+deriving instance (RepTypes rep, Show t) => Show (GLambda rep t)
 
-deriving instance (RepTypes rep) => Ord (Lambda rep)
+deriving instance (RepTypes rep, Ord t) => Ord (GLambda rep t)
+
+-- | Anonymous function for use in most SOACs, where the return type is a normal
+-- type.
+type Lambda rep = GLambda rep Type
+
+-- | Anonymous function that can return arrays with existential size.
+type ExtLambda rep = GLambda rep ExtType
 
 -- | A function and loop parameter.
 type FParam rep = Param (FParamInfo rep)
@@ -596,21 +605,22 @@ deriving instance (RepTypes rep) => Ord (FunDef rep)
 -- | An entry point parameter, comprising its name and original type.
 data EntryParam = EntryParam
   { entryParamName :: Name,
-    entryParamUniqueness :: Uniqueness,
+    entryParamDiet :: Diet,
     entryParamType :: EntryPointType
   }
   deriving (Eq, Show, Ord)
 
 -- | An entry point result type.
 data EntryResult = EntryResult
-  { entryResultUniqueness :: Uniqueness,
+  { -- | Here we overload "consumable" as "fresh".
+    entryResultFreshness :: Diet,
     entryResultType :: EntryPointType
   }
   deriving (Eq, Show, Ord)
 
 -- | Information about the inputs and outputs (return value) of an entry
 -- point.
-type EntryPoint = (Name, [EntryParam], EntryResult)
+type EntryPoint = (Name, [EntryParam], EntryResult, Maybe T.Text)
 
 -- | An entire Futhark program.
 data Prog rep = Prog

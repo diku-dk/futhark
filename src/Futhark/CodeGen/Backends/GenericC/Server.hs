@@ -121,7 +121,7 @@ cType :: Manifest -> TypeName -> C.Type
 cType manifest tname =
   case M.lookup tname $ manifestTypes manifest of
     Just (TypeArray ctype _ _ _) -> [C.cty|typename $id:(T.unpack ctype)|]
-    Just (TypeOpaque ctype _ _) -> [C.cty|typename $id:(T.unpack ctype)|]
+    Just (TypeOpaque ctype _ _ _) -> [C.cty|typename $id:(T.unpack ctype)|]
     Nothing -> uncurry primAPIType $ scalarToPrim tname
 
 data Kind
@@ -149,7 +149,7 @@ typeBoilerplate manifest (tname, TypeArray c_type_name et rank ops) =
       array_name = type_name <> "_array"
       info_name = et <> "_info"
       array_new_wrap = arrayNew ops <> "_wrap"
-      array_set = arrayNew ops <> "_set"
+      array_set_wrap = arraySet ops <> "_wrap"
       array_index_wrap = arrayIndex ops <> "_wrap"
       shape_args = [[C.cexp|shape[$int:i]|] | i <- [0 .. rank - 1]]
       is_args = [[C.cexp|is[$int:i]|] | i <- [0 .. rank - 1]]
@@ -164,18 +164,11 @@ typeBoilerplate manifest (tname, TypeArray c_type_name et rank ops) =
                 *out = $id:(arrayNew ops)(ctx, p, $args:shape_args);
                 return 0;
               }
-              int $id:array_set(struct futhark_context *ctx,
-                                typename $id:c_type_name arr,
-                                $ty:element_c_type *val,
-                                const typename int64_t *is) {
-                const typename int64_t *shape = $id:(arrayShape ops)(ctx, arr);
-                typename uint64_t idx = is[0];
-                for (int i = 1; i < $int:rank; ++i) {
-                  idx *= shape[i-1];
-                  idx += is[i];
-                }
-                (($ty:element_c_type*)$id:(arrayValuesRaw ops)(ctx, arr))[idx] = *val;
-                return 0;
+              int $id:array_set_wrap(struct futhark_context *ctx,
+                                     typename $id:c_type_name arr,
+                                     $ty:element_c_type *val,
+                                     const typename int64_t *is) {
+                return $id:(arraySet ops)(ctx, arr, *val, $args:is_args);
               }
               int $id:array_index_wrap(struct futhark_context *ctx,
                                        void *dest,
@@ -191,7 +184,7 @@ typeBoilerplate manifest (tname, TypeArray c_type_name et rank ops) =
                 .num_fields = 0,
                 .fields = NULL,
                 .new = (typename array_new_fn)$id:array_new_wrap,
-                .set = (typename array_set_fn)$id:array_set,
+                .set = (typename array_set_fn)$id:array_set_wrap,
                 .shape = (typename array_shape_fn)$id:(arrayShape ops),
                 .index = (typename array_index_fn)$id:array_index_wrap,
                 .values = (typename array_values_fn)$id:(arrayValues ops),
@@ -208,7 +201,7 @@ typeBoilerplate manifest (tname, TypeArray c_type_name et rank ops) =
                 .info = &$id:array_name
               };|]
       )
-typeBoilerplate manifest (tname, TypeOpaque c_type_name ops extra_ops) =
+typeBoilerplate manifest (tname, TypeOpaque c_type_name ops extra_ops _) =
   let type_name = typeStructName tname
       aux_name = type_name <> "_aux"
       (transparent_edecls, transparent_init, kind) = transparentDefs type_name extra_ops
@@ -450,12 +443,12 @@ entryTypeBoilerplate manifest =
     manifest
 
 oneEntryBoilerplate :: Manifest -> (T.Text, EntryPoint) -> ([C.Definition], C.Initializer)
-oneEntryBoilerplate manifest (name, EntryPoint cfun tuning_params output inputs attrs) =
+oneEntryBoilerplate manifest (name, EntryPoint cfun tuning_params output inputs attrs _doc) =
   let call_f = "call_" <> nameFromText name
       out_type = outputType output
       in_types = map inputType inputs
       in_types_name = nameFromText name <> "_in_types"
-      in_unique_name = nameFromText name <> "_in_unique"
+      in_consumed_name = nameFromText name <> "_in_consumed"
       tuning_params_name = nameFromText name <> "_tuning_params"
       attrs_name = nameFromText name <> "_attrs"
       (in_items, in_args)
@@ -466,7 +459,7 @@ oneEntryBoilerplate manifest (name, EntryPoint cfun tuning_params output inputs 
                   $inits:(map typeStructInit in_types),
                   NULL
                 };
-                bool $id:in_unique_name[] = {
+                bool $id:in_consumed_name[] = {
                   $inits:(map inputUniqueInit inputs)
                 };
                 const char* $id:tuning_params_name[] = {
@@ -488,15 +481,15 @@ oneEntryBoilerplate manifest (name, EntryPoint cfun tuning_params output inputs 
             .tuning_params = $id:tuning_params_name,
             .in_types = $id:in_types_name,
             .out_type = $init:(typeStructInit out_type),
-            .in_unique = $id:in_unique_name,
-            .out_unique = $init:(outputUniqueInit output),
+            .in_consumed = $id:in_consumed_name,
+            .out_fresh = $init:(outputUniqueInit output),
             .attrs = $id:attrs_name
             }|]
       )
   where
     typeStructInit tname = [C.cinit|&$id:(typeStructName tname)|]
-    inputUniqueInit = uniqueInit . inputUnique
-    outputUniqueInit = uniqueInit . outputUnique
+    inputUniqueInit = uniqueInit . inputConsumed
+    outputUniqueInit = uniqueInit . outputFresh
     uniqueInit True = [C.cinit|true|]
     uniqueInit False = [C.cinit|false|]
 

@@ -16,11 +16,11 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Set qualified as S
 import Data.Text qualified as T
+import Futhark.Error (compilerLimitation)
 import Futhark.IR.SOACS as I hiding (stmPat)
 import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.Bindings
 import Futhark.Internalise.Entry
-import Futhark.Internalise.Lambdas
 import Futhark.Internalise.Monad as I
 import Futhark.Internalise.TypesValues
 import Futhark.Transform.Rename as I
@@ -45,7 +45,47 @@ transformProg always_safe strip_provenance types vbinds = do
   I.renameProg $ I.Prog opaques consts funs
 
 internaliseValBinds :: VisibleTypes -> [E.ValBind] -> InternaliseM ()
-internaliseValBinds types = mapM_ $ internaliseValBind types
+internaliseValBinds types vbinds = do
+  -- Internalise every function's parameters and register its calling
+  -- information *before* internalising any body, so that references between
+  -- functions resolve regardless of definition order.
+  headers <- forM vbinds $ \vb -> do
+    let E.ValBind _ fname _ _ (Info rettype) tparams params _ _ _ _ = vb
+    fps <- internaliseFParams tparams params
+    let (_, _, _, info) = funHeader (funShapeParams fps) (funValueParams fps) rettype
+    unless (null (funValueParams fps)) $ addFunInfo fname info
+    pure (vb, fps)
+  forM_ headers $ \(vb, fps) ->
+    bindFParams fps $ internaliseValBindBody types vb fps
+
+-- | A function's internalised parameters, return type, full internalised
+-- return type, and calling information, all computed from its signature alone
+-- (no body required).
+funHeader ::
+  [I.FParam I.SOACS] ->
+  [[Tree (I.FParam I.SOACS)]] ->
+  E.ResRetType ->
+  ([Tree (I.FParam I.SOACS)], [I.ExtType], [(I.ExtType, RetAls)], FunInfo)
+funHeader shapeparams params' rettype =
+  (all_params, rettype', fun_rettype, info)
+  where
+    shapenames = map I.paramName shapeparams
+    all_params = map pure shapeparams ++ concat params'
+    zeroExts ts = generaliseExtTypes ts ts
+    (rettype', retals) =
+      first zeroExts . unzip $
+        internaliseReturnType (map (fmap paramDeclType) all_params) rettype
+    num_ctx = length (shapeContext rettype')
+    fun_rettype =
+      replicate num_ctx (I.Prim int64, mempty)
+        ++ zip rettype' (map (shiftRetAls num_ctx) retals)
+    info =
+      ( shapenames,
+        map declTypeOf $ foldMap (foldMap toList) params',
+        foldMap toList all_params,
+        fmap (`zip` map snd fun_rettype)
+          . applyRetType (map fst fun_rettype) (foldMap toList all_params)
+      )
 
 internaliseFunName :: VName -> Name
 internaliseFunName = nameFromText . prettyText
@@ -53,71 +93,53 @@ internaliseFunName = nameFromText . prettyText
 shiftRetAls :: Int -> RetAls -> RetAls
 shiftRetAls d (RetAls pals rals) = RetAls pals $ map (+ d) rals
 
-internaliseValBind :: VisibleTypes -> E.ValBind -> InternaliseM ()
-internaliseValBind types fb@(E.ValBind entry fname _ _ (Info rettype) tparams params body _ attrs _) = do
-  bindingFParams tparams params $ \shapeparams params' -> do
-    let shapenames = map I.paramName shapeparams
-        all_params = map pure shapeparams ++ concat params'
-        msg =
-          errorMsg
-            [ "Internal runtime error.\n",
-              "Return value of ",
-              ErrorString (prettyText fname),
-              " does not match type shape.\n",
-              "This is a bug in the Futhark compiler. Please report this:\n",
-              "  https://github.com/diku-dk/futhark/issues"
-            ]
+-- | Internalise a function's body, given its already-bound parameters (see
+-- 'internaliseFParams' and 'bindFParams'). Its calling information has already
+-- been registered by 'internaliseValBinds'.
+internaliseValBindBody :: VisibleTypes -> E.ValBind -> FunParams -> InternaliseM ()
+internaliseValBindBody types fb@(E.ValBind entry fname _ _ (Info rettype) _ _ body _ attrs _) fps = do
+  let (all_params, rettype', fun_rettype, _) =
+        funHeader (funShapeParams fps) (funValueParams fps) rettype
+      params' = funValueParams fps
+      msg =
+        errorMsg
+          [ "Internal runtime error.\n",
+            "Return value of ",
+            ErrorString (prettyText fname),
+            " does not match type shape.\n",
+            "This is a bug in the Futhark compiler. Please report this:\n",
+            "  https://github.com/diku-dk/futhark/issues"
+          ]
 
-    (body', rettype') <- buildBody $ do
-      body_res <- internaliseExp (baseName fname <> "_res") body
-      (rettype', retals) <-
-        first zeroExts . unzip . internaliseReturnType (map (fmap paramDeclType) all_params) rettype
-          <$> mapM subExpType body_res
+  body' <- buildBody_ $ do
+    body_res <- internaliseExp (baseName fname <> "_res") body
 
-      when (null params') $
-        bindExtSizes (E.AppRes (E.toStruct $ E.retType rettype) (E.retDims rettype)) body_res
+    when (null params') $
+      bindExtSizes (E.AppRes (E.toStruct $ E.retType rettype) (E.retDims rettype)) body_res
 
-      body_res' <-
-        ensureResultExtShape msg (map I.fromDecl rettype') $ subExpsRes body_res
-      let num_ctx = length (shapeContext rettype')
-      pure
-        ( body_res',
-          replicate num_ctx (I.Prim int64, mempty)
-            ++ zip rettype' (map (shiftRetAls num_ctx) retals)
-        )
+    ensureResultExtShape msg rettype' $ subExpsRes body_res
 
-    attrs' <- internaliseAttrs attrs
+  attrs' <- internaliseAttrs attrs
 
-    let fd =
-          I.FunDef
-            Nothing
-            attrs'
-            (internaliseFunName fname)
-            rettype'
-            (foldMap toList all_params)
-            body'
+  let fd =
+        I.FunDef
+          Nothing
+          attrs'
+          (internaliseFunName fname)
+          fun_rettype
+          (foldMap toList all_params)
+          body'
 
-    if null params'
-      then bindConstant fname fd
-      else
-        bindFunction
-          fname
-          fd
-          ( shapenames,
-            map declTypeOf $ foldMap (foldMap toList) params',
-            foldMap toList all_params,
-            fmap (`zip` map snd rettype')
-              . applyRetType (map fst rettype') (foldMap toList all_params)
-          )
+  if null params'
+    then addConstant fname fd
+    else addFunDef fd
 
   case entry of
     Just (Info entry') -> generateEntryPoint types entry' fb
     Nothing -> pure ()
-  where
-    zeroExts ts = generaliseExtTypes ts ts
 
 generateEntryPoint :: VisibleTypes -> E.EntryPoint -> E.ValBind -> InternaliseM ()
-generateEntryPoint types (E.EntryPoint e_params e_rettype) vb = do
+generateEntryPoint types (E.EntryPoint e_params e_rettype doc) vb = do
   let (E.ValBind _ ofname _ _ (Info rettype) tparams params _ _ attrs _) = vb
   bindingFParams tparams params $ \shapeparams params' -> do
     let all_params = map pure shapeparams ++ concat params'
@@ -127,6 +149,7 @@ generateEntryPoint types (E.EntryPoint e_params e_rettype) vb = do
           entryPoint
             types
             (baseName ofname)
+            doc
             (zip e_params $ map (foldMap toList) params')
             (e_rettype, map (map I.rankShaped) entry_rettype)
         args = map (I.Var . I.paramName) $ foldMap (foldMap toList) params'
@@ -156,7 +179,7 @@ generateEntryPoint types (E.EntryPoint e_params e_rettype) vb = do
         ("entry_" <> baseName ofname)
         ( ctx_ts
             ++ zip
-              (zeroExts (concat entry_rettype))
+              (map I.fromDecl (zeroExts (concat entry_rettype)))
               (map (shiftRetAls num_ctx) $ concat retals)
         )
         (shapeparams ++ foldMap (foldMap toList) params')
@@ -345,7 +368,7 @@ internaliseAppExp desc _ (E.Range start maybe_second end _) = do
     certifying cs $
       letSubExp "num_elems" $
         I.BasicOp $
-          I.BinOp (SDivUp Int64 I.Unsafe) distance pos_step
+          I.BinOp (SCeilDiv Int64 I.Unsafe) distance pos_step
 
   se <- letSubExp desc (I.BasicOp $ I.Iota num_elems start' step it)
   pure [se]
@@ -549,7 +572,18 @@ internaliseAppExp desc _ (E.Loop sparams mergepat loopinit form loopbody _) = do
 
           -- Careful not to clobber anything.
           loop_end_cond_body <- renameBody <=< buildBody_ $ do
-            forM_ (zip shapepat shapeargs) $ \(p, se) ->
+            -- Shape arguments may refer to other shape parameters, which
+            -- must not be clobbered before they are read.
+            let shapepat_names = map I.paramName shapepat
+            shapeargs' <- forM (zip shapepat shapeargs) $ \case
+              (p, I.Var v)
+                | v /= I.paramName p,
+                  v `elem` shapepat_names -> do
+                    v' <- newVName $ baseName v <> "_tmp"
+                    letBindNames [v'] $ I.BasicOp $ I.SubExp $ I.Var v
+                    pure $ I.Var v'
+              (_, se) -> pure se
+            forM_ (zip shapepat shapeargs') $ \(p, se) ->
               unless (se == I.Var (I.paramName p)) $
                 letBindNames [I.paramName p] $
                   BasicOp $
@@ -558,13 +592,17 @@ internaliseAppExp desc _ (E.Loop sparams mergepat loopinit form loopbody _) = do
             -- not in the same position), in which case we must be careful to
             -- avoid clobbering.
             let mergepat_names = map I.paramName mergepat'
-            ses' <- forM ses $ \case
-              I.Var v
+            ses' <- forM (zip mergepat' ses) $ \case
+              (p, I.Var v)
                 | v `elem` mergepat_names -> do
                     v' <- newVName $ baseName v <> "_tmp"
-                    letBindNames [v'] $ I.BasicOp (I.SubExp $ I.Var v)
+                    letBindNames [v'] $
+                      if primType $ paramType p
+                        then I.BasicOp (I.SubExp $ I.Var v)
+                        -- Need administrative coerce due to the renaming.
+                        else shapeCoerce (I.arrayDims $ paramType p) v
                     pure $ I.Var v'
-              se -> pure se
+              (_, se) -> pure se
             forM_ (zip mergepat' ses') $ \(p, se) ->
               letBindNames [I.paramName p] $
                 case se of
@@ -722,7 +760,7 @@ internaliseExp desc (E.Ascript e _ _) =
   internaliseExp desc e
 internaliseExp desc (E.Coerce e _ (Info et) _) = do
   ses <- internaliseExp desc e
-  ts <- internaliseCoerceType (E.toStruct et) <$> mapM subExpType ses
+  let ts = internaliseCoerceType (E.toStruct et)
   dt' <- typeExpForError $ toStruct et
   forM (zip ses ts) $ \(e', t') -> do
     dims <- arrayDims <$> subExpType e'
@@ -732,7 +770,7 @@ internaliseExp desc (E.Coerce e _ (Info et) _) = do
             ++ ["] cannot match shape of type \""]
             ++ dt'
             ++ ["\"."]
-    ensureExtShape (errorMsg parts) (I.fromDecl t') desc e'
+    ensureExtShape (errorMsg parts) t' desc e'
 internaliseExp desc (E.Negate e loc) = locating loc $ do
   e' <- internaliseExp1 "negate_arg" e
   et <- subExpType e'
@@ -881,10 +919,10 @@ internaliseExp desc (E.Update src steps ve _ loc) = locating loc $ do
           ++ prettyString t
 
     indexType :: E.StructType -> [E.DimIndex] -> E.StructType
-    indexType (E.Array u (E.Shape dims) et) idxs =
+    indexType (E.Array o (E.Shape dims) et) idxs =
       case dims' of
         [] -> E.Scalar et
-        ds -> E.Array u (E.Shape ds) et
+        ds -> E.Array o (E.Shape ds) et
       where
         dims' = keptPrefix <> suffix
         keptPrefix = [d | (d, i) <- zip prefix idxs, keepDim i]
@@ -909,8 +947,8 @@ internaliseExp desc (E.Attr attr e loc) = do
         case t of
           I.Array pt shape _ ->
             letSubExp desc $ I.BasicOp $ I.Scratch pt $ I.shapeDims shape
-          I.Prim pt ->
-            pure $ constant $ blankPrimValue pt
+          -- Ignore scratch on non-arrays because they are sometimes applied
+          -- too promisciously.
           _ -> pure se
     "blank" -> do
       ts <- mapM subExpType e'
@@ -1304,6 +1342,26 @@ internaliseDimIndex w (E.DimSlice i j s) = do
     negone = constant (-1 :: Int64)
     one = constant (1 :: Int64)
 
+internaliseFoldLambda ::
+  E.Exp ->
+  [I.Type] ->
+  [I.Type] ->
+  InternaliseM (I.Lambda SOACS)
+internaliseFoldLambda lam acctypes arrtypes = do
+  let rowtypes = map I.rowType arrtypes
+  (params, body, rettype) <- internaliseLambda lam $ acctypes ++ rowtypes
+  let rettype' =
+        [ t `I.setArrayShape` I.arrayShape shape
+        | (t, shape) <- zip rettype acctypes
+        ]
+  -- The result of the body must have the exact same shape as the
+  -- initial accumulator.
+  mkLambda params $
+    ensureResultShape
+      (ErrorMsg [ErrorString "shape of result does not match shape of initial value"])
+      rettype'
+      =<< bodyBind body
+
 internaliseScanOrReduce ::
   Name ->
   Name ->
@@ -1322,7 +1380,7 @@ internaliseScanOrReduce desc what f (lam, ne, arr) = do
       ne'
   nests <- mapM I.subExpType nes'
   arrts <- mapM lookupType arrs
-  lam' <- internaliseFoldLambda internaliseLambda lam nests arrts
+  lam' <- internaliseFoldLambda lam nests arrts
   w <- arraysSize 0 <$> mapM lookupType arrs
   letValExp' desc . I.Op =<< f w lam' nes' arrs
 
@@ -1345,7 +1403,7 @@ internaliseHist dim desc rf hist op ne buckets img = do
 
   -- reshape neutral element to have same size as the destination array
   ne_shp <- forM (zip ne' hist') $ \(n, h) -> do
-    rowtype <- I.stripArray 1 <$> lookupType h
+    rowtype <- I.stripArray dim <$> lookupType h
     ensureShape
       "Row shape of destination array does not match shape of neutral element"
       rowtype
@@ -1353,7 +1411,7 @@ internaliseHist dim desc rf hist op ne buckets img = do
       n
   ne_ts <- mapM I.subExpType ne_shp
   his_ts <- mapM (fmap (I.stripArray (dim - 1)) . lookupType) hist'
-  op' <- internaliseFoldLambda internaliseLambda op ne_ts his_ts
+  op' <- internaliseFoldLambda op ne_ts his_ts
 
   -- reshape return type of bucket function to have same size as neutral element
   -- (modulo the index)
@@ -1390,7 +1448,7 @@ internaliseStreamAcc desc dest op lam bs = do
   acc_cert_v <- newVName "acc_cert"
   dest_ts <- mapM lookupType dest'
   let dest_w = arraysSize 0 dest_ts
-      acc_t = Acc acc_cert_v (I.Shape [dest_w]) (map rowType dest_ts) NoUniqueness
+      acc_t = Acc acc_cert_v (I.Shape [dest_w]) (map rowType dest_ts)
   acc_p <- newParam "acc_p" acc_t
   withacc_lam <- mkLambda [Param mempty acc_cert_v (I.Prim I.Unit), acc_p] $ do
     bs_ts <- mapM lookupType bs'
@@ -1436,12 +1494,12 @@ internaliseSizeExp s e = do
     E.Scalar (E.Prim (E.Signed it)) -> (,it) <$> asIntS Int64 e'
     _ -> error "internaliseSizeExp: bad type"
 
+asVar :: Name -> I.SubExp -> InternaliseM I.VName
+asVar desc se = letExp desc $ I.BasicOp $ I.SubExp se
+
 internaliseExpToVars :: Name -> E.Exp -> InternaliseM [I.VName]
 internaliseExpToVars desc e =
-  mapM asIdent =<< internaliseExp desc e
-  where
-    asIdent (I.Var v) = pure v
-    asIdent se = letExp desc $ I.BasicOp $ I.SubExp se
+  mapM (asVar desc) =<< internaliseExp desc e
 
 internaliseOperation ::
   Name ->
@@ -1654,7 +1712,10 @@ bodyExtType (Body _ stms res) =
   where
     stmsscope = scopeOf stms
 
-internaliseLambda :: InternaliseLambda
+internaliseLambda ::
+  E.Exp ->
+  [I.Type] ->
+  InternaliseM ([I.LParam SOACS], I.Body SOACS, [I.Type])
 internaliseLambda (E.Parens e _) rowtypes =
   internaliseLambda e rowtypes
 internaliseLambda (E.Lambda params body _ (Info (RetType _ rettype)) _) rowtypes =
@@ -1672,6 +1733,55 @@ internaliseLambdaCoerce lam argtypes = do
       (ErrorMsg [ErrorString "unexpected lambda result size"])
       rettype
       =<< bodyBind body
+
+-- | The number of internalised values in the array component of the result of
+-- the lambda of a 'flatmap', which returns that array paired with a value of
+-- regular type.
+flatLambdaIrregulars :: E.Exp -> Int
+flatLambdaIrregulars (E.Parens e _) = flatLambdaIrregulars e
+flatLambdaIrregulars (E.Lambda _ _ _ (Info (E.RetType _ t)) _)
+  | Just (irreg_t : _) <- E.isTupleRecord t =
+      internalisedTypeSize $ E.toStruct irreg_t
+flatLambdaIrregulars e =
+  error $ "flatLambdaIrregulars: unexpected expression:\n" ++ prettyString e
+
+-- | Internalise the lambda of a 'flatmap'. The irregular results (the ones that
+-- are concatenated) are distinguished in the 'ExtLambda' by having the
+-- existential size as their outermost size, so that size must be a variable -
+-- when the lambda produces arrays of some other size, we bind that size and
+-- coerce the arrays to it. By the source language type rules, this cannot fail.
+internaliseFlatLambda :: E.Exp -> [Type] -> InternaliseM (I.ExtLambda SOACS)
+internaliseFlatLambda lam argtypes = do
+  (params, body, _) <- internaliseLambda lam argtypes
+  (body', ret) <- buildBody . localScope (scopeOfLParams params) $ do
+    res <- bodyBind body
+    let (irreg_res, reg_res) = splitAt (flatLambdaIrregulars lam) res
+    k <- irregularSize irreg_res
+    irreg_res' <- mapM (coerceOuter k) irreg_res
+    irreg_ts <- mapM (subExpType . resSubExp) irreg_res'
+    reg_ts <- mapM (subExpType . resSubExp) reg_res
+    pure
+      ( subExpRes (I.Var k) : irreg_res' <> reg_res,
+        I.Prim int64
+          : existentialiseExtTypes [k] (staticShapes irreg_ts)
+            <> staticShapes reg_ts
+      )
+  pure $ I.Lambda params ret body'
+  where
+    irregularSize [] =
+      error "internaliseFlatLambda: lambda has no irregular results."
+    irregularSize (r : _) =
+      asVar "flatmap_k" . arraySize 0 =<< subExpType (resSubExp r)
+
+    coerceOuter k r@(SubExpRes cs (I.Var v)) = do
+      t <- lookupType v
+      case arrayDims t of
+        d : ds
+          | d /= I.Var k ->
+              SubExpRes cs
+                <$> letSubExp "flatmap_irreg" (shapeCoerce (I.Var k : ds) v)
+        _ -> pure r
+    coerceOuter _ r = pure r
 
 -- | Overloaded operators are treated here.
 isOverloadedFunction ::
@@ -1771,6 +1881,7 @@ isIntrinsicFunction qname args = do
           handleSOACs,
           handleAccs,
           handleAD,
+          handleIO,
           handleRest
         ]
   msum [h args $ baseName $ qualLeaf qname | h <- handlers]
@@ -1810,16 +1921,6 @@ isIntrinsicFunction qname args = do
       lam' <- internaliseLambdaCoerce lam $ map rowType arr_ts
       let w = arraysSize 0 arr_ts
       letTupExp' desc . I.Op . I.Screma w arr' =<< I.mapSOAC lam'
-    handleSOACs [k, lam, arr] "partition" = do
-      k' <- fromIntegral <$> fromInt32 k
-      Just $ \_desc -> do
-        arrs <- internaliseExpToVars "partition_input" arr
-        lam' <- internalisePartitionLambda internaliseLambda k' lam $ map I.Var arrs
-        uncurry (++) <$> partitionWithSOACS (fromIntegral k') lam' arrs
-      where
-        fromInt32 (Literal (SignedValue (Int32Value k')) _) = Just k'
-        fromInt32 (IntLit k' (Info (E.Scalar (E.Prim (E.Signed Int32)))) _) = Just $ fromInteger k'
-        fromInt32 _ = Nothing
     handleSOACs [lam, ne, arr] "reduce" = Just $ \desc ->
       internaliseScanOrReduce desc "reduce" reduce (lam, ne, arr)
       where
@@ -1843,6 +1944,12 @@ isIntrinsicFunction qname args = do
       internaliseHist 2 desc rf dest op ne buckets img
     handleSOACs [rf, dest, op, ne, buckets, img] "hist_3d" = Just $ \desc ->
       internaliseHist 3 desc rf dest op ne buckets img
+    handleSOACs [lam, arr] "flatmap" = Just $ \desc -> do
+      arr' <- internaliseExpToVars "map_arr" arr
+      arr_ts <- mapM lookupType arr'
+      lam' <- internaliseFlatLambda lam $ map rowType arr_ts
+      let w = arraysSize 0 arr_ts
+      letValExp' desc $ I.Op $ FlatMap w arr' lam'
     handleSOACs _ _ = Nothing
 
     handleAccs [dest, f, bs] "scatter_stream" = Just $ \desc ->
@@ -1857,14 +1964,24 @@ isIntrinsicFunction qname args = do
     handleAccs _ _ = Nothing
 
     handleAD [f, x, v] fname
-      | fname `elem` ["jvp2", "vjp2"] = Just $ \desc -> do
+      | fname `elem` ["jvp2", "vjp2", "jmp2", "mjp2"] = Just $ \desc -> do
           x' <- internaliseExp "ad_x" x
           v' <- internaliseExp "ad_v" v
+          x_t <- subExpType $ head x'
+          v_t <- subExpType $ head v'
           lam <- internaliseLambdaCoerce f =<< mapM subExpType x'
           fmap (map I.Var) . letTupExp desc . Op $
             case fname of
-              "jvp2" -> JVP x' v' lam
-              _ -> VJP x' v' lam
+              "jvp2" -> JVP mempty x' v' lam
+              "vjp2" -> VJP mempty x' v' lam
+              "jmp2" ->
+                JVP (vecShape x_t v_t) x' v' lam
+              "mjp2" ->
+                VJP (vecShape (head (lambdaReturnType lam)) v_t) x' v' lam
+              _ -> error "handleAD: not supposed to happen."
+      where
+        vecShape t1 t2 =
+          I.Shape $ take (I.arrayRank t2 - I.arrayRank t1) (I.arrayDims t2)
     handleAD [f, f_adj, x] "with_vjp" = Just $ \desc -> do
       x' <- internaliseExp "ad_x" x
       lam <- internaliseLambdaCoerce f =<< mapM subExpType x'
@@ -1972,6 +2089,11 @@ isIntrinsicFunction qname args = do
     handleRest [arr1, offset, s1, s2, s3, s4, arr2] "flat_update_4d" = Just $ \desc -> do
       flatUpdateHelper desc arr1 offset [s1, s2, s3, s4] arr2
     handleRest _ _ = Nothing
+
+    handleIO _ s
+      | Just f <- T.stripPrefix "io_" (nameToText s) = Just $ \_ ->
+          compilerLimitation $ "io." <> f <> " is only supported in interpreted code."
+    handleIO _ _ = Nothing
 
     toSigned int_to e desc = do
       e' <- internaliseExp1 "trunc_arg" e
@@ -2116,7 +2238,7 @@ funcall desc (QualName _ fname) args = do
 
   shapeargs <- argShapes shapes fun_params argts
   let diets =
-        replicate (length shapeargs) I.ObservePrim
+        replicate (length shapeargs) I.Observe
           ++ map I.diet value_paramts
   args' <-
     ensureArgShapes
@@ -2156,7 +2278,7 @@ bindExtSizes (AppRes ret retext) ses = do
   ses_ts <- mapM subExpType ses
 
   let combine t1 t2 =
-        mconcat $ zipWith combine' (arrayExtDims t1) (arrayDims t2)
+        mconcat $ zipWith combine' (arrayDims t1) (arrayDims t2)
       combine' (I.Free (I.Var v)) se
         | v `elem` retext = M.singleton v se
       combine' _ _ = mempty
@@ -2169,114 +2291,6 @@ askSafety = do
   check <- asks envDoBoundsChecks
   pure $ if check then I.Safe else I.Unsafe
 
--- Implement partitioning using maps, scans and writes.
-partitionWithSOACS :: Int -> I.Lambda SOACS -> [I.VName] -> InternaliseM ([I.SubExp], [I.SubExp])
-partitionWithSOACS k lam arrs = do
-  arr_ts <- mapM lookupType arrs
-  let w = arraysSize 0 arr_ts
-  classes_and_increments <-
-    letTupExp "increments"
-      . I.Op
-      . I.Screma w arrs
-      =<< mapSOAC lam
-  (classes, increments) <- case classes_and_increments of
-    classes : increments -> pure (classes, take k increments)
-    _ -> error "partitionWithSOACS"
-
-  add_lam_x_params <-
-    replicateM k $ newParam "x" (I.Prim int64)
-  add_lam_y_params <-
-    replicateM k $ newParam "y" (I.Prim int64)
-  add_lam_body <- runBodyBuilder $
-    localScope (scopeOfLParams $ add_lam_x_params ++ add_lam_y_params) $
-      fmap subExpsRes $
-        forM (zip add_lam_x_params add_lam_y_params) $ \(x, y) ->
-          letSubExp "z" $
-            I.BasicOp $
-              I.BinOp
-                (I.Add Int64 I.OverflowUndef)
-                (I.Var $ I.paramName x)
-                (I.Var $ I.paramName y)
-  let add_lam =
-        I.Lambda
-          { I.lambdaBody = add_lam_body,
-            I.lambdaParams = add_lam_x_params ++ add_lam_y_params,
-            I.lambdaReturnType = replicate k $ I.Prim int64
-          }
-      nes = replicate (length increments) $ intConst Int64 0
-
-  scan <- I.scanSOAC [I.Scan add_lam nes]
-  all_offsets <- letTupExp "offsets" $ I.Op $ I.Screma w increments scan
-
-  -- We have the offsets for each of the partitions, but we also need
-  -- the total sizes, which are the last elements in the offests.  We
-  -- just have to be careful in case the array is empty.
-  last_index <- letSubExp "last_index" $ I.BasicOp $ I.BinOp (I.Sub Int64 OverflowUndef) w $ constant (1 :: Int64)
-  let nonempty_body = runBodyBuilder $
-        fmap subExpsRes $
-          forM all_offsets $ \offset_array ->
-            letSubExp "last_offset" $ I.BasicOp $ I.Index offset_array $ Slice [I.DimFix last_index]
-      empty_body = resultBodyM $ replicate k $ constant (0 :: Int64)
-  is_empty <- letSubExp "is_empty" $ I.BasicOp $ I.CmpOp (CmpEq int64) w $ constant (0 :: Int64)
-  sizes <-
-    letTupExp "partition_size" =<< eIf (eSubExp is_empty) empty_body nonempty_body
-
-  -- The total size of all partitions must necessarily be equal to the
-  -- size of the input array.
-
-  -- Create scratch arrays for the result.
-  blanks <- forM arr_ts $ \arr_t ->
-    letExp "partition_dest" $
-      I.BasicOp $
-        Scratch (I.elemType arr_t) (w : drop 1 (I.arrayDims arr_t))
-
-  -- Now write into the result.
-  results <-
-    doScatter "partition_res" 1 blanks (classes : all_offsets ++ arrs) $ \params -> do
-      let ([c_param], offset_params, value_params) =
-            splitAt3 1 (length all_offsets) params
-      offset <-
-        mkOffsetLambdaBody
-          (map I.Var sizes)
-          (I.Var $ I.paramName c_param)
-          0
-          offset_params
-      pure $ offset : map (I.Var . I.paramName) value_params
-  sizes' <-
-    letSubExp "partition_sizes" $
-      I.BasicOp $
-        I.ArrayLit (map I.Var sizes) $
-          I.Prim int64
-  pure (map I.Var results, [sizes'])
-  where
-    mkOffsetLambdaBody ::
-      [SubExp] ->
-      SubExp ->
-      Int ->
-      [I.LParam SOACS] ->
-      InternaliseM SubExp
-    mkOffsetLambdaBody _ _ _ [] =
-      pure $ constant (-1 :: Int64)
-    mkOffsetLambdaBody sizes c i (p : ps) = do
-      is_this_one <-
-        letSubExp "is_this_one" $
-          I.BasicOp $
-            I.CmpOp (CmpEq int64) c $
-              intConst Int64 $
-                toInteger i
-      next_one <- mkOffsetLambdaBody sizes c (i + 1) ps
-      this_one <-
-        letSubExp "this_offset"
-          =<< foldBinOp
-            (Add Int64 OverflowUndef)
-            (constant (-1 :: Int64))
-            (I.Var (I.paramName p) : take i sizes)
-      letSubExp "total_res"
-        =<< eIf
-          (eSubExp is_this_one)
-          (resultBodyM [this_one])
-          (resultBodyM [next_one])
-
 sizeExpForError :: E.Size -> InternaliseM [ErrorMsgPart SubExp]
 sizeExpForError e
   | Just _ <- isAnySize e = pure ["[]"]
@@ -2284,7 +2298,7 @@ sizeExpForError e
       e' <- internaliseExp1 "size" e
       pure ["[", ErrorVal int64 e', "]"]
 
-typeExpForError :: E.TypeBase Size u -> InternaliseM [ErrorMsgPart SubExp]
+typeExpForError :: E.TypeBase Size o -> InternaliseM [ErrorMsgPart SubExp]
 typeExpForError (E.Scalar (E.Prim t)) = pure [ErrorString $ prettyText t]
 typeExpForError (E.Scalar (E.TypeVar _ v args)) = do
   args' <- concat <$> mapM onArg args

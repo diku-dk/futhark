@@ -16,12 +16,14 @@ module Futhark.Util
     chunks,
     chunkLike,
     dropAt,
+    without,
     takeLast,
     dropLast,
     mapEither,
     partitionMaybe,
     maybeNth,
     maybeHead,
+    unsnoc,
     lookupWithIndex,
     splitFromEnd,
     splitAt3,
@@ -55,6 +57,8 @@ module Futhark.Util
     topologicalSort,
     debugTraceM,
     ensureCacheDirectory,
+    interleave,
+    unterleave,
   )
 where
 
@@ -163,6 +167,10 @@ mininum xs = L.foldl' min (maxinum xs) xs
 dropAt :: Int -> Int -> [a] -> [a]
 dropAt i n xs = take i xs ++ drop (i + n) xs
 
+-- | Remove the element at the given index.
+without :: Int -> [a] -> [a]
+without j = dropAt j 1
+
 -- | @takeLast n l@ takes the last @n@ elements of @l@.
 takeLast :: Int -> [a] -> [a]
 takeLast n = reverse . take n . reverse
@@ -195,6 +203,12 @@ maybeNth i l
 maybeHead :: [a] -> Maybe a
 maybeHead [] = Nothing
 maybeHead (x : _) = Just x
+
+-- | Split the last element from the list, if it exists.
+unsnoc :: [a] -> Maybe ([a], a)
+unsnoc [] = Nothing
+unsnoc [x] = Just ([], x)
+unsnoc (x : xs) = unsnoc xs >>= \(ys, y) -> Just (x : ys, y)
 
 -- | Lookup a value, returning also the index at which it appears.
 lookupWithIndex :: (Eq a) => a -> [(a, b)] -> Maybe (Int, b)
@@ -375,6 +389,15 @@ convFloat v
   | isInfinite v, v < 0 = -1 / 0
   | isNaN v = 0 / 0
   | otherwise = fromRational $ toRational v
+
+-- | Interleave two lists.
+interleave :: [a] -> [a] -> [a]
+interleave xs ys = concat $ L.transpose [xs, ys]
+
+-- | The inverse of interleave.
+unterleave :: [a] -> ([a], [a])
+unterleave (x : y : xys) = bimap (x :) (y :) $ unterleave xys
+unterleave _ = ([], [])
 
 -- Z-encoding from https://ghc.haskell.org/trac/ghc/wiki/Commentary/Compiler/SymbolNames
 --

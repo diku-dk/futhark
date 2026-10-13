@@ -333,11 +333,11 @@ instance HasScope SOACS (ImpM rep r op) where
         Array
           (entryArrayElemType arrayEntry)
           (Shape $ entryArrayShape arrayEntry)
-          NoUniqueness
+          NoMode
       entryType (ScalarVar _ scalarEntry) =
         Prim $ entryScalarType scalarEntry
       entryType (AccVar _ (acc, ispace, ts)) =
-        Acc acc ispace ts NoUniqueness
+        Acc acc ispace ts
 
 runImpM ::
   ImpM rep r op a ->
@@ -498,12 +498,6 @@ compileConsts used_consts stms = genConstants $ do
   compileStms used_consts stms $ pure ()
   pure (used_consts, ())
 
-lookupOpaqueType :: Name -> OpaqueTypes -> OpaqueType
-lookupOpaqueType v (OpaqueTypes types) =
-  case lookup v types of
-    Just t -> t
-    Nothing -> error $ "Unknown opaque type: " ++ show v
-
 valueTypeSign :: ValueType -> Signedness
 valueTypeSign (ValueType sign _ _) = sign
 
@@ -511,9 +505,9 @@ entryPointSignedness :: OpaqueTypes -> EntryPointType -> [Signedness]
 entryPointSignedness _ (TypeTransparent vt) = [valueTypeSign vt]
 entryPointSignedness types (TypeOpaque desc) =
   case lookupOpaqueType desc types of
-    OpaqueType vts -> map valueTypeSign vts
     OpaqueArray _ _ vts -> map valueTypeSign vts
     OpaqueRecordArray _ _ fs -> foldMap (entryPointSignedness types . snd) fs
+    OpaqueRecord [] -> [Signed]
     OpaqueRecord fs -> foldMap (entryPointSignedness types . snd) fs
     OpaqueSum vts _ -> map valueTypeSign vts
 
@@ -525,9 +519,9 @@ entryPointSize :: OpaqueTypes -> EntryPointType -> Int
 entryPointSize _ (TypeTransparent _) = 1
 entryPointSize types (TypeOpaque desc) =
   case lookupOpaqueType desc types of
-    OpaqueType vts -> length vts
     OpaqueArray _ _ vts -> length vts
     OpaqueRecordArray _ _ fs -> sum $ map (entryPointSize types . snd) fs
+    OpaqueRecord [] -> 1
     OpaqueRecord fs -> sum $ map (entryPointSize types . snd) fs
     OpaqueSum vts _ -> length vts
 
@@ -554,7 +548,7 @@ compileInParams ::
   OpaqueTypes ->
   [FParam rep] ->
   Maybe [EntryParam] ->
-  ImpM rep r op ([Imp.Param], [ArrayDecl], Maybe [((Name, Uniqueness), Imp.ExternalValue)])
+  ImpM rep r op ([Imp.Param], [ArrayDecl], Maybe [((Name, Diet), Imp.ExternalValue)])
 compileInParams types params eparams = do
   (inparams, arrayds) <- partitionEithers <$> mapM compileInParam params
   let findArray x = find (isArrayDecl x) arrayds
@@ -580,18 +574,18 @@ compileInParams types params eparams = do
           _ ->
             Nothing
 
-      mkExts (EntryParam v u et@(TypeOpaque desc) : epts) fparams =
+      mkExts (EntryParam v o et@(TypeOpaque desc) : epts) fparams =
         let signs = entryPointSignedness types et
             n = entryPointSize types et
             (fparams', rest) = splitAt n fparams
-         in ( (v, u),
+         in ( (v, o),
               Imp.OpaqueValue
                 desc
                 (catMaybes $ zipWith mkValueDesc fparams' signs)
             )
               : mkExts epts rest
-      mkExts (EntryParam v u (TypeTransparent (ValueType s _ _)) : epts) (fparam : fparams) =
-        maybeToList (((v, u),) . Imp.TransparentValue <$> mkValueDesc fparam s)
+      mkExts (EntryParam v o (TypeTransparent (ValueType s _ _)) : epts) (fparam : fparams) =
+        maybeToList (((v, o),) . Imp.TransparentValue <$> mkValueDesc fparam s)
           ++ mkExts epts fparams
       mkExts _ _ = []
 
@@ -627,7 +621,7 @@ compileExternalValues ::
   [RetType rep] ->
   EntryResult ->
   [Maybe Imp.Param] ->
-  ImpM rep r op (Uniqueness, Imp.ExternalValue)
+  ImpM rep r op (Diet, Imp.ExternalValue)
 compileExternalValues types orig_rts orig_epts maybe_params = do
   let (ctx_rts, val_rts) =
         splitAt
@@ -661,13 +655,13 @@ compileExternalValues types orig_rts orig_epts maybe_params = do
       num_ctx = length ctx_rts
 
   case (orig_epts, val_rts) of
-    (EntryResult u et@(TypeOpaque desc), rets) -> do
+    (EntryResult o et@(TypeOpaque desc), rets) -> do
       let signs = entryPointSignedness types et
       vds <- forM (zip3 [num_ctx ..] signs rets) $ \(j, s, r) -> mkValueDesc j s r
-      pure (u, Imp.OpaqueValue desc vds)
-    (EntryResult u (TypeTransparent (ValueType s _ _)), [ret]) -> do
+      pure (o, Imp.OpaqueValue desc vds)
+    (EntryResult o (TypeTransparent (ValueType s _ _)), [ret]) -> do
       vd <- mkValueDesc num_ctx s ret
-      pure (u, Imp.TransparentValue vd)
+      pure (o, Imp.TransparentValue vd)
     _ -> error "compileExternalValues: invalid inputs."
 
 compileOutParams ::
@@ -675,7 +669,7 @@ compileOutParams ::
   OpaqueTypes ->
   [RetType rep] ->
   Maybe EntryResult ->
-  ImpM rep r op (Maybe (Uniqueness, Imp.ExternalValue), [Imp.Param], [ValueDestination])
+  ImpM rep r op (Maybe (Diet, Imp.ExternalValue), [Imp.Param], [ValueDestination])
 compileOutParams types orig_rts maybe_orig_epts = do
   (maybe_params, dests) <- mapAndUnzipM compileOutParam orig_rts
   evs <- case maybe_orig_epts of
@@ -692,16 +686,16 @@ compileFunDef ::
 compileFunDef types (FunDef entry attrs fname rettype params body) =
   local (\env -> env {envFunction = name_entry `mplus` Just fname}) $ do
     ((outparams, inparams, results, args), body') <- collect' compile
-    let entry' = case (name_entry, results, args) of
-          (Just name_entry', Just results', Just args') ->
-            Just $ Imp.EntryPoint name_entry' results' args'
+    let entry' = case (name_entry, results, args, doc_entry) of
+          (Just name_entry', Just results', Just args', Just docs') ->
+            Just $ Imp.EntryPoint name_entry' results' args' docs'
           _ ->
             Nothing
     emitFunction fname $ Imp.Function entry' outparams inparams attrs body'
   where
-    (name_entry, params_entry, ret_entry) = case entry of
-      Nothing -> (Nothing, Nothing, Nothing)
-      Just (x, y, z) -> (Just x, Just y, Just z)
+    (name_entry, params_entry, ret_entry, doc_entry) = case entry of
+      Nothing -> (Nothing, Nothing, Nothing, Nothing)
+      Just (x, y, z, v) -> (Just x, Just y, Just z, Just v)
     compile = do
       (inparams, arrayds, args) <- compileInParams types params params_entry
       (results, outparams, dests) <- compileOutParams types (map fst rettype) ret_entry
@@ -1076,7 +1070,7 @@ addFParams = mapM_ addFParam
     addFParam fparam =
       addVar (paramName fparam) $
         memBoundToVarEntry Nothing $
-          noUniquenessReturns $
+          noModeReturns $
             paramDec fparam
 
 -- | Another hack.
@@ -1160,13 +1154,13 @@ dPrimVE name e = do
 
 memBoundToVarEntry ::
   Maybe (Exp rep) ->
-  MemBound NoUniqueness ->
+  MemBound NoMode ->
   VarEntry rep
 memBoundToVarEntry e (MemPrim bt) =
   ScalarVar e ScalarEntry {entryScalarType = bt}
 memBoundToVarEntry e (MemMem space) =
   MemVar e $ MemEntry space
-memBoundToVarEntry e (MemAcc acc ispace ts _) =
+memBoundToVarEntry e (MemAcc acc ispace ts) =
   AccVar e (acc, ispace, ts)
 memBoundToVarEntry e (MemArray bt shape _ (ArrayIn mem lmad)) =
   let location = MemLoc mem (shapeDims shape) lmad
@@ -1180,9 +1174,9 @@ memBoundToVarEntry e (MemArray bt shape _ (ArrayIn mem lmad)) =
 infoDec ::
   (Mem rep inner) =>
   NameInfo rep ->
-  MemInfo SubExp NoUniqueness MemBind
+  MemInfo SubExp NoMode MemBind
 infoDec (LetName dec) = letDecMem dec
-infoDec (FParamName dec) = noUniquenessReturns dec
+infoDec (FParamName dec) = noModeReturns dec
 infoDec (LParamName dec) = dec
 infoDec (IndexName it) = MemPrim $ IntType it
 
@@ -1864,6 +1858,17 @@ sAlloc name size space = do
 sArray :: Name -> PrimType -> ShapeBase SubExp -> VName -> LMAD -> ImpM rep r op VName
 sArray name bt shape mem lmad = do
   name' <- newVName name
+  when (LMAD.rank lmad /= shapeRank shape) $
+    error $
+      unlines
+        [ "sArray: array "
+            <> prettyString name'
+            <> " of rank "
+            <> show (shapeRank shape)
+            <> " with LMAD of rank "
+            <> show (LMAD.rank lmad)
+            <> "."
+        ]
   dArray name' bt shape mem lmad
   pure name'
 
@@ -1879,7 +1884,7 @@ sArrayInMem name pt shape mem =
 sAllocArrayPerm :: Name -> PrimType -> ShapeBase SubExp -> Space -> [Int] -> ImpM rep r op VName
 sAllocArrayPerm name pt shape space perm = do
   let permuted_dims = rearrangeShape perm $ shapeDims shape
-  mem <- sAlloc (name <> "_mem") (typeSize (Array pt shape NoUniqueness)) space
+  mem <- sAlloc (name <> "_mem") (typeSize (Array pt shape NoMode)) space
   let iota_lmad = LMAD.iota 0 $ map (isInt64 . primExpFromSubExp int64) permuted_dims
   sArray name pt shape mem $
     LMAD.permute iota_lmad $

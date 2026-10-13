@@ -4,8 +4,10 @@ module Futhark.Bench
   ( RunResult (..),
     DataResult (..),
     BenchResult (..),
+    BenchMetadata (..),
     Result (..),
     encodeBenchResults,
+    encodeBenchResultsWithMetadata,
     decodeBenchResults,
     binaryName,
     benchmarkDataset,
@@ -34,7 +36,7 @@ import Data.Vector.Unboxed qualified as U
 import Futhark.Profile
 import Futhark.Server
 import Futhark.Test
-import Futhark.Util (showText)
+import Futhark.Util (nubOrd, showText)
 import Statistics.Autocorrelation (autocorrelation)
 import Statistics.Sample (fastStdDev, mean)
 import System.Exit
@@ -75,9 +77,22 @@ data BenchResult = BenchResult
   }
   deriving (Eq, Show)
 
+-- | Information about the environment and invocation that produced a
+-- benchmark result file.
+data BenchMetadata = BenchMetadata
+  { benchStartTime :: UTCTime,
+    benchEndTime :: UTCTime,
+    benchHostname :: Maybe T.Text,
+    benchCompilerVersion :: Maybe T.Text,
+    benchBackend :: T.Text,
+    benchCompilerOptions :: [T.Text],
+    benchRuntimeOptions :: [T.Text]
+  }
+  deriving (Eq, Show)
+
 newtype DataResults = DataResults {unDataResults :: [DataResult]}
 
-newtype BenchResults = BenchResults {unBenchResults :: [BenchResult]}
+data BenchResults = BenchResults (Maybe BenchMetadata) [BenchResult]
 
 instance JSON.ToJSON Result where
   toJSON (Result runres memmap err profiling) =
@@ -131,19 +146,33 @@ dataResultJSON (DataResult desc (Right (Result runtimes bytes progerr_opt profil
           Just profiling -> [("profiling", JSON.toJSON profiling)]
   )
 
-benchResultJSON :: BenchResult -> (JSON.Key, JSON.Value)
-benchResultJSON (BenchResult prog r) =
+benchMetadataJSON :: BenchMetadata -> JSON.Value
+benchMetadataJSON metadata =
+  JSON.object
+    [ ("start_time", JSON.toJSON $ benchStartTime metadata),
+      ("end_time", JSON.toJSON $ benchEndTime metadata),
+      ("hostname", JSON.toJSON $ benchHostname metadata),
+      ("compiler_version", JSON.toJSON $ benchCompilerVersion metadata),
+      ("backend", JSON.toJSON $ benchBackend metadata),
+      ("compiler_options", JSON.toJSON $ benchCompilerOptions metadata),
+      ("runtime_options", JSON.toJSON $ benchRuntimeOptions metadata)
+    ]
+
+benchResultJSON :: Maybe BenchMetadata -> BenchResult -> (JSON.Key, JSON.Value)
+benchResultJSON metadata (BenchResult prog r) =
   ( JSON.fromString prog,
-    JSON.object [("datasets", JSON.toJSON $ DataResults r)]
+    JSON.object $
+      [("datasets", JSON.toJSON $ DataResults r)]
+        <> maybe [] (pure . ("metadata",) . benchMetadataJSON) metadata
   )
 
 instance JSON.ToJSON BenchResults where
-  toJSON (BenchResults rs) =
-    JSON.object $ map benchResultJSON rs
+  toJSON (BenchResults metadata rs) =
+    JSON.object $ map (benchResultJSON metadata) rs
 
 instance JSON.FromJSON BenchResults where
   parseJSON = JSON.withObject "benchmarks" $ \o ->
-    BenchResults <$> mapM onBenchmark (JSON.toList o)
+    BenchResults Nothing <$> mapM onBenchmark (JSON.toList o)
     where
       onBenchmark (k, v) =
         BenchResult (JSON.toString k)
@@ -153,11 +182,22 @@ instance JSON.FromJSON BenchResults where
 
 -- | Transform benchmark results to a JSON bytestring.
 encodeBenchResults :: [BenchResult] -> LBS.ByteString
-encodeBenchResults = JSON.encode . BenchResults
+encodeBenchResults = JSON.encode . BenchResults Nothing
+
+-- | Transform benchmark results and their provenance metadata to a JSON
+-- bytestring.  Metadata is stored inside each benchmark object so existing
+-- consumers that iterate the top-level program keys remain compatible.
+encodeBenchResultsWithMetadata ::
+  BenchMetadata ->
+  [BenchResult] ->
+  LBS.ByteString
+encodeBenchResultsWithMetadata = (JSON.encode .) . BenchResults . Just
 
 -- | Decode benchmark results from a JSON bytestring.
 decodeBenchResults :: LBS.ByteString -> Either String [BenchResult]
 decodeBenchResults = fmap unBenchResults . JSON.eitherDecode'
+  where
+    unBenchResults (BenchResults _ results) = results
 
 --- Running benchmarks
 
@@ -312,11 +352,12 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
   cmdMaybe . liftIO $ cmdPauseProfiling server
 
   let freeOut = cmdMaybe (cmdFree server [out])
-      freeIns = cmdMaybe (cmdFree server ins)
-      loadInput = valuesAsVars server (zip ins $ map inputType input_types) futhark dir input_spec
-      reloadInput = freeIns >> loadInput
+      loadInput = valuesAsVars server entry (zip ins $ map inputType input_types) futhark program input_spec
 
-  loadInput
+  ins' <- loadInput
+
+  let freeIns = cmdMaybe (cmdFree server (nubOrd ins'))
+      reloadInput = freeIns >> void loadInput
 
   let runtime l
         | Just l' <- T.stripPrefix "runtime: " l,
@@ -329,7 +370,7 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
         when (any inputConsumed input_types) reloadInput
 
       doRun = do
-        call_lines <- cmdEither (cmdCall server entry out ins)
+        call_lines <- cmdEither (cmdCall server entry out ins')
         case mapMaybe runtime call_lines of
           [call_runtime] -> pure (RunResult call_runtime, call_lines)
           [] -> throwError "Could not find runtime in output."
@@ -337,7 +378,7 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
 
   maybe_call_logs <- liftIO . timeout (runTimeout opts * 1000000) . runExceptT $ do
     -- First one uncounted warmup run.
-    void $ cmdEither $ cmdCall server entry out ins
+    void $ cmdEither $ cmdCall server entry out ins'
 
     ys <- runMinimum (freeOut *> doRun <* maybeReload) opts 0 0 mempty
 

@@ -1,6 +1,6 @@
 -- The error here could be better.
 -- ==
--- error: scope violation
+-- error: scope-violation
 
 type square [n] 't = [n][n]t
 

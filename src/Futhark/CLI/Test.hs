@@ -26,7 +26,7 @@ import Data.Word (Word64)
 import Futhark.Analysis.Metrics.Type
 import Futhark.Server
 import Futhark.Test
-import Futhark.Util (atMostChars, fancyTerminal, randomSeed, showText)
+import Futhark.Util (atMostChars, fancyTerminal, nubOrd, randomSeed, showText)
 import Futhark.Util.Options
 import Futhark.Util.Pretty (annotate, bgColor, bold, hardline, pretty, putDoc, vsep)
 import Futhark.Util.Table
@@ -46,6 +46,14 @@ import Text.Regex.TDFA
 -- may have multiple entry points). This should really not be done at
 -- the monadic level - a test failing should be handled explicitly.
 type TestM = ExceptT [T.Text] IO
+
+data IRInterpreter = SOACSInterpreter | GPUInterpreter
+
+interpreterOptions :: IRInterpreter -> String -> [String]
+interpreterOptions SOACSInterpreter entry =
+  ["--run-soacs=" <> entry]
+interpreterOptions GPUInterpreter entry =
+  ["--gpu", "--run-gpu=" <> entry]
 
 -- Taken from transformers-0.5.5.0.
 eitherToErrors :: Either e a -> Errors e a
@@ -146,6 +154,10 @@ data TestMode
     Compiled
   | -- | Test interpreted code.
     Interpreted
+  | -- | Test code interpreted after internalisation to SOACS.
+    InterpretedSOACS
+  | -- | Test code interpreted after internalisation to GPU IR
+    InterpretedGPU
   | -- | Perform structure tests.
     Structure
   deriving (Eq, Show)
@@ -272,6 +284,29 @@ runInterpretedEntry (FutharkExe futhark) program (InputOutputs entry run_cases) 
                     runResult program code output err
    in accErrors_ $ map runInterpretedCase run_cases
 
+runIRInterpretedEntry :: FutharkExe -> IRInterpreter -> FilePath -> InputOutputs -> TestM ()
+runIRInterpretedEntry (FutharkExe futhark) interpreter program (InputOutputs entry run_cases) =
+  let dir = takeDirectory program
+      runInterpretedCase run@(TestRun _ inputValues _ index _) =
+        unless (any (`elem` runTags run) ["compiled", "script"]) $
+          context ("Entry point: " <> entry <> "; dataset: " <> runDescription run) $ do
+            input <- T.unlines . map valueText <$> getValues (FutharkExe futhark) dir inputValues
+            expectedResult' <- getExpectedResult (FutharkExe futhark) program entry run
+            (code, output, err) <-
+              liftIO $
+                readProcessWithExitCode
+                  futhark
+                  (["dev"] <> interpreterOptions interpreter (T.unpack entry) <> [program])
+                  (T.encodeUtf8 input)
+            case code of
+              ExitFailure 127 ->
+                throwError $ progNotFound $ T.pack futhark
+              _ ->
+                liftExcept $
+                  compareResult entry index program expectedResult' $
+                    runResult program code output err
+   in accErrors_ $ map runInterpretedCase run_cases
+
 runTestCase :: TestCase -> TestM ()
 runTestCase (TestCase mode program testcase progs pbtConfig) = do
   futhark <- liftIO $ maybe getExecutablePath pure $ configFuthark progs
@@ -326,7 +361,7 @@ runTestCase (TestCase mode program testcase progs pbtConfig) = do
               phaseRandom = Nothing
             }
 
-      when (mode `elem` [Compiled, Interpreted]) $
+      when (mode `elem` [Compiled, Interpreted, InterpretedSOACS, InterpretedGPU]) $
         context "Generating reference outputs" $
           -- We probably get the concurrency at the test program level,
           -- so force just one data set at a time here.
@@ -376,6 +411,16 @@ runTestCase (TestCase mode program testcase progs pbtConfig) = do
           accErrors_ $
             map (runInterpretedEntry (FutharkExe futhark) program) ios
 
+      when (mode == InterpretedSOACS) $
+        context "Interpreting SOACS" $
+          accErrors_ $
+            map (runIRInterpretedEntry (FutharkExe futhark) SOACSInterpreter program) ios
+
+      when (mode == InterpretedGPU) $
+        context "Interpreting GPU IR" $
+          accErrors_ $
+            map (runIRInterpretedEntry (FutharkExe futhark) GPUInterpreter program) ios
+
 liftCommand ::
   (MonadError T.Text m, MonadIO m) =>
   IO (Maybe CmdFailure) ->
@@ -399,8 +444,6 @@ runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
           onRes = either (Failure . pure) (const Success)
       mapM (fmap onRes . runCompiledCase input_types' (out, out_t) ins) run_cases
   where
-    dir = takeDirectory program
-
     runCompiledCase input_types (out, out_t) ins run = runExceptT $ do
       let TestRun _ input_spec _ index _ = run
           case_ctx =
@@ -412,10 +455,10 @@ runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
       context1 case_ctx $ do
         expected <- getExpectedResult futhark program entry run
 
-        valuesAsVars server (zip ins (map inputType input_types)) futhark dir input_spec
+        ins' <- valuesAsVars server entry (zip ins (map inputType input_types)) futhark program input_spec
 
-        call_r <- liftIO $ cmdCall server entry out ins
-        liftCommand $ cmdFree server ins
+        call_r <- liftIO $ cmdCall server entry out ins'
+        liftCommand $ cmdFree server $ nubOrd ins'
 
         let res = case call_r of
               Left (CmdFailure _ err) ->
@@ -815,6 +858,16 @@ commandLineOptions =
       ["interpreted"]
       (NoArg $ Right $ \config -> config {configTestMode = Interpreted})
       "Only interpret",
+    Option
+      []
+      ["interpret-soacs"]
+      (NoArg $ Right $ \config -> config {configTestMode = InterpretedSOACS})
+      "Only interpret SOACS IR",
+    Option
+      []
+      ["interpret-gpu"]
+      (NoArg $ Right $ \config -> config {configTestMode = InterpretedGPU})
+      "Only interpret GPU IR",
     Option
       "c"
       ["compiled"]

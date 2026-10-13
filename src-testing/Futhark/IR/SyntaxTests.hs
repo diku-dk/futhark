@@ -17,6 +17,9 @@ parseString desc p =
 instance IsString Type where
   fromString = parseString "Type" parseType
 
+instance IsString ExtType where
+  fromString = parseString "ExtType" parseExtType
+
 instance IsString DeclExtType where
   fromString = parseString "DeclExtType" parseDeclExtType
 

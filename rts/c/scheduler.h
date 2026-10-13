@@ -101,6 +101,10 @@ static inline int scheduler_execute_task(struct scheduler *scheduler,
 #include <sys/sysinfo.h>
 #include <sys/resource.h>
 #include <signal.h>
+#elif defined(__OpenBSD__)
+#include <sys/resource.h>
+#include <sys/sysctl.h>
+#include <signal.h>
 #elif defined(__EMSCRIPTEN__)
 #include <emscripten/threading.h>
 #include <sys/sysinfo.h>
@@ -157,6 +161,15 @@ static int num_processors(void) {
   return ncores;
 #elif defined(__linux__)
   return get_nprocs();
+#elif defined(__OpenBSD__)
+  int mib[2], ncores;
+  size_t len;
+
+  mib[0] = CTL_HW;
+  mib[1] = HW_NCPUONLINE;
+  len = sizeof(ncores);
+  CHECK_ERRNO(sysctl(mib, 2, &ncores, &len, NULL, 0), "sysctl");
+  return ncores;
 #elif __EMSCRIPTEN__
   return emscripten_num_logical_cores();
 #else

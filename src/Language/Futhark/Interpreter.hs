@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE Strict #-}
 
 -- | An interpreter operating on type-checked source Futhark terms.
@@ -5,11 +6,12 @@
 module Language.Futhark.Interpreter
   ( Ctx (..),
     Env,
-    InterpreterError,
+    InterpreterError (..),
     prettyInterpreterError,
     initialCtx,
     interpretExp,
     interpretDec,
+    interpretApply,
     interpretImport,
     interpretFunction,
     ctxWithImports,
@@ -22,9 +24,16 @@ module Language.Futhark.Interpreter
     Value,
     fromTuple,
     isEmptyArray,
+    asByteString,
     prettyEmptyArray,
     prettyValue,
     valueText,
+
+    -- * IO
+    IOOp,
+    determineIO,
+    doIOOp,
+    ioRelativeTo,
   )
 where
 
@@ -59,6 +68,9 @@ import Futhark.Util.Pretty hiding (apply)
 import Language.Futhark hiding (Shape, matchDims)
 import Language.Futhark qualified as F
 import Language.Futhark.Interpreter.AD qualified as AD
+import Language.Futhark.Interpreter.FFI.Push qualified as FFI
+import Language.Futhark.Interpreter.FFI.ServerM qualified as FFI
+import Language.Futhark.Interpreter.IO
 import Language.Futhark.Interpreter.Values hiding (Value)
 import Language.Futhark.Interpreter.Values qualified
 import Language.Futhark.Primitive (floatValue, intValue)
@@ -86,11 +98,16 @@ data ExtOp a
   = ExtOpTrace T.Text (Doc ()) a
   | ExtOpBreak Loc BreakReason (NE.NonEmpty StackFrame) a
   | ExtOpError InterpreterError
+  | ExtOpFFI (FFI.ServerM Value) (Value -> a)
+  | -- | Perform an IO operation.
+    ExtOpIO IOOp (Value -> a)
 
 instance Functor ExtOp where
   fmap f (ExtOpTrace w s x) = ExtOpTrace w s $ f x
   fmap f (ExtOpBreak w why backtrace x) = ExtOpBreak w why backtrace $ f x
   fmap _ (ExtOpError err) = ExtOpError err
+  fmap f (ExtOpFFI vr c) = ExtOpFFI vr $ f . c
+  fmap f (ExtOpIO v c) = ExtOpIO v $ f . c
 
 type Stack = [StackFrame]
 
@@ -180,7 +197,7 @@ instance Pretty (F.Shape SizeClosure) where
   pretty = mconcat . map (brackets . pretty) . shapeDims
 
 -- | A type where the sizes are unevaluated expressions.
-type EvalType = TypeBase SizeClosure NoUniqueness
+type EvalType = TypeBase SizeClosure NoMode
 
 structToEval :: Env -> StructType -> EvalType
 structToEval env = first (SizeClosure env)
@@ -363,7 +380,7 @@ data TypeBinding
   = TypeConBinding
       Env
       [TypeParam]
-      (RetTypeBase Size NoUniqueness)
+      (RetTypeBase Size NoMode)
   | TypeBinding
       EvalType
   deriving (Show)
@@ -438,7 +455,12 @@ bad loc env s = stacking loc env $ do
 
 trace :: T.Text -> Value -> EvalM ()
 trace w v = do
-  liftF $ ExtOpTrace w (prettyValue v) ()
+  -- Printing a value requires having it in full.
+  v' <- force v
+  liftF $ ExtOpTrace w (prettyValue v') ()
+
+doIO :: IOOp -> EvalM Value
+doIO io = liftF $ ExtOpIO io id
 
 typeCheckerEnv :: Env -> T.Env
 typeCheckerEnv env =
@@ -460,9 +482,20 @@ break env loc = do
   backtrace <- asks ((StackFrame loc (Ctx env imports) NE.:|) . fst)
   liftF $ ExtOpBreak loc BreakPoint backtrace ()
 
-fromArray :: Value -> (ValueShape, [Value])
-fromArray (ValueArray shape as) = (shape, elems as)
-fromArray v = error $ "Expected array value, but found: " <> show v
+-- | Fetch in full a value that may reside on a server, such that it can be
+-- handled by code that knows only about ordinary values. Only indexing (see
+-- 'indexArray') is able to work directly on a server value, so anything else
+-- must force it first.
+force :: Value -> EvalM Value
+force v
+  | FFI.hasLazy v = liftF $ ExtOpFFI (FFI.getLazy v) id
+  | otherwise = pure v
+
+fromArray :: Value -> EvalM (ValueShape, [Value])
+fromArray v =
+  force v >>= \case
+    ValueArray shape as -> pure (shape, elems as)
+    v' -> error $ "Expected array value, but found: " <> show v'
 
 project :: Name -> Value -> Value
 project f (ValueRecord fs)
@@ -478,14 +511,14 @@ apply2 loc env f x y = stacking loc env $ do
   f' <- apply noLoc mempty f x
   apply noLoc mempty f' y
 
-matchPat :: Env -> Pat (TypeBase Size u) -> Value -> EvalM Env
+matchPat :: Env -> Pat (TypeBase Size o) -> Value -> EvalM Env
 matchPat env p v = do
   m <- runMaybeT $ patternMatch env p v
   case m of
     Nothing -> error $ "matchPat: missing case for " <> prettyString (toStruct <$> p) ++ " and " <> show v
     Just env' -> pure env'
 
-patternMatch :: Env -> Pat (TypeBase Size u) -> Value -> MaybeT EvalM Env
+patternMatch :: Env -> Pat (TypeBase Size o) -> Value -> MaybeT EvalM Env
 patternMatch env (PatAttr _ p _) val =
   patternMatch env p val
 patternMatch env (Id v (Info t) _) val =
@@ -585,19 +618,39 @@ indexShape (IndexingSlice start end stride : is) (ShapeDim d shape) =
 indexShape _ shape =
   shape
 
-indexArray :: [Indexing] -> Value -> Maybe Value
-indexArray (IndexingFix i : is) (ValueArray _ arr)
-  | i >= 0,
-    i < n =
-      indexArray is $ arr ! fromIntegral i
-  | otherwise =
-      Nothing
+iaArrayLength :: Value -> Int64
+iaArrayLength v = case valueShape v of
+  ShapeDim n _ -> n
+  _ -> error "Expected array."
+
+iaRowShape :: Value -> ValueShape
+iaRowShape v = case valueShape v of
+  ShapeDim _ rowshape -> rowshape
+  _ -> error "Expected array."
+
+iaIndexOnce :: Value -> Int64 -> EvalM Value
+iaIndexOnce (ValueArray _ arr) i = pure $ arr ! fromIntegral i
+iaIndexOnce v@(ValueLazyFFI shp vr os) i
+  -- Indexing an array of arrays merely notes the index; nothing is
+  -- fetched until we reach an element.
+  | ShapeDim _ ShapeDim {} <- valueShape v = pure v'
+  | otherwise = liftF $ ExtOpFFI (FFI.index is vr >>= FFI.get (valueShape v')) id
   where
-    n = arrayLength arr
-indexArray (IndexingSlice start end stride : is) (ValueArray (ShapeDim _ rowshape) arr) = do
-  js <- indexesFor start end stride $ arrayLength arr
-  toArray' (indexShape is rowshape) <$> mapM (indexArray is . (arr !)) js
-indexArray _ v = Just v
+    v' = ValueLazyFFI shp vr $ i : os
+    is = map fromIntegral $ reverse $ i : os
+iaIndexOnce _ _ = error "Expected array."
+
+indexArray :: [Indexing] -> Value -> MaybeT EvalM Value
+indexArray (IndexingFix i : is) v
+  | i >= 0,
+    i < iaArrayLength v =
+      lift (iaIndexOnce v i) >>= indexArray is
+  | otherwise =
+      MaybeT $ pure Nothing
+indexArray (IndexingSlice start end stride : is) v = do
+  js <- MaybeT $ pure <$> indexesFor start end stride $ iaArrayLength v
+  toArray' (indexShape is $ iaRowShape v) <$> mapM (\i -> MaybeT (Just <$> iaIndexOnce v (fromIntegral i)) >>= indexArray is) js
+indexArray _ v = pure v
 
 writeArray :: [Indexing] -> Value -> Value -> Maybe Value
 writeArray slice x y = runIdentity $ updateArray (\_ y' -> pure y') slice x y
@@ -653,24 +706,25 @@ evalIndex loc env is arr = do
             <> "] out of bounds for array of shape "
             <> prettyText (arrayValueShape arr)
             <> "."
-  maybe oob pure $ indexArray is arr
+  v <- runMaybeT $ indexArray is arr
+  maybe oob pure v
 
 -- | Expand type based on information that was not available at
 -- type-checking time (the structure of abstract types).
-expandType :: (Pretty u) => Env -> TypeBase Size u -> TypeBase SizeClosure u
+expandType :: (Pretty o) => Env -> TypeBase Size o -> TypeBase SizeClosure o
 expandType _ (Scalar (Prim pt)) = Scalar $ Prim pt
 expandType env (Scalar (Record fs)) = Scalar $ Record $ fmap (expandType env) fs
-expandType env (Scalar (Arrow u p d t1 (RetType dims t2))) =
-  Scalar $ Arrow u p d (expandType env t1) (RetType dims (expandType env t2))
-expandType env t@(Array u shape _) =
+expandType env (Scalar (Arrow o p d t1 (RetType dims t2))) =
+  Scalar $ Arrow o p d (expandType env t1) (RetType dims (expandType env t2))
+expandType env t@(Array o shape _) =
   let et = stripArray (shapeRank shape) t
       et' = expandType env et
       shape' = fmap (SizeClosure env) shape
-   in second (const u) (arrayOf shape' $ toStruct et')
-expandType env (Scalar (TypeVar u tn args)) =
+   in second (const o) (arrayOf shape' $ toStruct et')
+expandType env (Scalar (TypeVar o tn args)) =
   case lookupType tn env of
     Just (TypeBinding t') ->
-      second (const u) t'
+      second (const o) t'
     Just (TypeConBinding tn_env ps (RetType ext t')) ->
       let (substs, types) = mconcat $ zipWith matchPtoA ps args
           onDim (SizeClosure dim_env dim)
@@ -682,11 +736,11 @@ expandType env (Scalar (TypeVar u tn args)) =
             | otherwise =
                 SizeClosure (env <> dim_env) $
                   applySubst (`M.lookup` substs) dim
-       in bimap onDim (const u) $ expandType (Env mempty types <> tn_env) t'
+       in bimap onDim (const o) $ expandType (Env mempty types <> tn_env) t'
     Nothing ->
       -- This case only happens for built-in abstract types,
       -- e.g. accumulators.
-      Scalar (TypeVar u tn $ map expandArg args)
+      Scalar (TypeVar o tn $ map expandArg args)
   where
     matchPtoA (TypeParamDim p _) (TypeArgDim e) =
       (M.singleton p $ ExpSubst e, mempty)
@@ -700,7 +754,7 @@ expandType env (Scalar (Sum cs)) = Scalar $ Sum $ (fmap . fmap) (expandType env)
 
 -- | Evaluate all possible sizes, except those that contain free
 -- variables in the set of names.
-evalType :: S.Set VName -> EvalType -> EvalM (TypeBase (Either Int64 SizeClosure) NoUniqueness)
+evalType :: S.Set VName -> EvalType -> EvalM (TypeBase (Either Int64 SizeClosure) NoMode)
 evalType outer_bound t = do
   let evalDim bound _ (SizeClosure env e)
         | canBeEvaluated bound e =
@@ -736,10 +790,43 @@ evalTermVar env qv t =
 typeValueShape :: Env -> StructType -> EvalM ValueShape
 typeValueShape env t = typeShape <$> evalTypeFully (expandType env t)
 
+-- | Compute the shape of a sum value with the given type, constructor
+-- and payload values. The shapes of the payload values take
+-- precedence over the type annotation, which may contain existential
+-- sizes that cannot be evaluated. The shapes of the other
+-- constructors are computed from the type, after resolving
+-- existential sizes against the concrete payload where possible; the
+-- type system guarantees that dimensions not determined by the
+-- payload can be evaluated.
+sumValueShape :: Env -> StructType -> Name -> [Value] -> EvalM ValueShape
+sumValueShape env t c vs =
+  case expandType env t of
+    Scalar (Sum cs) -> do
+      let payload_shapes = map valueShape vs
+          learned =
+            i64Env $ mconcat $ maybe [] (zipWith learn payload_shapes) $ M.lookup c cs
+          evalDim (SizeClosure denv e) =
+            asInt64 <$> evalWithExts (learned <> denv) e
+          onConstr c' fts
+            | c' == c = pure payload_shapes
+            | otherwise = map typeShape <$> mapM (bitraverse evalDim pure) fts
+      ShapeSum <$> M.traverseWithKey onConstr cs
+    t' -> typeShape <$> evalTypeFully t'
+  where
+    learn (ShapeDim d s) ft
+      | SizeClosure _ (Var v _ _) : _ <- shapeDims (arrayShape ft) =
+          M.insert (qualLeaf v) d $ learn s (stripArray 1 ft)
+      | otherwise = learn s (stripArray 1 ft)
+    learn (ShapeRecord fs) (Scalar (Record fts)) =
+      mconcat $ M.elems $ M.intersectionWith learn fs fts
+    learn (ShapeSum fs) (Scalar (Sum fts)) =
+      mconcat $ map mconcat $ M.elems $ M.intersectionWith (zipWith learn) fs fts
+    learn _ _ = mempty
+
 -- Sometimes type instantiation is not quite enough - then we connect
 -- up the missing sizes here.  In particular used for eta-expanded
 -- entry points.
-linkMissingSizes :: [VName] -> Pat (TypeBase Size u) -> Value -> Env -> Env
+linkMissingSizes :: [VName] -> Pat (TypeBase Size o) -> Value -> Env -> Env
 linkMissingSizes [] _ _ env = env
 linkMissingSizes missing_sizes p v env =
   env <> i64Env (resolveExistentials missing_sizes p_t (valueShape v))
@@ -762,7 +849,7 @@ evalBinding env missing_sizes [] body rettype =
         env'' <- linkMissingSizes missing_sizes p v <$> matchPat env' p v
         etaExpand (v : vs) env'' rt
     etaExpand vs env' _ = do
-      f <- eval env' body
+      f <- localExts $ eval env' body
       foldM (apply noLoc mempty) f $ reverse vs
 evalBinding env missing_sizes (p : ps) body rettype =
   pure . ValueFun $ \v -> do
@@ -771,37 +858,59 @@ evalBinding env missing_sizes (p : ps) body rettype =
 
 evalValBinding ::
   Env ->
+  VName ->
   [TypeParam] ->
   [Pat ParamType] ->
   ResRetType ->
   Exp ->
   EvalM TermBinding
-evalValBinding env tparams ps ret fbody = do
+evalValBinding env name tparams ps ret fbody = do
   let ftype = evalToStruct $ expandType env $ funType ps ret
       retext = case ps of
         [] -> retDims ret
         _ -> []
 
-  -- Distinguish polymorphic and non-polymorphic bindings here.
-  if null tparams
-    then
+  -- A function binding may refer to itself recursively, which means it muse be
+  -- in scope of itself. We tie the knot by evaluating the body in an
+  -- environment ('recenv') that maps the 'name' to itself. Crucially, in each
+  -- case below the binding is a lazy, self-referential 'let' whose right-hand
+  -- side is a value constructor (a 'ValueFun' closure or a 'TermPoly' closure).
+  --
+  -- Distinguish polymorphic, monomorphic-function, and plain-value
+  -- bindings here.
+  case (null tparams, ps) of
+    (True, []) ->
+      -- Not a syntactic function, so cannot be recursive.
       fmap (TermValue (Just $ T.BoundV [] ftype))
         . returned env (retType ret) retext
         =<< evalBinding env [] ps fbody (retType ret)
-    else pure . TermPoly (Just $ T.BoundV [] ftype) $ \ftype' -> do
-      let resolved =
-            resolveTypeParams (map typeParamName tparams) ftype ftype'
-      tparam_env <- evalResolved resolved
-      let env' = tparam_env <> env
-          -- In some cases (abstract lifted types) there may be
-          -- missing sizes that were not fixed by the type
-          -- instantiation.  These will have to be set by looking
-          -- at the actual function arguments.
-          missing_sizes =
-            filter (`M.notMember` envTerm env') $
-              map typeParamName (filter isSizeParam tparams)
-      returned env (retType ret) retext
-        =<< evalBinding env' missing_sizes ps fbody (retType ret)
+    (True, p : ps') ->
+      -- A monomorphic function; "unfold" the first step of what evalBinding
+      -- would do.
+      let recenv = env {envTerm = M.insert name binding $ envTerm env}
+          binding =
+            TermValue (Just $ T.BoundV [] ftype) . ValueFun $ \v -> do
+              env' <- matchPat recenv p v
+              evalBinding env' [] ps' fbody (retType ret)
+       in pure binding
+    (False, _) ->
+      -- A polymorphic function.
+      let binding = TermPoly (Just $ T.BoundV [] ftype) $ \ftype' -> do
+            let resolved =
+                  resolveTypeParams (map typeParamName tparams) ftype ftype'
+            tparam_env <- evalResolved resolved
+            let recenv = env {envTerm = M.insert name binding $ envTerm env}
+                env' = tparam_env <> recenv
+                -- In some cases (abstract lifted types) there may be
+                -- missing sizes that were not fixed by the type
+                -- instantiation.  These will have to be set by looking
+                -- at the actual function arguments.
+                missing_sizes =
+                  filter (`M.notMember` envTerm env') $
+                    map typeParamName (filter isSizeParam tparams)
+            returned env (retType ret) retext
+              =<< evalBinding env' missing_sizes ps fbody (retType ret)
+       in pure binding
 
 evalArg :: Env -> Exp -> Maybe VName -> EvalM Value
 evalArg env e ext = do
@@ -811,7 +920,7 @@ evalArg env e ext = do
     _ -> pure ()
   pure v
 
-returned :: Env -> TypeBase Size u -> [VName] -> Value -> EvalM Value
+returned :: Env -> TypeBase Size o -> [VName] -> Value -> EvalM Value
 returned _ _ [] v = pure v
 returned env ret retext v = do
   mapM_ (uncurry putExtSize . second (ValuePrim . SignedValue . Int64Value))
@@ -877,9 +986,9 @@ evalAppExp env (LetPat sizes p e body _) = do
       env'' = env' <> i64Env (resolveExistentials (map sizeName sizes) p_t v_s)
   eval env'' body
 evalAppExp env (LetFun (f, _) (tparams, ps, _, Info ret, fbody) body _) = do
-  binding <- evalValBinding env tparams ps ret fbody
+  binding <- evalValBinding env f tparams ps ret fbody
   eval (env {envTerm = M.insert f binding $ envTerm env}) body
-evalAppExp env (BinOp (op, _) op_t (x, Info xext) (y, Info yext) loc)
+evalAppExp env (BinOp (op, _) (Info op_t) (x, Info xext) (y, Info yext) loc)
   | baseName (qualLeaf op) == "&&" = do
       x' <- asBool <$> eval env x
       if x'
@@ -893,8 +1002,9 @@ evalAppExp env (BinOp (op, _) op_t (x, Info xext) (y, Info yext) loc)
   | otherwise = do
       x' <- evalArg env x xext
       y' <- evalArg env y yext
-      op' <- eval env $ Var op op_t loc
-      apply2 loc env op' x' y'
+      op' <- evalTermVar env op op_t
+      op'' <- apply loc env op' x'
+      apply loc env op'' y'
 evalAppExp env (If cond e1 e2 _) = do
   cond' <- asBool <$> eval env cond
   if cond' then eval env e1 else eval env e2
@@ -927,7 +1037,7 @@ evalAppExp env (Loop sparams pat loopinit form body _) = do
       bound' <- asSigned <$> eval env bound
       forLoop (identName iv) bound' (zero bound') init_v
     ForIn in_pat in_e -> do
-      (_, in_vs) <- fromArray <$> eval env in_e
+      (_, in_vs) <- fromArray =<< eval env in_e
       foldM (forInLoop in_pat) init_v in_vs
     While cond ->
       whileLoop cond init_v
@@ -1068,14 +1178,19 @@ eval env (OpSection qv (Info t) _) =
   evalTermVar env qv $ toStruct t
 eval env (OpSectionLeft qv _ e (Info (_, _, argext), _) (Info (RetType _ t), _) loc) = do
   v <- evalArg env e argext
-  f <- evalTermVar env qv (toStruct t)
+  f <- evalTermVar env qv t'
   apply loc env f v
+  where
+    t' = toStruct t
 eval env (OpSectionRight qv _ e (Info _, Info (_, _, argext)) (Info (RetType _ t)) loc) = do
   y <- evalArg env e argext
   pure $
     ValueFun $ \x -> do
-      f <- evalTermVar env qv $ toStruct t
-      apply2 loc env f x y
+      f <- evalTermVar env qv t'
+      f' <- apply loc env f x
+      apply loc env f' y
+  where
+    t' = toStruct t
 eval env (UpdateSection steps _ loc) =
   pure $ ValueFun $ evalSection steps
   where
@@ -1096,7 +1211,7 @@ eval env (Assert what e (Info s) loc) = do
   eval env e
 eval env (Constr c es (Info t) _) = do
   vs <- mapM (eval env) es
-  shape <- typeValueShape env $ toStruct t
+  shape <- sumValueShape env (toStruct t) c vs
   pure $ ValueSum shape c vs
 eval env (Attr (AttrAtom (AtomName "break") _) e loc) = do
   break env (locOf loc)
@@ -1115,7 +1230,9 @@ eval env (Attr _ e _) =
 evalUpdateSteps :: Env -> [UpdateStep Info VName] -> Value -> Value -> EvalM (Maybe Value)
 evalUpdateSteps env = go
   where
-    go [] _ newv = pure $ Just newv
+    -- The value we update with must be in full, as 'writeArray' will store
+    -- it directly in the destination.
+    go [] _ newv = Just <$> force newv
     go (UpdateStepField f : rest) (ValueRecord fs) newv
       | Just old <- M.lookup f fs = do
           newf <- go rest old newv
@@ -1124,13 +1241,16 @@ evalUpdateSteps env = go
       error "eval update: invalid field update."
     go (UpdateStepSlice is : rest) arr newv = do
       is' <- mapM (evalDimIndex env) is
-      case indexArray is' arr of
+      -- 'writeArray' cannot update an array residing on a server.
+      arr' <- force arr
+      v <- runMaybeT $ indexArray is' arr'
+      case v of
         Nothing -> pure Nothing
         Just old -> do
           newsub <- go rest old newv
           case newsub of
             Nothing -> pure Nothing
-            Just vsub -> pure $ writeArray is' arr vsub
+            Just vsub -> pure $ writeArray is' arr' vsub
 
 evalCase ::
   Value ->
@@ -1231,9 +1351,104 @@ evalModExp env (ModApply f e (Info psubst) (Info rsubst) _) = do
       pure (f_env <> e_env <> res_env <> env_substs, res_mod)
     _ -> error "Expected ModuleFun."
 
+-- | Call an external function with the given return type.
+extCall :: Name -> ResRetType -> Env -> [Value] -> EvalM Value
+extCall n ret env ps = do
+  v <- liftF . (`ExtOpFFI` id) . call =<< resShapeOf ext env t
+  -- An existential size that the server cannot reveal is one that occurs only
+  -- in the payload of an absent constructor. It is observable by binding it in
+  -- a size pattern, so this differs from the interpreter, which knows the
+  -- actual size. Like the C API, we use 0 for the arrays of an absent
+  -- constructor.
+  let ext_env =
+        i64Env $
+          resolveExistentials ext t (valueShape v) <> M.fromList (map (,0) ext)
+  completeSums (ext_env <> env) t v
+  where
+    ext = retDims ret
+    t = toStruct $ snd $ unfoldFunType $ retType ret
+    call resshp = do
+      FFI.gc
+      vr <- FFI.call n =<< FFI.putArgs n ps
+      shp <- FFI.resultShape resshp vr
+      FFI.lazyGet shp vr
+
+-- | Describe a result type for 'FFI.resultShape'. Arrays, records, and sums
+-- with existential sizes are merely described, never evaluated; only what is
+-- none of these has its shape taken from the type.
+resShapeOf :: [VName] -> Env -> StructType -> EvalM FFI.ResShape
+resShapeOf ext env t
+  | rank > 0 =
+      FFI.ResArray <$> resShapeOf ext env (stripArray rank t)
+  | Scalar (Record fs) <- t =
+      FFI.ResRecord <$> traverse (resShapeOf ext env) fs
+  | Scalar (Sum cs) <- t,
+    any (`S.member` fvVars (freeInType t)) ext =
+      FFI.ResSum <$> traverse (traverse (resShapeOf ext env)) cs
+  | otherwise =
+      FFI.ResKnown . typeShape <$> evalTypeFully (structToEval env t)
+  where
+    rank = arrayRank t
+
+-- | The shape of a sum produced by 'FFI.resultShape' describes only the
+-- constructor that is present. Add the others, whose shapes are determined by
+-- the type in the given environment.
+completeSums :: Env -> StructType -> Value -> EvalM Value
+completeSums env (Scalar (Record ts)) (ValueRecord vs) =
+  ValueRecord <$> sequence (M.intersectionWith (completeSums env) ts vs)
+completeSums env t@(Scalar (Sum cs)) (ValueSum _ c vs) = do
+  vs' <- maybe (pure vs) (\ts -> zipWithM (completeSums env) ts vs) $ M.lookup c cs
+  shape <- sumValueShape env t c vs'
+  pure $ ValueSum shape c vs'
+completeSums _ _ v = pure v
+
+-- | The parameters of an external binding, represented as functions that
+-- bind an argument in the environment.
+extParams :: [Pat ParamType] -> ResRetType -> [Env -> Value -> EvalM Env]
+extParams ps ret = map fromPat ps <> map fromArrow (fst $ unfoldFunType $ retType ret)
+  where
+    fromPat p env = matchPat env p
+    fromArrow (Named v, t) env val =
+      pure $ valEnv (M.singleton v (Just $ T.BoundV [] $ toStruct t, val)) <> env
+    fromArrow (Unnamed, _) env _ = pure env
+
+-- | Construct the value of an external binding with the given parameters. The
+-- shape of the result may depend on the values of the parameters, so it is
+-- computed only once every argument has been supplied and bound in the
+-- environment. A binding of arity zero is not a function, and is called
+-- immediately.
+extFun ::
+  Name ->
+  Env ->
+  [Env -> Value -> EvalM Env] ->
+  ResRetType ->
+  EvalM Value
+extFun n = extFun' []
+  where
+    extFun' vs env [] ret = extCall n ret env $ reverse vs
+    extFun' vs env (bind : binds) ret = pure . ValueFun $ \v -> do
+      env' <- bind env v
+      extFun' (v : vs) env' binds ret
+
 evalDec :: Env -> Dec -> EvalM Env
+evalDec env (ValDec vb@(ValBind (Just _) vn@(VName n _) _ _ (Info ret) tparams ps _ _ _ _)) | "$external" `elem` valBindAttrs vb = localExts $ do
+  let ftype = evalToStruct $ expandType env $ funType ps ret
+      bv = Just $ T.BoundV [] ftype
+      params = extParams ps ret
+  sizes <- extEnv
+  if null tparams
+    then do
+      f <- extFun n env params ret
+      pure $ mempty {envTerm = M.singleton vn $ TermValue bv f} <> sizes
+    else
+      -- TODO: Add missing sizes?
+      let pfn ftype' = do
+            tparam_env <-
+              evalResolved $ resolveTypeParams (map typeParamName tparams) ftype ftype'
+            extFun n (tparam_env <> env) params ret
+       in pure $ mempty {envTerm = M.singleton vn $ TermPoly bv pfn} <> sizes
 evalDec env (ValDec (ValBind _ v _ _ (Info ret) tparams ps fbody _ _ _)) = localExts $ do
-  binding <- evalValBinding env tparams ps ret fbody
+  binding <- evalValBinding env v tparams ps ret fbody
   sizes <- extEnv
   pure $ mempty {envTerm = M.singleton v binding} <> sizes
 evalDec env (OpenDec me _) = do
@@ -1332,7 +1547,12 @@ modifyValueM f v = snd <$> valueAccumLM g 0 v
 -- Perhaps creating JVPValues could be abstracted into a function
 -- exposed by the AD module?
 doJVP2 :: Value -> Value -> Value -> EvalM Value
-doJVP2 f v s = do
+doJVP2 f v0 s0 = do
+  -- Differentiation traverses the values themselves, so anything
+  -- residing on a server must be fetched first.
+  v <- force v0
+  s <- force s0
+
   depth <- adDepth
 
   -- Turn the seeds into a list of ADValues
@@ -1384,7 +1604,12 @@ doJVP2 f v s = do
 -- Perhaps creating VJPValues could be abstracted into a function
 -- exposed by the AD module?
 doVJP2 :: Value -> Value -> Value -> EvalM Value
-doVJP2 f v s = do
+doVJP2 f v0 s0 = do
+  -- Differentiation traverses the values themselves, so anything
+  -- residing on a server must be fetched first.
+  v <- force v0
+  s <- force s0
+
   -- Get the depth
   depth <- adDepth
 
@@ -1722,12 +1947,14 @@ initialCtx =
     def ">>" = Just $ bopDef $ sintOp P.AShr ++ uintOp P.LShr
     def "<<" = Just $ bopDef $ intOp P.Shl
     def ">>>" = Just $ bopDef $ sintOp P.LShr ++ uintOp P.LShr
+    -- Equality inspects the values themselves, so anything residing on a
+    -- server must be fetched first.
     def "==" = Just $
       fun2 $
-        \xs ys -> pure $ ValuePrim $ BoolValue $ xs == ys
+        \xs ys -> ValuePrim . BoolValue <$> ((==) <$> force xs <*> force ys)
     def "!=" = Just $
       fun2 $
-        \xs ys -> pure $ ValuePrim $ BoolValue $ xs /= ys
+        \xs ys -> ValuePrim . BoolValue <$> ((/=) <$> force xs <*> force ys)
     -- The short-circuiting is handled directly in 'eval'; these cases
     -- are only used when partially applying and such.
     def "&&" = Just $
@@ -1811,32 +2038,67 @@ initialCtx =
         pure $ ValueFun $ \f -> pure . ValueFun $ \xs ->
           case unfoldFunType t' of
             ([_, _], ret_t)
-              | rowshape <- typeShape $ stripArray 1 ret_t ->
-                  toArray' rowshape <$> mapM (apply noLoc mempty f) (snd $ fromArray xs)
+              | rowshape <- typeShape $ stripArray 1 ret_t -> do
+                  xs' <- snd <$> fromArray xs
+                  toArray' rowshape <$> mapM (apply noLoc mempty f) xs'
             _ ->
               error $
                 "Invalid arguments to map intrinsic:\n"
                   ++ unlines [prettyString t, show f, show xs]
+    def "flatmap" = Just $
+      TermPoly Nothing $ \t ->
+        pure $ ValueFun $ \f -> pure . ValueFun $ \xs ->
+          case unfoldFunType t of
+            ([_, _], ret_t)
+              | Just [_, _, _, irreg_t, reg_t] <- isTupleRecord ret_t -> do
+                  irreg_rowshape <- typeShape <$> evalTypeFully (stripArray 1 irreg_t)
+                  reg_rowshape <- typeShape <$> evalTypeFully (stripArray 1 reg_t)
+                  yss <-
+                    mapM (apply noLoc mempty f) . snd
+                      =<< fromArray xs
+                  -- Each application produces a segment, which is concatenated
+                  -- with the others, and a value that is merely collected.
+                  let (segs, regs) = unzip $ map (fromPair . fromTuple) yss
+                  segs' <- mapM (fmap snd . fromArray) segs
+                  let seg_sizes = map genericLength segs' :: [Int64]
+                      offsets = init $ scanl (+) 0 seg_sizes
+                      flag s = if s == 0 then [] else True : replicate (fromIntegral s - 1) False
+                      mkI64 = ValuePrim . SignedValue . Int64Value
+                  pure $
+                    toTuple
+                      [ toArray' ShapeLeaf $ map mkI64 seg_sizes,
+                        toArray' ShapeLeaf $ map (ValuePrim . BoolValue) $ concatMap flag seg_sizes,
+                        toArray' ShapeLeaf $ map mkI64 offsets,
+                        toArray' irreg_rowshape $ concat segs',
+                        toArray' reg_rowshape regs
+                      ]
+            _ ->
+              error $
+                "Invalid arguments to flatmap intrinsic:\n"
+                  ++ unlines [show f, show xs]
+      where
+        fromPair (Just [x, y]) = (x, y)
+        fromPair _ = error "flatmap: lambda did not return a pair"
     def s | "reduce" `T.isPrefixOf` s = Just $
       fun3 $ \f ne xs ->
-        foldM (apply2 noLoc mempty f) ne $ snd $ fromArray xs
+        foldM (apply2 noLoc mempty f) ne . snd =<< fromArray xs
     def "scan" = Just $
       fun3 $ \f ne xs -> do
         let next (out, acc) x = do
               x' <- apply2 noLoc mempty f acc x
               pure (x' : out, x')
+        xs' <- snd <$> fromArray xs
         toArray' (valueShape ne) . reverse . fst
-          <$> foldM next ([], ne) (snd $ fromArray xs)
+          <$> foldM next ([], ne) xs'
     def "scatter" = Just $
       fun3 $ \arr is vs ->
-        case arr of
-          ValueArray shape arr' ->
-            pure $
-              ValueArray shape $
-                foldl' update arr' $
-                  zip (map asInt $ snd $ fromArray is) (snd $ fromArray vs)
-          _ ->
-            error $ "scatter expects array, but got: " <> show arr
+        force arr >>= \case
+          ValueArray shape arr' -> do
+            is' <- map asInt . snd <$> fromArray is
+            vs' <- snd <$> fromArray vs
+            pure $ ValueArray shape $ foldl' update arr' $ zip is' vs'
+          arr' ->
+            error $ "scatter expects array, but got: " <> show arr'
       where
         update arr' (i, v) =
           if i >= 0 && i < arrayLength arr'
@@ -1844,13 +2106,13 @@ initialCtx =
             else arr'
     def "scatter_2d" = Just $
       fun3 $ \arr is vs ->
-        case arr of
-          ValueArray _ _ ->
-            pure $
-              foldl' update arr $
-                zip (map fromTuple $ snd $ fromArray is) (snd $ fromArray vs)
-          _ ->
-            error $ "scatter_2d expects array, but got: " <> show arr
+        force arr >>= \case
+          arr'@ValueArray {} -> do
+            is' <- map fromTuple . snd <$> fromArray is
+            vs' <- snd <$> fromArray vs
+            pure $ foldl' update arr' $ zip is' vs'
+          arr' ->
+            error $ "scatter_2d expects array, but got: " <> show arr'
       where
         update :: Value -> (Maybe [Value], Value) -> Value
         update arr (Just idxs@[_, _], v) =
@@ -1859,33 +2121,33 @@ initialCtx =
           error "scatter_2d expects 2-dimensional indices"
     def "scatter_3d" = Just $
       fun3 $ \arr is vs ->
-        case arr of
-          ValueArray _ _ ->
-            pure $
-              foldl' update arr $
-                zip (map fromTuple $ snd $ fromArray is) (snd $ fromArray vs)
-          _ ->
-            error $ "scatter_3d expects array, but got: " <> show arr
+        force arr >>= \case
+          arr'@ValueArray {} -> do
+            is' <- map fromTuple . snd <$> fromArray is
+            vs' <- snd <$> fromArray vs
+            pure $ foldl' update arr' $ zip is' vs'
+          arr' ->
+            error $ "scatter_3d expects array, but got: " <> show arr'
       where
         update :: Value -> (Maybe [Value], Value) -> Value
         update arr (Just idxs@[_, _, _], v) =
           fromMaybe arr $ writeArray (map (IndexingFix . asInt64) idxs) arr v
         update _ _ =
           error "scatter_3d expects 3-dimensional indices"
-    def "hist_1d" = Just . fun6 $ \_ arr fun _ is vs ->
-      foldM
-        (update fun)
-        arr
-        (zip (map asInt64 $ snd $ fromArray is) (snd $ fromArray vs))
+    def "hist_1d" = Just . fun6 $ \_ arr fun _ is vs -> do
+      arr' <- force arr
+      is' <- map asInt64 . snd <$> fromArray is
+      vs' <- snd <$> fromArray vs
+      foldM (update fun) arr' $ zip is' vs'
       where
         op = apply2 mempty mempty
         update fun arr (i, v) =
           fromMaybe arr <$> updateArray (op fun) [IndexingFix i] arr v
-    def "hist_2d" = Just . fun6 $ \_ arr fun _ is vs ->
-      foldM
-        (update fun)
-        arr
-        (zip (map fromTuple $ snd $ fromArray is) (snd $ fromArray vs))
+    def "hist_2d" = Just . fun6 $ \_ arr fun _ is vs -> do
+      arr' <- force arr
+      is' <- map fromTuple . snd <$> fromArray is
+      vs' <- snd <$> fromArray vs
+      foldM (update fun) arr' $ zip is' vs'
       where
         op = apply2 mempty mempty
         update fun arr (Just idxs@[_, _], v) =
@@ -1893,11 +2155,11 @@ initialCtx =
             <$> updateArray (op fun) (map (IndexingFix . asInt64) idxs) arr v
         update _ _ _ =
           error "hist_2d: bad index value"
-    def "hist_3d" = Just . fun6 $ \_ arr fun _ is vs ->
-      foldM
-        (update fun)
-        arr
-        (zip (map fromTuple $ snd $ fromArray is) (snd $ fromArray vs))
+    def "hist_3d" = Just . fun6 $ \_ arr fun _ is vs -> do
+      arr' <- force arr
+      is' <- map fromTuple . snd <$> fromArray is
+      vs' <- snd <$> fromArray vs
+      foldM (update fun) arr' $ zip is' vs'
       where
         op = apply2 mempty mempty
         update fun arr (Just idxs@[_, _, _], v) =
@@ -1907,7 +2169,9 @@ initialCtx =
           error "hist_2d: bad index value"
     def "partition" = Just $
       fun3 $ \k f xs -> do
-        let (ShapeDim _ rowshape, xs') = fromArray xs
+        (xs_shape, xs') <- fromArray xs
+
+        let ShapeDim _ rowshape = xs_shape
 
             next outs x = do
               i <- asInt <$> apply noLoc mempty f x
@@ -1926,8 +2190,10 @@ initialCtx =
         insertAt i x (l : ls) = l : insertAt (i - 1) x ls
         insertAt _ _ ls = ls
     def "scatter_stream" = Just $
-      fun3 $ \dest f vs ->
-        case (dest, vs) of
+      fun3 $ \dest f vs -> do
+        dest' <- force dest
+        vs' <- force vs
+        case (dest', vs') of
           ( ValueArray dest_shape dest_arr,
             ValueArray _ vs_arr
             ) -> do
@@ -1939,10 +2205,12 @@ initialCtx =
                 _ ->
                   error $ "scatter_stream produced: " <> show acc'
           _ ->
-            error $ "scatter_stream expects array, but got: " <> prettyString (show vs, show vs)
+            error $ "scatter_stream expects array, but got: " <> prettyString (show dest', show vs')
     def "hist_stream" = Just $
-      fun5 $ \dest op _ne f vs ->
-        case (dest, vs) of
+      fun5 $ \dest op _ne f vs -> do
+        dest' <- force dest
+        vs' <- force vs
+        case (dest', vs') of
           ( ValueArray dest_shape dest_arr,
             ValueArray _ vs_arr
             ) -> do
@@ -1954,7 +2222,7 @@ initialCtx =
                 _ ->
                   error $ "hist_stream produced: " <> show acc'
           _ ->
-            error $ "hist_stream expects array, but got: " <> prettyString (show dest, show vs)
+            error $ "hist_stream expects array, but got: " <> prettyString (show dest', show vs')
     def "acc_write" = Just $
       fun3 $ \acc i v ->
         case (acc, i) of
@@ -1991,7 +2259,8 @@ initialCtx =
           f i j =
             indexArray [IndexingFix $ offset' + i * s1' + j * s2'] arr
 
-      case mk1 [mk2 [f i j | j <- iota n2'] | i <- iota n1'] of
+      vs <- runMaybeT $ mk1 [mk2 [f i j | j <- iota n2'] | i <- iota n1']
+      case vs of
         Just arr' -> pure arr'
         Nothing ->
           bad mempty mempty $
@@ -2005,9 +2274,11 @@ initialCtx =
         ShapeDim n1 (ShapeDim n2 _) -> do
           let iota x = [0 .. x - 1]
               f arr' (i, j) =
-                writeArray [IndexingFix $ offset' + i * s1' + j * s2'] arr'
+                MaybeT . pure . writeArray [IndexingFix $ offset' + i * s1' + j * s2'] arr'
                   =<< indexArray [IndexingFix i, IndexingFix j] v
-          case foldM f arr [(i, j) | i <- iota n1, j <- iota n2] of
+          dest <- force arr
+          o <- runMaybeT $ foldM f dest [(i, j) | i <- iota n1, j <- iota n2]
+          case o of
             Just arr' -> pure arr'
             Nothing ->
               bad mempty mempty $
@@ -2030,7 +2301,8 @@ initialCtx =
           f i j l =
             indexArray [IndexingFix $ offset' + i * s1' + j * s2' + l * s3'] arr
 
-      case mk1 [mk2 [mk3 [f i j l | l <- iota n3'] | j <- iota n2'] | i <- iota n1'] of
+      vs <- runMaybeT $ mk1 [mk2 [mk3 [f i j l | l <- iota n3'] | j <- iota n2'] | i <- iota n1']
+      case vs of
         Just arr' -> pure arr'
         Nothing ->
           bad mempty mempty $
@@ -2045,9 +2317,11 @@ initialCtx =
         ShapeDim n1 (ShapeDim n2 (ShapeDim n3 _)) -> do
           let iota x = [0 .. x - 1]
               f arr' (i, j, l) =
-                writeArray [IndexingFix $ offset' + i * s1' + j * s2' + l * s3'] arr'
+                MaybeT . pure . writeArray [IndexingFix $ offset' + i * s1' + j * s2' + l * s3'] arr'
                   =<< indexArray [IndexingFix i, IndexingFix j, IndexingFix l] v
-          case foldM f arr [(i, j, l) | i <- iota n1, j <- iota n2, l <- iota n3] of
+          dest <- force arr
+          o <- runMaybeT $ foldM f dest [(i, j, l) | i <- iota n1, j <- iota n2, l <- iota n3]
+          case o of
             Just arr' -> pure arr'
             Nothing ->
               bad mempty mempty $
@@ -2073,7 +2347,8 @@ initialCtx =
           f i j l m =
             indexArray [IndexingFix $ offset' + i * s1' + j * s2' + l * s3' + m * s4'] arr
 
-      case mk1 [mk2 [mk3 [mk4 [f i j l m | m <- iota n4'] | l <- iota n3'] | j <- iota n2'] | i <- iota n1'] of
+      vs <- runMaybeT $ mk1 [mk2 [mk3 [mk4 [f i j l m | m <- iota n4'] | l <- iota n3'] | j <- iota n2'] | i <- iota n1']
+      case vs of
         Just arr' -> pure arr'
         Nothing ->
           bad mempty mempty $
@@ -2089,9 +2364,11 @@ initialCtx =
         ShapeDim n1 (ShapeDim n2 (ShapeDim n3 (ShapeDim n4 _))) -> do
           let iota x = [0 .. x - 1]
               f arr' (i, j, l, m) =
-                writeArray [IndexingFix $ offset' + i * s1' + j * s2' + l * s3' + m * s4'] arr'
+                MaybeT . pure . writeArray [IndexingFix $ offset' + i * s1' + j * s2' + l * s3' + m * s4'] arr'
                   =<< indexArray [IndexingFix i, IndexingFix j, IndexingFix l, IndexingFix m] v
-          case foldM f arr [(i, j, l, m) | i <- iota n1, j <- iota n2, l <- iota n3, m <- iota n4] of
+          dest <- force arr
+          o <- runMaybeT $ foldM f dest [(i, j, l, m) | i <- iota n1, j <- iota n2, l <- iota n3, m <- iota n4]
+          case o of
             Just arr' -> pure arr'
             Nothing ->
               bad mempty mempty $
@@ -2105,7 +2382,8 @@ initialCtx =
             listPair (xs, ys) =
               [toArray' xs_shape xs, toArray' ys_shape ys]
 
-        pure $ toTuple $ listPair $ unzip $ map (fromPair . fromTuple) $ snd $ fromArray x
+        x' <- snd <$> fromArray x
+        pure $ toTuple $ listPair $ unzip $ map (fromPair . fromTuple) x'
       where
         fromPair (Just [x, y]) = (x, y)
         fromPair _ = error "Not a pair"
@@ -2113,31 +2391,39 @@ initialCtx =
       fun2 $ \xs ys -> do
         let ShapeDim _ xs_rowshape = valueShape xs
             ShapeDim _ ys_rowshape = valueShape ys
+        xs' <- snd <$> fromArray xs
+        ys' <- snd <$> fromArray ys
         pure $
           toArray' (ShapeRecord (tupleFields [xs_rowshape, ys_rowshape])) $
             map toTuple $
-              transpose [snd $ fromArray xs, snd $ fromArray ys]
+              transpose [xs', ys']
     def "concat" = Just $
       fun2 $ \xs ys -> do
-        let (ShapeDim _ rowshape, xs') = fromArray xs
-            (_, ys') = fromArray ys
+        (xs_shape, xs') <- fromArray xs
+        (_, ys') <- fromArray ys
+        let ShapeDim _ rowshape = xs_shape
         pure $ toArray' rowshape $ xs' ++ ys'
     def "transpose" = Just $
       fun1 $ \xs -> do
-        let (ShapeDim n (ShapeDim m shape), xs') = fromArray xs
+        (xs_shape, xs') <- fromArray xs
+        let ShapeDim n (ShapeDim m shape) = xs_shape
+        rows <- mapM (fmap snd . fromArray) xs'
         pure $
           toArray (ShapeDim m (ShapeDim n shape)) $
             map (toArray (ShapeDim n shape)) $
               -- Slight hack to work around empty dimensions.
               genericTake m $
-                transpose (map (snd . fromArray) xs') ++ repeat []
+                transpose rows ++ repeat []
     def "flatten" = Just $
       fun1 $ \xs -> do
-        let (ShapeDim n (ShapeDim m shape), xs') = fromArray xs
-        pure $ toArray (ShapeDim (n * m) shape) $ concatMap (snd . fromArray) xs'
+        (xs_shape, xs') <- fromArray xs
+        let ShapeDim n (ShapeDim m shape) = xs_shape
+        rows <- mapM (fmap snd . fromArray) xs'
+        pure $ toArray (ShapeDim (n * m) shape) $ concat rows
     def "unflatten" = Just $
       fun3 $ \n m xs -> do
-        let (ShapeDim xs_size innershape, xs') = fromArray xs
+        (xs_shape, xs') <- fromArray xs
+        let ShapeDim xs_size innershape = xs_shape
             rowshape = ShapeDim (asInt64 m) innershape
             shape = ShapeDim (asInt64 n) rowshape
         if asInt64 n * asInt64 m /= xs_size || asInt64 n < 0 || asInt64 m < 0
@@ -2154,12 +2440,30 @@ initialCtx =
     def "manifest" = Just $ fun1 pure
     def "jvp2" = Just $ fun3 doJVP2
     def "vjp2" = Just $ fun3 doVJP2
+    def "jmp2" = Just $ fun3 $ \f x seeds -> do
+      v <- apply noLoc mempty f x
+      seeds' <- snd <$> fromArray seeds
+      dvs <-
+        toArray' (valueShape v) . map (project "1")
+          <$> mapM (doJVP2 f x) seeds'
+      pure $ toTuple [v, dvs]
+    def "mjp2" = Just $ fun3 $ \f x seeds -> do
+      v <- apply noLoc mempty f x
+      seeds' <- snd <$> fromArray seeds
+      dvs <-
+        toArray' (valueShape x) . map (project "1")
+          <$> mapM (doVJP2 f x) seeds'
+      pure $ toTuple [v, dvs]
     def "with_vjp" = Just $ fun3 $ \f _ arg ->
       -- XXX? We simply ignore the custom derivative. This is correct, but makes
       -- it more of a hassle to test them.
       apply noLoc mempty f arg
     def "acc" = Nothing
-    def s | nameFromText s `M.member` namesToPrimTypes = Nothing
+    def fname
+      | nameFromText fname `M.member` namesToPrimTypes = Nothing
+      | Just op <- determineIO fname =
+          Just $ TermPoly Nothing $ \t ->
+            pure $ ValueFun $ doIO <=< op (evalTypeFully t) <=< force
     def s = error $ "Missing intrinsic: " ++ T.unpack s
 
     tdef :: Name -> Maybe TypeBinding
@@ -2179,8 +2483,15 @@ intrinsicsNeg = intrinsicVal "neg"
 intrinsicsNot :: Value
 intrinsicsNot = intrinsicVal "!"
 
+-- | Interpret a single expression.
 interpretExp :: Ctx -> Exp -> F ExtOp Value
 interpretExp ctx e = runEvalM (ctxImports ctx) $ eval (ctxEnv ctx) e
+
+-- | Interpret an application of a function value to an argument value. It
+-- better be well-typed!
+interpretApply :: Ctx -> Value -> Value -> F ExtOp Value
+interpretApply ctx f arg =
+  runEvalM (ctxImports ctx) $ apply mempty (ctxEnv ctx) f arg
 
 interpretDecs :: Ctx -> [Dec] -> F ExtOp Env
 interpretDecs ctx decs =
@@ -2235,7 +2546,7 @@ checkEntryArgs entry args entry_t
           </> "Got input of types"
           </> indent 2 (stack (map pretty args_ts))
   where
-    (param_ts, _) = unfoldFunType entry_t
+    param_ts = map snd $ fst $ unfoldFunType entry_t
     args_ts = map (valueStructType . valueType) args
     expected
       | null param_ts =
@@ -2272,7 +2583,7 @@ interpretFunction ctx fname vs = do
   where
     updateType (vt : vts) (Scalar (Arrow als pn d pt (RetType dims rt))) = do
       checkInput vt pt
-      Scalar . Arrow als pn d (valueStructType vt) . RetType dims . toRes Nonunique
+      Scalar . Arrow als pn d (valueStructType vt) . RetType dims . toRes Nonfresh
         <$> updateType vts (toStruct rt)
     updateType _ t =
       Right t

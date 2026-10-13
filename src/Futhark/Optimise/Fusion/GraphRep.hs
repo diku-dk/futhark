@@ -395,6 +395,7 @@ expInputs (Op soac) = case soac of
   Futhark.JVP {} -> freeClassifications soac
   Futhark.VJP {} -> freeClassifications soac
   Futhark.WithVJP {} -> freeClassifications soac
+  Futhark.FlatMap {} -> freeClassifications soac
   where
     inputs = S.fromList . (`zip` repeat SOACInput)
 expInputs e

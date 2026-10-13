@@ -6,7 +6,7 @@
 -- structure gpu-mem { Alloc 2 }
 
 def main (xss: [][]i32) =
-  #[incremental_flattening(only_intra)]
+  #[flattening(only_intra)]
   map (\xs ->
          let as = map (+ 1) xs |> opaque
          let a = reduce (+) 0 as

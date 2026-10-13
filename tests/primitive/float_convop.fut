@@ -70,7 +70,7 @@ entry f64_to_bool = map bool.f64
 -- ==
 -- entry: f32_to_u32
 -- input { [f32.nan, f32.inf, -f32.inf, -1f32, 1f32, 3.5f32, -3.5f32] }
--- output { [0u32, 0u32, 0u32, 4294967295u32, 1u32, 3u32, 4294967293u32] }
+-- output { [0u32, 0u32, 0u32, 0u32, 1u32, 3u32, 0u32] }
 
 -- ==
 -- entry: f64_to_i32
@@ -80,7 +80,7 @@ entry f64_to_bool = map bool.f64
 -- ==
 -- entry: f64_to_u32
 -- input { [f64.nan, f64.inf, -f64.inf, -1f64, 1f64, 3.5f64, -3.5f64] }
--- output { [0u32, 0u32, 0u32, 4294967295u32, 1u32, 3u32, 4294967293u32] }
+-- output { [0u32, 0u32, 0u32, 0u32, 1u32, 3u32, 0u32] }
 
 -- ==
 -- entry: f16_to_bool

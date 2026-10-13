@@ -27,7 +27,7 @@ import Futhark.CodeGen.ImpGen.GPU.SegScan
 import Futhark.Error
 import Futhark.IR.GPUMem
 import Futhark.MonadFreshNames
-import Futhark.Util.IntegralExp (divUp, nextMul)
+import Futhark.Util.IntegralExp (ceilDiv, nextMul)
 import Prelude hiding (quot, rem)
 
 callKernelOperations :: Operations GPUMem HostEnv Imp.HostOp
@@ -144,7 +144,7 @@ opCompiler (Pat [pe]) (Inner (SizeOp (CalcNumBlocks w64 max_num_tblocks_key tblo
   -- The calculations are done with 64-bit integers to avoid overflow
   -- issues.
   let num_tblocks_maybe_zero =
-        sMin64 (pe64 w64 `divUp` pe64 tblock_size) $
+        sMin64 (pe64 w64 `ceilDiv` pe64 tblock_size) $
           sExt64 (tvExp max_num_tblocks)
   -- We also don't want zero blocks.
   let num_tblocks = sMax64 1 num_tblocks_maybe_zero
@@ -249,16 +249,25 @@ withAcc pat inputs lam = do
 
 expCompiler :: ExpCompiler GPUMem HostEnv Imp.HostOp
 -- We generate a simple kernel for iota and replicate.
-expCompiler (Pat [pe]) (BasicOp (Iota n x s et)) = do
-  x' <- toExp x
-  s' <- toExp s
-  sIota (patElemName pe) (pe64 n) x' s' et
-expCompiler (Pat [pe]) (BasicOp (Replicate shape se))
+expCompiler dest@(Pat [pe]) e@(BasicOp (Iota n x s et)) = do
+  space <- lookupArraySpace $ patElemName pe
+  -- Might still have non-GPU iotas.
+  if space == Space "device"
+    then do
+      x' <- toExp x
+      s' <- toExp s
+      sIota (patElemName pe) (pe64 n) x' s' et
+    else defCompileExp dest e
+expCompiler dest@(Pat [pe]) e@(BasicOp (Replicate shape se))
   | Acc {} <- patElemType pe = pure ()
-  | otherwise =
-      if shapeRank shape == 0
-        then copyDWIM (patElemName pe) [] se []
-        else sReplicate (patElemName pe) se
+  | shapeRank shape == 0 =
+      copyDWIM (patElemName pe) [] se []
+  | otherwise = do
+      space <- lookupArraySpace $ patElemName pe
+      -- Might still have non-GPU replicates.
+      if space == Space "device"
+        then sReplicate (patElemName pe) se
+        else defCompileExp dest e
 -- Allocation in the "shared" space is just a placeholder.
 expCompiler _ (Op (Alloc _ (Space "shared"))) =
   pure ()

@@ -61,43 +61,19 @@ function toU8(ta) {
   return new Uint8Array(ta.buffer, ta.byteOffset, ta.byteLength);
 }
 
-function construct_binary_value(v, typ) {
-  var dims;
-  var payload_bytes;
-  var filler;
-  if (v instanceof FutharkOpaque) {
-    throw "Opaques are not supported";
-  } else if (v instanceof FutharkArray) {
-    var t = v.futharkType();
-    var ftype = "    ".slice(t.length) + t;
-    var shape = v.shape();
-    var ta = v.toTypedArray(shape);
-    var da = new BigInt64Array(shape);
-    dims = shape.length;
-    payload_bytes = da.byteLength + ta.byteLength;
-    filler = (bytes) => {
-      bytes.set(toU8(da), 7);
-      bytes.set(toU8(ta), 7 + da.byteLength);
-    }
-  } else {
-    var ftype = "    ".slice(typ.length) + typ;
-    dims = 0;
-    payload_bytes = typToSize[ftype];
-    filler = (bytes) => {
-      var scalar = new (typToType[ftype])([v]);
-      bytes.set(toU8(scalar), 7);
-    }
-  }
-  var total_bytes = 7 + payload_bytes;
-  var bytes = new Uint8Array(total_bytes);
-  bytes[0] = Buffer.from('b').readUInt8();
-  bytes[1] = 2;
-  bytes[2] = dims;
+// The binary encoding of a value with the given primitive type and shape (a
+// list of BigInts), where 'bytes' is the payload.
+function binary_value(typ, shape, bytes) {
+  var ftype = "    ".slice(typ.length) + typ;
+  var header = new Uint8Array(7);
+  header[0] = 'b'.charCodeAt(0);
+  header[1] = 2;
+  header[2] = shape.length;
   for (var i = 0; i < 4; i++) {
-    bytes[3+i] = ftype.charCodeAt(i);
+    header[3+i] = ftype.charCodeAt(i);
   }
-  filler(bytes);
-  return Buffer.from(bytes);
+  var dims = new BigInt64Array(shape);
+  return Buffer.concat([header, toU8(dims), bytes]);
 }
 
 class Reader {
@@ -156,8 +132,6 @@ class Reader {
     this.buff = this.buff.slice(7);
     var exp_typ = "[]".repeat(dim) + typename;
     var given_typ = "[]".repeat(num_dim) + typ.toString().trim();
-    console.log(exp_typ);
-    console.log(given_typ);
     if (exp_typ !== given_typ) {
       throw ("Expected type : " + exp_typ + ", Actual type : " + given_typ);
     }

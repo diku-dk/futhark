@@ -5,7 +5,7 @@
 --
 -- ==
 -- tags { no_ispc }
--- compiled input { 300i64 }
+-- input { 300i64 }
 -- output { [[220i32, 284i32]] }
 
 def divisors (n: i32) : []i32 =

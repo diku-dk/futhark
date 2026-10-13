@@ -78,12 +78,10 @@
 --   optimisations such as fusion, inlining, and a host of other
 --   cleanup.
 --
--- * "Futhark.IR.GPU": a representation where parallelism is expressed
---   with flat /segmented operations/, and a few other GPU-specific
---   operations are also supported.  The pass
---   "Futhark.Pass.ExtractKernels" transforms a
---   'Futhark.IR.SOACS.SOACS' program to a 'Futhark.IR.GPU.GPU'
---   program.
+-- * "Futhark.IR.GPU": a representation where parallelism is expressed with flat
+--   /segmented operations/, and a few other GPU-specific operations are also
+--   supported. The pass "Futhark.Pass.Flatten" transforms a
+--   'Futhark.IR.SOACS.SOACS' program to a 'Futhark.IR.GPU.GPU' program.
 --
 -- * "Futhark.IR.MC": a representation where parallelism is expressed
 --   with flat /segmented operations/, and a few other multicore-specific

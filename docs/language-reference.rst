@@ -291,11 +291,11 @@ of the function::
 
   def name params...: rettype = body
 
-Hindley-Milner-style type inference is supported.  A parameter may be
-given a type with the notation ``(name: type)``.  Functions may not be
-recursive.  The sizes of the arguments can be constrained - see `Size
-Types`_.  A function can be *polymorphic* by using type parameters, in
-the same way as for `Type Abbreviations`_::
+Hindley-Milner-style type inference is supported. A parameter may be given a
+type with the notation ``(name: type)``. Functions may be recursive, subject to
+various restrictions - see :ref:`recursive-functions`. The sizes of the arguments
+can be constrained - see `Size Types`_. A function can be *polymorphic* by using
+type parameters, in the same way as for `Type Abbreviations`_::
 
   def reverse [n] 't (xs: [n]t): [n]t = xs[::-1]
 
@@ -316,10 +316,6 @@ definition::
   def pair 't (x: t) (y: t) = (x, y)
 
 The application ``pair [1] [2,3]`` is ill-typed.
-
-To simplify the handling of in-place updates (see
-:ref:`in-place-updates`), the value returned by a function may not
-alias any global variables.
 
 User-Defined Operators
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -1006,9 +1002,11 @@ This notation is syntactic sugar for ``let r = r with f = v in body``.
 ...............................
 
 Bind ``f`` to a function with the given parameters and definition
-(``e``) and evaluate ``body``.  The function will be treated as
-aliasing any free variables in ``e``.  The function is not in scope of
-itself, and hence cannot be recursive.
+(``e``) and evaluate ``body``. The function will be treated as
+aliasing any free variables in ``e``. The function is not in scope of
+itself, and hence cannot be recursive. While the function can be made
+polymorphic by putting in explicit size parameters, it is not
+automatically generalised the way top level functions are.
 
 ``loop pat = initial for x in a do loopbody``
 .............................................
@@ -1105,6 +1103,9 @@ These also apply to any record or tuple containing a function (a
 
 * A ``loop`` parameter cannot be a function.
 
+* There are some restrictions on recursive higher-order functions, see
+  :ref:`recursive-functions`.
+
 Further, *type parameters* are divided into *non-lifted* (bound with
 an apostrophe, e.g. ``'t``), *size-lifted* (``'~t``), and *fully
 lifted* (``'^t``).  Only fully lifted type parameters may be
@@ -1134,6 +1135,31 @@ cannot be influenced by later uses of the function.
 Local bindings made with ``let`` are not made polymorphic through
 let-generalisation *unless* they are syntactically functions, meaning
 they have at least one named parameter.
+
+.. _recursive-functions:
+
+Recursive functions
+-------------------
+
+Functions may be recursive, subject to the following constraints.
+
+1. Mutual recursion is not supported - a function is only in scope of itself.
+
+2. A recursive function definition may not have a higher-order return type. In
+   some cases you can work around this restriction by adding more function
+   parameters.
+
+3. A recursive call of a higher-order function must be provided arguments for
+   all of its higher-order parameters, and they must be syntactically identical
+   to the corresponding parameter in the definition.
+
+Restriction 2 is to make restriction 3 feasible to check, and restriction 3
+exists to ensure defunctionalisation is possible.
+
+Recursion is monomorphic, meaning a recursive call uses the same instantiation
+of type parameters as the function definition. However, *size-polymorphic*
+recursion is allowed, but requires explicit size parameters in the function
+definition.
 
 .. _size-types:
 
@@ -1439,9 +1465,9 @@ update.  This involves also checking that no *alias* of ``a`` is used.
 Generally, most language constructs produce new arrays, but some
 (slicing) create arrays that alias their input arrays.
 
-When defining a function parameter we can mark it as *consuming* by
-prefixing it with an asterisk.  For a return type, we can mark it as
-*alias-free* by prefixing it with an asterisk.  For example::
+When defining a function parameter we can mark it as *consuming* by prefixing it
+with an asterisk. For a return type, we can mark it as *fresh* by prefixing it
+with an asterisk. For example::
 
   def modify (a: *[]i32) (i: i32) (x: i32): *[]i32 =
     a with [i] = a[i] + x
@@ -1469,15 +1495,22 @@ For bulk in-place updates with multiple values, use the ``scatter``
 function from the `prelude
 <https://futhark-lang.org/docs/prelude/doc/prelude/soacs.html>`_.
 
-Alias Analysis
-~~~~~~~~~~~~~~
+Alias Propagation
+~~~~~~~~~~~~~~~~~
 
-The rules used by the Futhark compiler to determine aliasing are
-intuitive in the intra-procedural case.  Aliases are associated with
-entire arrays.  Aliases of a record are tuple are tracked for each
-element, not for the record or tuple itself.  Most constructs produce
-fresh arrays, with no aliases.  The main exceptions are ``if``,
-``loop``, function calls, and variable literals.
+The key safety property behind in-place updates is that once an object has been
+consumed, it is never accessed again. To guarantee this property, the compiler
+must also be aware of the potential for *aliasing*: whether two different
+variables share underlying storage.
+
+The rules used by the Futhark compiler to determine aliasing are somewhat
+intricate, but the intuition is easy: the result of an expression aliases its
+subexpressions, except for expressions that explicitly construct fresh results.
+
+Aliases are tracked at the level of arrays and abstract types. Aliases of a
+record or tuple are tracked for each element, not for the record or tuple
+itself. Most constructs produce fresh arrays, with no aliases. The main
+exceptions are ``if``, ``loop``, function calls, and variable literals.
 
 * After a binding ``let a = b``, that simply assigns a new name to an
   existing variable, the variable ``a`` aliases ``b``.  Similarly for
@@ -1490,28 +1523,41 @@ fresh arrays, with no aliases.  The main exceptions are ``if``,
   aliases that the merge parameters may assume at the end of an
   iteration, computed to a fixed point.
 
-* The aliases of a value returned from a function is the most
-  interesting case, and depends on whether the return value is
-  declared *alias-free* (with an asterisk ``*``) or not.  If it is
-  declared alias-free, then it has no aliases.  Otherwise, it aliases
-  all arguments passed for *non-consumed* parameters.
+* The aliases of a value returned from a function is the most interesting case,
+  and depends on whether the return value is declared *fresh* (with an asterisk
+  ``*``) or not. If it is declared alias-free, then it has no aliases.
+  Otherwise, it aliases all arguments passed for *non-consumed* parameters.
 
 In-place Updates and Higher-Order Functions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Consumption generally interacts inflexibly with higher-order
-functions.  The issue is that we cannot control how many times a
-function argument is applied, or to what, so it is not safe to pass a
-function that consumes its argument.  The following two conservative
-rules govern the interaction between consumption and higher-order
-functions:
+Consumption generally interacts inflexibly with higher-order functions. The
+issue is that we cannot control how many times a function argument is applied,
+or to what, so it is not safe to pass a function that consumes its argument. The
+following two conservative rules govern the interaction between consumption and
+higher-order functions:
 
 1. In the expression ``let p = e1 in ...``, if *any* in-place update
    takes place in the expression ``e1``, the value bound by ``p`` must
    not be or contain a function.
 
-2. A function that consumes one of its arguments may not be passed as
-   a higher-order argument to another function.
+2. A function that consumes one of its arguments may not be passed as a
+   higher-order argument to another function, unless that other function
+   explicitly expects a consuming function.
+
+3. It is not possible to quantify over the freshness of a functional argument,
+   so the fact that a function result is fresh is usually lost when it is passed
+   as a functional argument.
+
+   a. A major exception is that the type checker performs parametricity-based
+      analysis for *polymorphic* higher-order functions of certain types. For
+      example, when using the pipeline operator as ``x |> f``, the compiler is
+      able to infer that the result can only possibly come from the function
+      ``f``, and hence that the result of the entire expression is as fresh as
+      is declared for ``f``.
+
+      This works only for direct references to polymorphic functions, and they
+      must be fully applied.
 
 .. _module-system:
 
@@ -1711,19 +1757,20 @@ Attributes
 
 .. productionlist::
    attr:   `name`
+       : | "$" `name`
        : | `decimal`
        : | `name` "(" [`attr` ("," `attr`)* [","]] ")"
 
-An expression, declaration, pattern, or module type spec can be
-prefixed with an attribute, written as ``#[attr]``.  This may affect
-how it is treated by the compiler or other tools.  In no case will
-attributes affect or change the *semantics* of a program, but it may
-affect how well it compiles and runs (or in some cases, whether it
-compiles or runs at all).  Unknown attributes are silently ignored.
-Most have no effect in the interpreter.  An attribute can be either an
-*atom*, written as an identifier or number, or *compound*, consisting
-of an identifier and a comma-separated sequence of attributes.  The
-latter is used for grouping and encoding of more complex information.
+An expression, declaration, pattern, or module type spec can be prefixed with an
+attribute, written as ``#[attr]``. This may affect how it is treated by the
+compiler or other tools. In no case will attributes affect or change the
+*semantics* of a program, but it may affect how well it compiles and runs (or in
+some cases, whether it compiles or runs at all). Unknown attributes are silently
+ignored. Most have no effect in the interpreter. An attribute can be either an
+*atom*, written as an identifier or number, or *compound*, consisting of an
+identifier and a comma-separated sequence of attributes. The latter is used for
+grouping and encoding of more complex information. An identifier prefixed with a
+``$`` must be the name of a term variable in scope.
 
 Expression attributes
 ~~~~~~~~~~~~~~~~~~~~~
@@ -1772,28 +1819,42 @@ The compiler will treat the attributed expression as a black box.
 This is used to work around optimisation deficiencies (or bugs),
 although it should hopefully rarely be necessary.
 
-``incremental_flattening(no_outer)``
-....................................
+``flattening(sequentialise_nonuniform)``
+........................................
+
+Within the attributed SOAC (which should not itself be nested), any nonuniform
+nested parallelism is sequentialised. This gives up the inner parallelism, but
+avoids the substantial bookkeeping that flattening irregular arrays entails.
+Note that in some cases this can lead to un-compileable code, if the
+nonuniformity is too severe. Uniform nested parallelism is unaffected. The
+attribute is ignored where the irregularity cannot be confined to a single
+thread, in which case such values are flattened as usual.
+
+Historical note: this is intended to reproduce the behaviour of Futhark prior to
+supporting irregular flattening.
+
+``flattening(no_outer)``
+........................
 
 When using incremental flattening, do not generate the "only outer
 parallelism" version for the attributed SOACs.
 
-``incremental_flattening(no_intra)``
-....................................
+``flattening(no_intra)``
+........................
 
 When using incremental flattening, do not generate the "intra-block
 parallelism" version for the attributed SOACs.
 
-``incremental_flattening(only_intra)``
-......................................
+``flattening(only_intra)``
+..........................
 
 When using incremental flattening, *only* generate the "intra-block
 parallelism" version of the attributed SOACs.  **Beware**: the
 resulting program will fail to run if the inner parallelism does not
 fit on the device.
 
-``incremental_flattening(only_inner)``
-......................................
+``flattening(only_inner)``
+..........................
 
 When using incremental flattening, do not generate multiple versions
 for this SOAC, but do exploit inner parallelism (which may give rise
@@ -1880,6 +1941,17 @@ prevent the GPU backends from generating working code.
 ..........
 
 Always inline calls to this function.
+
+``cpu_function``
+................
+
+Compile the body of this function to sequential (CPU) code. Store the parameters
+and results in CPU memory, even when using a GPU backend for the rest of the
+program. This is useful when you have a costly sequential top-level function in
+an otherwise parallel program.
+
+You almost always want to combine this with ``#[noinline]``, as
+``#[cpu_function]`` only takes effect when the function is not inlined.
 
 Pattern attributes
 ~~~~~~~~~~~~~~~~~~

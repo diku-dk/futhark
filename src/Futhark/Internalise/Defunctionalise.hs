@@ -22,14 +22,20 @@ import Language.Futhark.TypeChecker.Types (Subst (..), applySubst)
 
 -- | A static value stores additional information about the result of
 -- defunctionalization of an expression, aside from the residual expression.
+--
+-- The Ord instance here is really important, as it is used for the memoisation
+-- machinery that handles recursive functions.
 data StaticVal
-  = Dynamic ParamType
+  = -- | A first-order value.  The freshness slot is meaningful only where the
+    -- value is used as a parameter, and is converted at those boundaries; see
+    -- 'paramTypeFromSV'.
+    Dynamic ResType
   | -- | The Env is the lexical closure of the lambda.
     LambdaSV (Pat ParamType) ResRetType Exp Env
   | RecordSV [(Name, StaticVal)]
   | -- | The constructor that is actually present, plus
     -- the others that are not.
-    SumSV Name [StaticVal] [(Name, [ParamType])]
+    SumSV Name [StaticVal] [(Name, [ResType])]
   | -- | The pair is the StaticVal and residual expression of this
     -- function as a whole, while the second StaticVal is its
     -- body. (Don't trust this too much, my understanding may have
@@ -37,7 +43,7 @@ data StaticVal
     DynamicFun (Exp, StaticVal) StaticVal
   | IntrinsicSV
   | HoleSV StructType SrcLoc
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 data Binding = Binding
   { -- | Just if this is a polymorphic binding that must be
@@ -45,7 +51,7 @@ data Binding = Binding
     bindingType :: Maybe ([VName], StructType),
     bindingSV :: StaticVal
   }
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 -- | Environment mapping variable names to their associated static
 -- value.
@@ -65,8 +71,8 @@ askEnv = asks snd
 
 replaceTypeSizes ::
   M.Map VName SizeSubst ->
-  TypeBase Size als ->
-  TypeBase Size als
+  TypeBase Size o ->
+  TypeBase Size o
 replaceTypeSizes substs = first onDim
   where
     onDim (Var v typ loc) =
@@ -175,32 +181,50 @@ restrictEnvTo fv = asks restrict
     restrict' (HoleSV t loc) = HoleSV t loc
     restrict'' (Binding t sv) = Binding t $ restrict' sv
 
+-- | Maps a function specialisation - a function's 'LambdaSV' together with the
+-- 'StaticVal' of the argument it is applied to - to the top-level function
+-- lifted for it: its name, its return type, and the 'StaticVal' of the result.
+-- Applying the same function to the same static argument again (in particular, a
+-- recursive occurrence) reuses this lifting rather than lifting it anew, which
+-- both deduplicates lifted functions and ties off recursion. See Note [Lifting
+-- and recursion].
+type LiftMemo = M.Map (StaticVal, StaticVal) (VName, ResRetType, StaticVal)
+
 -- | Defunctionalization monad. The Reader environment tracks both the global
 -- Env and the current Env. This is used to avoid unnecessarily large closure
 -- environments (no need to capture the global one).
 newtype DefM a
-  = DefM (ReaderT (Env, Env) (State ([ValBind], VNameSource)) a)
+  = DefM (ReaderT (Env, Env) (State ([ValBind], VNameSource, LiftMemo)) a)
   deriving
     ( Functor,
       Applicative,
       Monad,
       MonadReader (Env, Env),
-      MonadState ([ValBind], VNameSource)
+      MonadState ([ValBind], VNameSource, LiftMemo)
     )
 
 instance MonadFreshNames DefM where
-  putNameSource src = modify $ \(x, _) -> (x, src)
-  getNameSource = gets snd
+  putNameSource src = modify $ \(x, _, m) -> (x, src, m)
+  getNameSource = gets (\(_, src, _) -> src)
 
 -- | Run a computation in the defunctionalization monad. Returns the result of
 -- the computation, a new name source, and a list of lifted function declations.
 runDefM :: VNameSource -> DefM a -> (a, VNameSource, [ValBind])
 runDefM src (DefM m) =
-  let (x, (vbs, src')) = runState (runReaderT m mempty) (mempty, src)
+  let (x, (vbs, src', _)) = runState (runReaderT m mempty) (mempty, src, mempty)
    in (x, src', reverse vbs)
 
 addValBind :: ValBind -> DefM ()
-addValBind vb = modify $ first (vb :)
+addValBind vb = modify $ \(vbs, src, m) -> (vb : vbs, src, m)
+
+-- | The function lifted for the given specialisation, if any (see 'LiftMemo').
+lookupLift :: (StaticVal, StaticVal) -> DefM (Maybe (VName, ResRetType, StaticVal))
+lookupLift key = gets $ \(_, _, m) -> M.lookup key m
+
+-- | Record the function lifted for a specialisation (see 'LiftMemo').
+insertLift :: (StaticVal, StaticVal) -> (VName, ResRetType, StaticVal) -> DefM ()
+insertLift key v =
+  modify $ \(vbs, src, m) -> (vbs, src, M.insert key v m)
 
 -- | Create a new top-level value declaration with the given function name,
 -- return type, list of parameters, and body expression.
@@ -279,9 +303,9 @@ data SizeSubst
   deriving (Eq, Ord, Show)
 
 dimMapping ::
-  (Monoid a) =>
-  TypeBase Size a ->
-  TypeBase Size a ->
+  (Monoid o) =>
+  TypeBase Size o ->
+  TypeBase Size o ->
   M.Map VName SizeSubst
 dimMapping t1 t2 = execState (matchDims f t1 t2) mempty
   where
@@ -296,9 +320,9 @@ dimMapping t1 t2 = execState (matchDims f t1 t2) mempty
     f _ d _ = pure d
 
 dimMapping' ::
-  (Monoid a) =>
-  TypeBase Size a ->
-  TypeBase Size a ->
+  (Monoid o) =>
+  TypeBase Size o ->
+  TypeBase Size o ->
   M.Map VName VName
 dimMapping' t1 t2 = M.mapMaybe f $ dimMapping t1 t2
   where
@@ -331,10 +355,10 @@ sizesToRename (LambdaSV param _ _ _) =
 -- expression. This is necessary since the original type may contain additional
 -- information (e.g., shape restrictions) from the user given annotation.
 combineTypeShapes ::
-  (Monoid as) =>
-  TypeBase Size as ->
-  TypeBase Size as ->
-  TypeBase Size as
+  (Monoid o) =>
+  TypeBase Size o ->
+  TypeBase Size o ->
+  TypeBase Size o
 combineTypeShapes (Scalar (Record ts1)) (Scalar (Record ts2))
   | M.keys ts1 == M.keys ts2 =
       Scalar $
@@ -357,16 +381,16 @@ combineTypeShapes (Scalar (Arrow als1 p1 d1 a1 (RetType dims1 b1))) (Scalar (Arr
       d1
       (combineTypeShapes a1 a2)
       (RetType dims1 (combineTypeShapes b1 b2))
-combineTypeShapes (Scalar (TypeVar u v targs1)) (Scalar (TypeVar _ _ targs2)) =
-  Scalar $ TypeVar u v $ zipWith f targs1 targs2
+combineTypeShapes (Scalar (TypeVar o v targs1)) (Scalar (TypeVar _ _ targs2)) =
+  Scalar $ TypeVar o v $ zipWith f targs1 targs2
   where
     f (TypeArgType t1) (TypeArgType t2) = TypeArgType (combineTypeShapes t1 t2)
     f targ _ = targ
-combineTypeShapes (Array u shape1 et1) (Array _ _shape2 et2) =
+combineTypeShapes (Array o shape1 et1) (Array _ _shape2 et2) =
   arrayOfWithAliases
-    u
+    o
     shape1
-    (combineTypeShapes (setUniqueness (Scalar et1) u) (setUniqueness (Scalar et2) u))
+    (combineTypeShapes (setMode (Scalar et1) o) (setMode (Scalar et2) o))
 combineTypeShapes _ t = t
 
 -- When we instantiate a polymorphic StaticVal, we rename all the
@@ -417,7 +441,7 @@ defuncFun tparams pats e0 ret loc = do
         [pat'] -> (pat', ret, e0)
         (pat' : pats') ->
           ( pat',
-            RetType [] $ second (const Nonunique) $ funType pats' ret,
+            RetType [] $ second (const Nonfresh) $ funType pats' ret,
             Lambda pats' e0 Nothing (Info ret) loc
           )
 
@@ -466,13 +490,13 @@ defuncFun tparams pats e0 ret loc = do
 -- the associated static value in the defunctionalization monad.
 defuncExp :: Exp -> DefM (Exp, StaticVal)
 defuncExp e@Literal {} =
-  pure (e, Dynamic $ toParam Observe $ typeOf e)
+  pure (e, Dynamic $ toRes Nonfresh $ typeOf e)
 defuncExp e@IntLit {} =
-  pure (e, Dynamic $ toParam Observe $ typeOf e)
+  pure (e, Dynamic $ toRes Nonfresh $ typeOf e)
 defuncExp e@FloatLit {} =
-  pure (e, Dynamic $ toParam Observe $ typeOf e)
+  pure (e, Dynamic $ toRes Nonfresh $ typeOf e)
 defuncExp e@StringLit {} =
-  pure (e, Dynamic $ toParam Observe $ typeOf e)
+  pure (e, Dynamic $ toRes Nonfresh $ typeOf e)
 defuncExp (Parens e loc) = do
   (e', sv) <- defuncExp e
   pure (Parens e' loc, sv)
@@ -510,17 +534,17 @@ defuncExp (RecordLit fs loc) = do
                   (baseName vn, sv)
                 )
 defuncExp e@(ArrayVal vs t loc) =
-  pure (ArrayVal vs t loc, Dynamic $ toParam Observe $ typeOf e)
+  pure (ArrayVal vs t loc, Dynamic $ toRes Nonfresh $ typeOf e)
 defuncExp (ArrayLit es t@(Info t') loc) = do
   es' <- mapM defuncExp' es
-  pure (ArrayLit es' t loc, Dynamic $ toParam Observe t')
+  pure (ArrayLit es' t loc, Dynamic $ toRes Nonfresh t')
 defuncExp (AppExp (Range e1 me incl loc) res) = do
   e1' <- defuncExp' e1
   me' <- mapM defuncExp' me
   incl' <- mapM defuncExp' incl
   pure
     ( AppExp (Range e1' me' incl' loc) res,
-      Dynamic $ toParam Observe $ appResType $ unInfo res
+      Dynamic $ toRes Nonfresh $ appResType $ unInfo res
     )
 defuncExp e@(Var qn (Info t) loc) = do
   sv <- lookupVar (toStruct t) (qualLeaf qn)
@@ -528,12 +552,12 @@ defuncExp e@(Var qn (Info t) loc) = do
     -- If the variable refers to a dynamic function, we eta-expand it
     -- so that we do not have to duplicate its definition.
     DynamicFun {} -> do
-      (params, body, ret) <- etaExpand (RetType [] $ toRes Nonunique t) e
+      (params, body, ret) <- etaExpand (RetType [] $ toRes Nonfresh t) e
       defuncFun [] params body ret mempty
     -- Intrinsic functions used as variables are eta-expanded, so we
     -- can get rid of them.
     IntrinsicSV -> do
-      (pats, body, tp) <- etaExpand (RetType [] $ toRes Nonunique t) e
+      (pats, body, tp) <- etaExpand (RetType [] $ toRes Nonfresh t) e
       defuncExp $ Lambda pats body Nothing (Info tp) mempty
     HoleSV _ hole_loc ->
       pure (Hole (Info t) hole_loc, sv)
@@ -607,7 +631,7 @@ defuncExp (AppExp (Loop sparams pat loopinit form e3 loc) res) = do
   pure (AppExp (Loop sparams pat (LoopInitExplicit e1') form' e3' loc) res, sv)
   where
     insertIdent (Ident vn (Info tp) _) =
-      M.insert vn $ Binding Nothing $ Dynamic $ toParam Observe tp
+      M.insert vn $ Binding Nothing $ Dynamic $ toRes Nonfresh tp
 defuncExp e@(AppExp BinOp {} _) =
   error $ "defuncExp: unexpected binary operator: " ++ prettyString e
 defuncExp (Project vn e0 tp@(Info tp') loc) = do
@@ -616,7 +640,7 @@ defuncExp (Project vn e0 tp@(Info tp') loc) = do
     RecordSV svs -> case lookup vn svs of
       Just sv -> pure (Project vn e0' (Info $ structTypeFromSV sv) loc, sv)
       Nothing -> error "Invalid record projection."
-    Dynamic _ -> pure (Project vn e0' tp loc, Dynamic $ toParam Observe tp')
+    Dynamic _ -> pure (Project vn e0' tp loc, Dynamic $ toRes Nonfresh tp')
     HoleSV _ hloc -> pure (Project vn e0' tp loc, HoleSV tp' hloc)
     _ -> error $ "Projection of an expression with static value " ++ show sv0
 defuncExp (AppExp LetWith {} _) =
@@ -626,7 +650,7 @@ defuncExp expr@(AppExp (Index e0 idxs loc) res) = do
   idxs' <- mapM defuncDimIndex idxs
   pure
     ( AppExp (Index e0' idxs' loc) res,
-      Dynamic $ toParam Observe $ typeOf expr
+      Dynamic $ toRes Nonfresh $ typeOf expr
     )
 
 -- Note that we might change the type of the record field here.  This
@@ -667,26 +691,26 @@ defuncExp (Constr name es (Info sum_t@(Scalar (Sum all_fs))) loc) = do
   let sv =
         SumSV name svs $
           M.toList $
-            name `M.delete` M.map (map (toParam Observe . defuncType)) all_fs
+            name `M.delete` M.map (map (toRes Nonfresh . defuncType)) all_fs
       sum_t' = combineTypeShapes sum_t (structTypeFromSV sv)
   pure (Constr name es' (Info sum_t') loc, sv)
   where
     defuncType ::
-      (Monoid als) =>
-      TypeBase Size als ->
-      TypeBase Size als
-    defuncType (Array u shape t) = Array u shape (defuncScalar t)
+      (Monoid o) =>
+      TypeBase Size o ->
+      TypeBase Size o
+    defuncType (Array o shape t) = Array o shape (defuncScalar t)
     defuncType (Scalar t) = Scalar $ defuncScalar t
 
     defuncScalar ::
-      (Monoid als) =>
-      ScalarTypeBase Size als ->
-      ScalarTypeBase Size als
+      (Monoid o) =>
+      ScalarTypeBase Size o ->
+      ScalarTypeBase Size o
     defuncScalar (Record fs) = Record $ M.map defuncType fs
     defuncScalar Arrow {} = Record mempty
     defuncScalar (Sum fs) = Sum $ M.map (map defuncType) fs
     defuncScalar (Prim t) = Prim t
-    defuncScalar (TypeVar u tn targs) = TypeVar u tn targs
+    defuncScalar (TypeVar o tn targs) = TypeVar o tn targs
 defuncExp (Constr name _ (Info t) loc) =
   error $
     "Constructor "
@@ -739,7 +763,7 @@ defuncSoacExp (Lambda params e0 decl tp loc) = do
   pure $ Lambda params e0' decl tp loc
 defuncSoacExp e
   | Scalar Arrow {} <- typeOf e = do
-      (pats, body, tp) <- etaExpand (RetType [] $ toRes Nonunique $ typeOf e) e
+      (pats, body, tp) <- etaExpand (RetType [] $ toRes Nonfresh $ typeOf e) e
       env <- askEnv
       let env' = foldl' envFromPat env pats
       body' <- local (second (const env')) $ defuncExp' body
@@ -825,7 +849,7 @@ defuncLet _ [] body (RetType _ rettype) = do
     ( [],
       [],
       body',
-      imposeType sv $ resToParam rettype,
+      imposeType sv rettype,
       resTypeFromSV sv
     )
   where
@@ -865,7 +889,7 @@ unRetType (RetType ext t) = do
 
 defuncApplyFunction :: Exp -> Int -> DefM (Exp, StaticVal)
 defuncApplyFunction e@(Var qn (Info t) loc) num_args = do
-  let (argtypes, rettype) = unfoldFunType t
+  let (argtypes, rettype) = first (map snd) $ unfoldFunType t
   sv <- lookupVar (toStruct t) (qualLeaf qn)
 
   case sv of
@@ -877,7 +901,7 @@ defuncApplyFunction e@(Var qn (Info t) loc) num_args = do
           pure (Var qn (Info (foldFunType argtypes' $ RetType [] rettype')) loc, sv)
       | all orderZero argtypes,
         orderZero rettype -> do
-          (params, body, ret) <- etaExpand (RetType [] $ toRes Nonunique t) e
+          (params, body, ret) <- etaExpand (RetType [] $ toRes Nonfresh t) e
           defuncFun [] params body ret mempty
       | otherwise -> do
           fname <- newVName $ "dyn_" <> baseName (qualLeaf qn)
@@ -920,60 +944,91 @@ defuncApplyArg ::
   (Exp, StaticVal) ->
   ((Maybe VName, Exp), [ParamType]) ->
   DefM (Exp, StaticVal)
-defuncApplyArg (fname_s, floc) (f', LambdaSV pat lam_e_t lam_e closure_env) ((argext, arg), _) = do
+defuncApplyArg (fname_s, floc) (f', fsv@(LambdaSV pat lam_e_t lam_e closure_env)) ((argext, arg), _) = do
   (arg', arg_sv) <- defuncExp arg
-  let env' = alwaysMatchPatSV closure_env pat arg_sv
-      dims = mempty
-  (lam_e', sv) <-
-    localNewEnv env' $
-      defuncExp lam_e
 
-  let closure_pat = buildEnvPat dims closure_env
-      pat' = updatePat pat arg_sv
+  -- Build a call to the lifted specialisation named 'lifted' with the
+  -- given (first-order) return type.  Reuses the closure value 'f'' and
+  -- the (already defunctionalised) argument.
+  let mkCall lifted lifted_ret = do
+        let f_t = toStruct $ typeOf f'
+            arg_t = toStruct $ typeOf arg'
+            fname_t = foldFunType [toParam Observe f_t, toParam (diet (patternType pat)) arg_t] lifted_ret
+            fname' = Var (qualName lifted) (Info fname_t) floc
+        callret <- unRetType lifted_ret
+        pure $ mkApply fname' [(Nothing, f'), (argext, arg')] callret
 
-  globals <- asks $ M.keysSet . fst
+  -- Applying this function to this static argument may already have been
+  -- lifted; if so, reuse that lifting. This is what ties off recursion,
+  -- since a recursive occurrence re-applies the same function to the same
+  -- static argument. See Note [Lifting and recursion].
+  let key = (fsv, arg_sv)
 
-  -- Lift lambda to top-level function definition.  We put in
-  -- a lot of effort to try to infer the uniqueness attributes
-  -- of the lifted function, but this is ultimately all a sham
-  -- and a hack.  There is some piece we're missing.
-  let params = [closure_pat, pat']
-      lifted_rettype =
-        RetType (retDims lam_e_t) $
-          combineTypeShapes (retType lam_e_t) (resTypeFromSV sv)
+  memhit <- lookupLift key
+  case memhit of
+    Just (lifted, lifted_ret, sv) -> do
+      e <- mkCall lifted lifted_ret
+      pure (e, sv)
+    Nothing -> do
+      let env' = alwaysMatchPatSV closure_env pat arg_sv
+          dims = mempty
 
-      already_bound =
-        globals <> S.fromList (dims <> foldMap patNames params)
+      -- This slot yields the first-order body of the function (rather
+      -- than peeling off another function-typed parameter) exactly when
+      -- its result is order-zero.  There we must record the lifted name
+      -- before defunctionalising the body, so that a recursive
+      -- occurrence inside it finds the entry rather than re-inlining
+      -- forever.  The recorded return type is the declared one, since
+      -- the body's inferred refinement is not available yet; we replace
+      -- it with the refined one once the body has been lifted.
+      let is_body = orderZero $ retType lam_e_t
+      fname <- newVName fname_s
+      let memo_ret = RetType (retDims lam_e_t) (retType lam_e_t)
+      when is_body $
+        insertLift key (fname, memo_ret, Dynamic $ retType memo_ret)
+      (lam_e', sv) <-
+        localNewEnv env' $
+          defuncExp lam_e
 
-      more_dims =
-        S.toList $
-          S.filter (`S.notMember` already_bound) $
-            foldMap patternArraySizes params
+      let closure_pat = buildEnvPat dims closure_env
+          pat' = updatePat pat arg_sv
 
-  -- Ensure that no parameter sizes are AnySize.  The internaliser
-  -- expects this.  This is easy, because they are all
-  -- first-order.
-  let bound_sizes = S.fromList (dims <> more_dims) <> globals
-  params' <- instAnySizes params
+      globals <- asks $ M.keysSet . fst
 
-  fname <- newVName fname_s
-  liftValDec
-    fname
-    lifted_rettype
-    (dims ++ more_dims ++ unboundSizes bound_sizes params')
-    params'
-    lam_e'
+      -- Lift lambda to top-level function definition.  We put in
+      -- a lot of effort to try to infer the freshness attributes
+      -- of the lifted function, but this is ultimately all a sham
+      -- and a hack.  There is some piece we're missing.
+      let params = [closure_pat, pat']
+          lifted_rettype =
+            RetType (retDims lam_e_t) $
+              combineTypeShapes (retType lam_e_t) (resTypeFromSV sv)
 
-  let f_t = toStruct $ typeOf f'
-      arg_t = toStruct $ typeOf arg'
-      fname_t = foldFunType [toParam Observe f_t, toParam (diet (patternType pat)) arg_t] lifted_rettype
-      fname' = Var (qualName fname) (Info fname_t) floc
-  callret <- unRetType lifted_rettype
+          already_bound =
+            globals <> S.fromList (dims <> foldMap patNames params)
 
-  pure
-    ( mkApply fname' [(Nothing, f'), (argext, arg')] callret,
-      sv
-    )
+          more_dims =
+            S.toList $
+              S.filter (`S.notMember` already_bound) $
+                foldMap patternArraySizes params
+
+      -- Ensure that no parameter sizes are AnySize.  The internaliser
+      -- expects this.  This is easy, because they are all
+      -- first-order.
+      let bound_sizes = S.fromList (dims <> more_dims) <> globals
+      params' <- instAnySizes params
+
+      liftValDec
+        fname
+        lifted_rettype
+        (dims ++ more_dims ++ unboundSizes bound_sizes params')
+        params'
+        lam_e'
+
+      insertLift key (fname, lifted_rettype, sv)
+
+      e <- mkCall fname lifted_rettype
+      pure (e, sv)
 -- If 'f' is a dynamic function, we just leave the application in
 -- place, but we update the types since it may be partially
 -- applied or return a higher-order value.
@@ -1016,8 +1071,8 @@ defuncApply f args appres loc = do
           (argtypes, _) = unfoldFunType $ typeOf f
       fmap (first $ updateReturn appres) $
         foldM (defuncApplyArg (fname, loc)) (f', f_sv) $
-          NE.zip args $
-            NE.tails argtypes
+          NE.zip args . NE.tails . map snd $
+            argtypes
   where
     intrinsicOrHole e' = do
       -- If the intrinsic is fully applied, then we are done.
@@ -1026,9 +1081,9 @@ defuncApply f args appres loc = do
       -- immediately any time we encounter a non-fully-applied
       -- intrinsic?
       if null $ fst $ unfoldFunType $ appResType appres
-        then pure (e', Dynamic $ toParam Observe $ appResType appres)
+        then pure (e', Dynamic $ toRes Nonfresh $ appResType appres)
         else do
-          (pats, body, tp) <- etaExpand (RetType [] $ toRes Nonunique $ typeOf e') e'
+          (pats, body, tp) <- etaExpand (RetType [] $ toRes Nonfresh $ typeOf e') e'
           defuncExp $ Lambda pats body Nothing (Info tp) mempty
 
 -- | Check if a 'StaticVal' and a given application depth corresponds
@@ -1065,7 +1120,7 @@ envFromPat env pat = case pat of
   RecordPat fs _ -> foldl' envFromPat env $ map snd fs
   PatParens p _ -> envFromPat env p
   PatAttr _ p _ -> envFromPat env p
-  Id vn (Info t) _ -> M.insert vn (Binding Nothing $ Dynamic t) env
+  Id vn (Info t) _ -> M.insert vn (Binding Nothing $ Dynamic $ paramToRes t) env
   Wildcard _ _ -> env
   PatAscription p _ _ -> envFromPat env p
   PatLit {} -> env
@@ -1086,34 +1141,34 @@ buildEnvPat sizes env = RecordPat (map buildField $ M.toList env) mempty
 
 -- | Compute the corresponding type for the *representation* of a
 -- given static value (not the original possibly higher-order value).
-typeFromSV :: StaticVal -> ParamType
-typeFromSV (Dynamic tp) =
+resTypeFromSV :: StaticVal -> ResType
+resTypeFromSV (Dynamic tp) =
   tp
-typeFromSV (LambdaSV _ _ _ env) =
+resTypeFromSV (LambdaSV _ _ _ env) =
   Scalar . Record . M.fromList $
-    map (bimap (nameFromText . prettyText) (typeFromSV . bindingSV)) $
+    map (bimap (nameFromText . prettyText) (resTypeFromSV . bindingSV)) $
       M.toList env
-typeFromSV (RecordSV ls) =
-  let ts = map (fmap typeFromSV) ls
+resTypeFromSV (RecordSV ls) =
+  let ts = map (fmap resTypeFromSV) ls
    in Scalar $ Record $ M.fromList ts
-typeFromSV (DynamicFun (_, sv) _) =
-  typeFromSV sv
-typeFromSV (SumSV name svs fields) =
-  let svs' = map typeFromSV svs
+resTypeFromSV (DynamicFun (_, sv) _) =
+  resTypeFromSV sv
+resTypeFromSV (SumSV name svs fields) =
+  let svs' = map resTypeFromSV svs
    in Scalar $ Sum $ M.insert name svs' $ M.fromList fields
-typeFromSV (HoleSV t _) =
-  toParam Observe t
-typeFromSV IntrinsicSV =
+resTypeFromSV (HoleSV t _) =
+  toRes Nonfresh t
+resTypeFromSV IntrinsicSV =
   error "Tried to get the type from the static value of an intrinsic."
 
-resTypeFromSV :: StaticVal -> ResType
-resTypeFromSV = paramToRes . typeFromSV
-
 structTypeFromSV :: StaticVal -> StructType
-structTypeFromSV = toStruct . typeFromSV
+structTypeFromSV = toStruct . resTypeFromSV
 
+-- | The 'Diet' of the result means something else than the freshness it is
+-- converted from: that the function may consume the parameter.  The two agree
+-- on what matters, since a function owns what it consumes.
 paramTypeFromSV :: StaticVal -> ParamType
-paramTypeFromSV = typeFromSV
+paramTypeFromSV = resToParam . resTypeFromSV
 
 -- | Construct the type for a fully-applied dynamic function from its
 -- static value and the original types of its arguments.
@@ -1144,7 +1199,7 @@ matchPatSV env (Id vn (Info t) _) sv =
   -- (but probably reveals a flaw in our bookkeeping).
   pure $
     if orderZero t
-      then dim_env <> M.insert vn (Binding Nothing $ Dynamic t) env
+      then dim_env <> M.insert vn (Binding Nothing $ Dynamic $ paramToRes t) env
       else dim_env <> M.insert vn (Binding Nothing sv) env
   where
     -- Extract all sizes that are potentially bound here. This is
@@ -1172,7 +1227,7 @@ matchPatSV env (PatConstr c1 _ ps _) (Dynamic (Scalar (Sum fs)))
   | otherwise =
       error $ "matchPatSV: missing constructor in type: " ++ prettyString c1
 matchPatSV env pat (Dynamic t) = matchPatSV env pat $ svFromType t
-matchPatSV env pat (HoleSV t _) = matchPatSV env pat $ svFromType $ toParam Observe t
+matchPatSV env pat (HoleSV t _) = matchPatSV env pat $ svFromType $ toRes Nonfresh t
 matchPatSV _ pat sv =
   error $
     "Tried to match pattern\n"
@@ -1225,7 +1280,7 @@ updatePat pat@(PatConstr c1 (Info t) ps loc) sv@(SumSV _ svs _)
 updatePat (PatConstr c1 _ ps loc) (Dynamic t) =
   PatConstr c1 (Info $ toParam Observe t) ps loc
 updatePat pat (Dynamic t) = updatePat pat (svFromType t)
-updatePat pat (HoleSV t _) = updatePat pat (svFromType $ toParam Observe t)
+updatePat pat (HoleSV t _) = updatePat pat (svFromType $ toRes Nonfresh t)
 updatePat pat sv =
   error $
     "Tried to update pattern\n"
@@ -1236,16 +1291,56 @@ updatePat pat sv =
 -- | Convert a record (or tuple) type to a record static value. This
 -- is used for "unwrapping" tuples and records that are nested in
 -- 'Dynamic' static values.
-svFromType :: ParamType -> StaticVal
+svFromType :: ResType -> StaticVal
 svFromType (Scalar (Record fs)) = RecordSV . M.toList $ M.map svFromType fs
 svFromType t = Dynamic t
 
+-- | The static value of a (top-level) binding within the scope of its own
+-- definition, used to handle recursion. We construct a 'DynamicFun' spine
+-- matching the value parameters, ending in a 'Dynamic' for the result. This
+-- suffices for fully applied recursive calls: the residual expression simply
+-- refers to the top-level binding by name.
+--
+-- This is possible only when the parameters and the result are order-zero, as
+-- the static value would otherwise depend on the body. See Note [Lifting and
+-- recursion] for why that suffices.
+selfSV :: VName -> [Pat ParamType] -> ResType -> Maybe StaticVal
+selfSV name params rettype
+  | all patternOrderZero params,
+    orderZero rettype =
+      Just $ go params
+  | otherwise = Nothing
+  where
+    ret_sv = Dynamic rettype
+    go [] = ret_sv
+    go (_ : ps) =
+      let inner = go ps
+          self = Var (qualName name) (Info (structTypeFromSV inner)) mempty
+       in DynamicFun (self, inner) inner
+
+-- | The self static value binding for a top-level binding, if it is first-order
+-- (see 'selfSV'). We register these for all bindings before defunctionalising
+-- any of them, so that mutually recursive references resolve. The real static
+-- value of each binding, added as it is processed, takes precedence over the
+-- bindings produced here. This is what lets a lambda-lifted function refer to
+-- the binding it was lifted out of; see Note [Lifting and recursion].
+selfBinding :: ValBind -> Env
+selfBinding valbind =
+  case selfSV (valBindName valbind) (valBindParams valbind) rettype of
+    Just self_sv ->
+      M.singleton (valBindName valbind) $
+        Binding (Just (first (map typeParamName) (valBindTypeScheme valbind))) self_sv
+    Nothing -> mempty
+  where
+    Info (RetType _ rettype) = valBindRetType valbind
+
 -- | Defunctionalize a top-level value binding. Returns the
 -- transformed result as well as an environment that binds the name of
--- the value binding to the static value of the transformed body.  The
--- boolean is true if the function is a 'DynamicFun'.
+-- the value binding to the static value of the transformed body.
 defuncValBind :: ValBind -> DefM (ValBind, Env)
--- Eta-expand entry points with a functional return type.
+-- Eta-expand a functional result into further parameters, as the core language
+-- is first-order. A recursive binding never has one (see Note [Lifting and
+-- recursion]), so this cannot affect the self static values.
 defuncValBind (ValBind entry name name_loc _ (Info rettype) tparams params body _ attrs loc)
   | Scalar Arrow {} <- retType rettype = do
       (body_pats, body', rettype') <- etaExpand (second (const mempty) rettype) body
@@ -1268,8 +1363,24 @@ defuncValBind valbind@(ValBind _ name _ retdecl (Info (RetType ret_dims rettype)
       show name
         ++ " has type parameters, "
         ++ "but the defunctionaliser expects a monomorphic input program."
+  -- Bind the name in the scope of its own definition, so that first-order
+  -- recursive references can be defunctionalised via a static value; see
+  -- 'selfSV'. Higher-order recursive functions get no self static value: their
+  -- body is not defunctionalised here (it is stored raw in a 'LambdaSV' and
+  -- defunctionalised when applied), so recursive references resolve against the
+  -- global scope, and the recursion is tied off by memoisation in
+  -- 'defuncApplyArg' (see Note [Lifting and recursion]).
+  let self = (selfBinding valbind <>)
+  -- The self static value goes into the *global* environment (as well as the
+  -- local one) so that it is treated as a top-level function: recursive uses of
+  -- it as a value are then eta-expanded and closure-converted like any other
+  -- top-level function (see the 'DynamicFun' case of 'defuncExp'), rather than
+  -- capturing the self static value into a closure, which 'restrictEnvTo' omits
+  -- for globals.
   (tparams', params', body', sv, sv_t) <-
-    defuncLet (map typeParamName tparams) params body $ RetType ret_dims rettype
+    local (bimap self self) $
+      defuncLet (map typeParamName tparams) params body $
+        RetType ret_dims rettype
   globals <- asks $ M.keysSet . fst
   let bound_sizes = S.fromList (foldMap patNames params') <> S.fromList tparams' <> globals
   params'' <- instAnySizes params'
@@ -1283,7 +1394,7 @@ defuncValBind valbind@(ValBind _ name _ retdecl (Info (RetType ret_dims rettype)
           valBindRetType =
             Info $
               if null params'
-                then RetType ret_dims' $ rettype' `setUniqueness` Nonunique
+                then RetType ret_dims' $ rettype' `setMode` Nonfresh
                 else RetType ret_dims' rettype',
           valBindTypeParams = map (`TypeParamDim` mempty) tparams'',
           valBindParams = params'',
@@ -1297,11 +1408,15 @@ defuncValBind valbind@(ValBind _ name _ retdecl (Info (RetType ret_dims rettype)
 
 -- | Defunctionalize a list of top-level declarations.
 defuncVals :: [ValBind] -> DefM ()
-defuncVals [] = pure ()
-defuncVals (valbind : ds) = do
-  (valbind', env) <- defuncValBind valbind
-  addValBind valbind'
-  local (bimap (env <>) (env <>)) $ defuncVals ds
+defuncVals binds =
+  local (bimap (self_env <>) (self_env <>)) $ go binds
+  where
+    self_env = foldMap selfBinding binds
+    go [] = pure ()
+    go (valbind : ds) = do
+      (valbind', env) <- defuncValBind valbind
+      addValBind valbind'
+      local (bimap (env <>) (env <>)) $ go ds
 
 {-# NOINLINE transformProg #-}
 
@@ -1312,3 +1427,74 @@ transformProg :: (MonadFreshNames m) => [ValBind] -> m [ValBind]
 transformProg decs = modifyNameSource $ \namesrc ->
   let ((), namesrc', decs') = runDefM namesrc $ defuncVals decs
    in (decs', namesrc')
+
+-- Note [Lifting and recursion]
+--
+-- Defunctionalisation works by static interpretation: applying a higher-order
+-- function ('defuncApplyArg' on a 'LambdaSV') is specialised by inlining the
+-- function body with its static (function-valued) argument substituted in, and
+-- lifting the result to a fresh top-level function. Recursion is not a special
+-- case of this; it falls out of memoising the lifting.
+--
+-- The specialisation a given step produces is fully determined by the function
+-- (the 'LambdaSV', which carries the body, the parameter, and the lexical
+-- closure) together with the 'StaticVal' of the argument it is applied to.
+-- Everything that varies at runtime (the captured values) is passed in the
+-- closure, not baked into the lifted function. So we memoise ('LiftMemo') the
+-- lifted function under exactly that pair, and reuse it whenever the same
+-- function is applied to the same static argument again. This deduplicates
+-- lifted functions, and it terminates recursion for free: a recursive
+-- occurrence re-applies the same function to a statically identical argument
+-- (order-zero arguments have the same 'StaticVal' regardless of their runtime
+-- value, and an unchanged higher-order argument resolves to the same
+-- 'StaticVal'), so it hits the memo and becomes a call to the function being
+-- lifted rather than another round of inlining.
+--
+-- There is no distinction between recursive and non-recursive functions: an
+-- ordinary call and a recursive call are the same memo lookup. Note that this
+-- means a program whose recursion is not statically resolvable - an indirect
+-- recursive call, or one that passes a *different* function at each step (e.g.
+-- `go (\x -> g x) n = ... go (\x -> g (g x)) (n-1)`) - produces ever-changing
+-- keys and does not terminate here. The type checker rejects such programs, by
+-- requiring a recursive application to be saturated and to pass its
+-- higher-order arguments unchanged.
+--
+-- One subtlety remains, and it is about knot-tying, not about recognising
+-- recursion. A curried application peels off one parameter per step; the step
+-- whose result is order-zero yields the actual first-order body, and its body
+-- may contain the recursive occurrence. That entry must therefore be recorded
+-- _before_ the body is defunctionalised, using the declared (order-zero) return
+-- type and a 'Dynamic' static value, both known up front; it is replaced with
+-- the refined return type and real static value once the body is lifted. The
+-- earlier (function-typed) steps are recorded *after* lifting, since their
+-- residual 'StaticVal' - which a memo hit must return so application can
+-- continue - is not known until then. This is sound because those earlier steps
+-- are all processed before the order-zero step (the body is innermost), so they
+-- are in the memo by the time the body's recursive occurrence looks for them.
+--
+-- Another problem is scoping. Recursion is resolved by name, and 'defuncVals'
+-- processes bindings in order, so a body being defunctionalised can normally
+-- see the static value of everything it refers to. Lambda lifting is the only
+-- thing that breaks this as it can introduce mutual recursion (this is not
+-- allowed in the source language).
+--
+-- Whether this is a problem depends on the lifted function:
+--
+-- - A higher-order function is not defunctionalised where it is defined - its
+--   body is stored in a 'LambdaSV' and defunctionalised when it is applied,
+--   which is necessarily from a later binding. By then the binding it refers to
+--   has been processed, and nothing more is needed.
+--
+-- - A first-order function is defunctionalised eagerly, and so does need the
+--   static value of a binding that has not been processed yet. 'selfBinding'
+--   provides it for all bindings up front, which 'selfSV' can derive from the
+--   signature alone when the parameters and the result are order-zero.
+--
+-- The type rules ensure the result of a recursive binding is always order-zero,
+-- which is crucial for making this work.
+--
+-- A binding with a higher-order parameter thus gets no self static value, and
+-- needs none: the type checker also requires a recursive application to pass
+-- such a parameter unchanged, so a lifted function containing the recursive
+-- occurrence must capture the function-typed parameter, which makes it
+-- higher-order itself - the first case above.

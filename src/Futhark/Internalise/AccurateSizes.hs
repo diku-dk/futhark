@@ -28,7 +28,7 @@ shapeMapping all_params value_arg_types =
 
     f t1@Array {} t2@Array {} =
       pure $ M.fromList $ mapMaybe match $ zip (arrayDims t1) (arrayDims t2)
-    f (Acc acc1 ispace1 ts1 _) (Acc acc2 ispace2 ts2 _) = do
+    f (Acc acc1 ispace1 ts1) (Acc acc2 ispace2 ts2) = do
       let ispace_m =
             M.fromList . mapMaybe match $
               zip (shapeDims ispace1) (shapeDims ispace2)
@@ -106,10 +106,10 @@ ensureShape msg = ensureExtShape msg . staticShapes1
 -- shape declarations.  Not used to change rank of arguments.  Assumes
 -- everything is otherwise type-correct.
 ensureArgShapes ::
-  (Typed (TypeBase Shape u)) =>
+  (Typed (TypeBase Shape o)) =>
   ErrorMsg SubExp ->
   [VName] ->
-  [TypeBase Shape u] ->
+  [TypeBase Shape o] ->
   [SubExp] ->
   InternaliseM [SubExp]
 ensureArgShapes msg shapes paramts args =

@@ -18,6 +18,7 @@ import Control.Arrow (first)
 import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
+import Data.Either (partitionEithers)
 import Data.List (find)
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -29,7 +30,7 @@ import Futhark.IR.SOACS hiding (SOAC (..))
 import Futhark.IR.SOACS qualified as Futhark
 import Futhark.Optimise.Fusion.Composing
 import Futhark.Optimise.Fusion.Screma
-import Futhark.Pass.ExtractKernels.ISRWIM (rwimPossible)
+import Futhark.Transform.ISRWIM (rwimPossible)
 import Futhark.Transform.Rename (renameLambda)
 import Futhark.Transform.Substitute
 
@@ -201,7 +202,10 @@ fuseSOACwithKer ::
   SOAC ->
   FusedSOAC ->
   TryFusion FusedSOAC
-fuseSOACwithKer mode unfus_set outVars soac_p ker = do
+fuseSOACwithKer mode unfus_set outVars soac_p0 ker = do
+  -- soac_p0 is not removed from the program until much later, so the copy of it
+  -- that ends up inside the fused SOAC must be given fresh names.
+  soac_p <- flip SOAC.setLambda soac_p0 <$> renameLambda (SOAC.lambda soac_p0)
   -- We are fusing soac_p into soac_c, i.e, the output of soac_p is going
   -- into soac_c.
   let soac_c = fsSOAC ker
@@ -213,15 +217,8 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
       lam_c = SOAC.lambda soac_c
       w = SOAC.width soac_p
       returned_outvars = filter (`nameIn` unfus_set) outVars
-      success res_outnms res_soac = do
-        -- Avoid name duplication, because the producer lambda is not
-        -- removed from the program until much later.
-        uniq_lam <- renameLambda $ SOAC.lambda res_soac
-        pure $
-          ker
-            { fsSOAC = uniq_lam `SOAC.setLambda` res_soac,
-              fsOutNames = res_outnms
-            }
+      success res_outnms res_soac =
+        pure $ ker {fsSOAC = res_soac, fsOutNames = res_outnms}
 
   -- Can only fuse SOACs with same width.
   guard $ SOAC.width soac_p == SOAC.width soac_c
@@ -307,27 +304,27 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
       SOAC.Hist _ _ ops_p _,
       Horizontal
       ) -> do
-        let p_num_buckets = length ops_p
-            c_num_buckets = length ops_c
+        let p_num_is = sum $ map (shapeRank . histShape) ops_p
+            c_num_is = sum $ map (shapeRank . histShape) ops_c
             (body_p, body_c) = (lambdaBody lam_p, lambdaBody lam_c)
             body' =
               Body
                 { bodyDec = bodyDec body_p, -- body_p and body_c have the same decorations
                   bodyStms = bodyStms body_p <> bodyStms body_c,
                   bodyResult =
-                    take c_num_buckets (bodyResult body_c)
-                      ++ take p_num_buckets (bodyResult body_p)
-                      ++ drop c_num_buckets (bodyResult body_c)
-                      ++ drop p_num_buckets (bodyResult body_p)
+                    take c_num_is (bodyResult body_c)
+                      ++ take p_num_is (bodyResult body_p)
+                      ++ drop c_num_is (bodyResult body_c)
+                      ++ drop p_num_is (bodyResult body_p)
                 }
             lam' =
               Lambda
                 { lambdaParams = lambdaParams lam_c ++ lambdaParams lam_p,
                   lambdaBody = body',
                   lambdaReturnType =
-                    replicate (c_num_buckets + p_num_buckets) (Prim int64)
-                      ++ drop c_num_buckets (lambdaReturnType lam_c)
-                      ++ drop p_num_buckets (lambdaReturnType lam_p)
+                    replicate (c_num_is + p_num_is) (Prim int64)
+                      ++ drop c_num_is (lambdaReturnType lam_c)
+                      ++ drop p_num_is (lambdaReturnType lam_p)
                 }
         success (fsOutNames ker ++ returned_outvars) $
           SOAC.Hist w (inp_c_arr <> inp_p_arr) (ops_c <> ops_p) lam'
@@ -457,7 +454,7 @@ type Optimization =
   TryFusion (SOAC, SOAC.ArrayTransforms)
 
 optimizations :: [Optimization]
-optimizations = [iswim]
+optimizations = [iswim, unflattenAccOnlyMap]
 
 iswim ::
   Maybe [VName] ->
@@ -506,6 +503,87 @@ iswim _ (SOAC.Screma w arrs form) ots
 iswim _ _ _ =
   fail "ISWIM does not apply."
 
+-- | When a pure-map Screma returns exclusively accumulator results and some
+-- non-accumulator inputs carry a 2D-to-1D flattening Reshape transform, we
+-- can "unflatten" the map:
+--
+--   Screma(n*m, {flat_a1:[n*m]t1, ..., acc_p:acc(...)}, lam)
+--   where lam : (t1, ..., acc) → acc
+--
+-- becomes
+--
+--   Screma(n, {a1:[n][m]t1, ..., acc_p:acc(...)}, outer_lam)
+--   where outer_lam = \(row_a1:[m]t1, ..., acc_p:acc(...)) →
+--     Screma(m, {row_a1, ..., acc_p}, lam)
+--
+-- This exposes the 2D inputs directly, enabling the standard fusion rules to
+-- fuse the resulting Screma(n,...) with an upstream Screma(n,...) producer.
+unflattenAccOnlyMap ::
+  Maybe [VName] ->
+  SOAC ->
+  SOAC.ArrayTransforms ->
+  TryFusion (SOAC, SOAC.ArrayTransforms)
+unflattenAccOnlyMap (Just outVars) (SOAC.Screma _nm inps form) ots = do
+  lam <- liftMaybe $ isMapSOAC form
+  -- All results must be accumulator types.
+  guard $ all isAcc $ lambdaReturnType lam
+  -- Only apply when the producer outputs non-scalar rows (rank > 1), meaning
+  -- pullReshape cannot handle this case (it requires scalar-leaf map nests).
+  -- When the producer outputs scalars, the simpler prepend approach works fine.
+  outVarTypes <- mapM lookupType outVars
+  guard $ any ((> 1) . arrayRank) outVarTypes
+  -- Partition inputs paired with their lambda params: those with a 2D→1D
+  -- flattening Reshape vs. those that pass through unchanged (acc params).
+  -- A flattening reshape: base type is 2D, first transform collapses it to 1D.
+  let classifyInp (inp@(SOAC.Input ts _v base_t), p)
+        | SOAC.Reshape _aux ns SOAC.:< ts' <- SOAC.viewf ts,
+          arrayRank base_t == 2,
+          shapeRank (newShape ns) == 1 =
+            Left (SOAC.Input ts' _v base_t, p)
+        | otherwise =
+            Right (inp, p)
+      (flat_pairs, pass_pairs) =
+        partitionEithers $ zipWith (curry classifyInp) inps (lambdaParams lam)
+  -- Need at least one flattened input.
+  guard $ not (null flat_pairs)
+  -- The non-flattened inputs must be accumulators, because we are changing the
+  -- width of the SOAC.
+  guard $ all (isAcc . SOAC.inputType . fst) pass_pairs
+  -- All flattened inputs must agree on the outer dim n and inner dim m.
+  let dims2d base_t = (arraySize 0 base_t, arraySize 1 base_t)
+      getBaseTy (SOAC.Input _ _ base_t, _) = base_t
+      (n, m) = dims2d (getBaseTy (head flat_pairs))
+  guard $ all ((== (n, m)) . dims2d . getBaseTy) flat_pairs
+  -- The lambda params for the flat inputs get their type changed from [n*m]t
+  -- to [m]t (a single row).  Pass-through params are unchanged.
+  let mkRowParam (_, p) = p {paramDec = rowType (paramDec p)}
+      flat_row_params = map mkRowParam flat_pairs
+      pass_params = map snd pass_pairs
+      inner_lam_params = flat_row_params ++ pass_params
+  inner_lam <- renameLambda $ lam {lambdaParams = inner_lam_params}
+  inner_form <- mapSOAC inner_lam
+  -- Inner Screma over m: plain-variable inputs for the row params, then
+  -- plain-variable inputs for the pass-through (acc) params.
+  let inner_inps =
+        map (SOAC.identInput . paramToIdent) flat_row_params
+          ++ map (SOAC.identInput . paramToIdent) pass_params
+      inner_soac = SOAC.Screma m inner_inps inner_form
+  -- Outer lambda: same param names but outer params have type [m]t (rows).
+  let outer_lam_params = flat_row_params ++ pass_params
+  outer_lam <- runLambdaBuilder outer_lam_params $ do
+    inner_exp <- SOAC.toExp inner_soac
+    res <- letTupExp "inner_acc" inner_exp
+    pure $ map (subExpRes . Var) res
+  outer_form <- mapSOAC outer_lam
+  -- Outer Screma over n: 2D inputs (flatten reshape stripped) then pass-through.
+  let outer_inps = map fst flat_pairs ++ map fst pass_pairs
+  pure (SOAC.Screma n outer_inps outer_form, ots)
+unflattenAccOnlyMap _ _ _ =
+  fail "unflattenAccOnlyMap does not apply."
+
+paramToIdent :: Param Type -> Ident
+paramToIdent p = Ident (paramName p) (paramType p)
+
 removeParamOuterDim :: LParam SOACS -> LParam SOACS
 removeParamOuterDim param =
   let t = rowType $ paramType param
@@ -538,11 +616,21 @@ commonTransforms' inps =
     Just (Just mot, inps') -> first (mot SOAC.<|) $ commonTransforms' $ reverse inps'
     _ -> (SOAC.noTransforms, map snd inps)
   where
+    -- Two reshapes with the same shape are compatible even if their certs differ;
+    -- merge the certs to produce a single common reshape transform.
+    compatibleTransforms (SOAC.Reshape aux1 shape1) (SOAC.Reshape aux2 shape2)
+      | shape1 == shape2 =
+          Just $ SOAC.Reshape (aux1 <> aux2) shape1
+    compatibleTransforms ot1 ot2
+      | ot1 == ot2 = Just ot1
+    compatibleTransforms _ _ = Nothing
+
     inspect (mot, prev) (True, inp) =
       case (mot, inputToOutput inp) of
         (Nothing, Just (ot, inp')) -> Just (Just ot, (True, inp') : prev)
         (Just ot1, Just (ot2, inp'))
-          | ot1 == ot2 -> Just (Just ot2, (True, inp') : prev)
+          | Just combined <- compatibleTransforms ot1 ot2 ->
+              Just (Just combined, (True, inp') : prev)
         _ -> Nothing
     inspect (mot, prev) inp = Just (mot, inp : prev)
 
@@ -683,9 +771,24 @@ pullReshape soac ots = do
     all
       ((== MapNest.depth mapnest) . arrayRank)
       (MapNest.typeOf mapnest)
-  mapnest' <- MapNest.reshape cs (newShape newshape) mapnest
+  -- Reshaping the nest changes its parallel dimensions, e.g. an unflattening
+  -- splits one dimension into several. When the innermost lambda contains a
+  -- SOAC (such as a reduction), this can inhibit later optimisations: a matrix
+  -- multiplication whose result is unflattened becomes a nest where one operand
+  -- varies with two of the dimensions, which tiling cannot handle (see
+  -- tests/tiling/tiling_mm_unflatten.fut). In that case we only allow
+  -- coercions. As a simple heuristic, we only look at the top-level statements
+  -- of the innermost lambda. The proper solution is for tiling to handle such
+  -- nests.
+  guard $
+    reshapeKind newshape == ReshapeCoerce
+      || not (any (isSOAC . stmExp) (bodyStms (lambdaBody (MapNest.mapNestLambda mapnest))))
+  mapnest' <- MapNest.reshape cs newshape mapnest
   soac' <- MapNest.toSOAC mapnest'
   pure (soac', ots')
+  where
+    isSOAC Op {} = True
+    isSOAC _ = False
 
 -- Tie it all together in exposeInputs (for making inputs to a
 -- consumer available) and pullOutputTransforms (for moving

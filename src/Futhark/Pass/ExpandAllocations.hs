@@ -25,12 +25,12 @@ import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplify.Rep (addScopeWisdom)
 import Futhark.Pass
 import Futhark.Pass.ExplicitAllocations.GPU (explicitAllocationsInStms)
-import Futhark.Pass.ExtractKernels.BlockedKernel (nonSegRed)
-import Futhark.Pass.ExtractKernels.ToGPU (segThread)
+import Futhark.Pass.Flatten.Builtins (mkSegSpace)
 import Futhark.Tools
 import Futhark.Transform.CopyPropagate (copyPropagateInFun)
-import Futhark.Transform.Rename (renameStm)
+import Futhark.Transform.Rename (renamePat, renameStm)
 import Futhark.Transform.Substitute
+import Futhark.Transform.ToGPU (segThread)
 import Futhark.Util (mapAccumLM)
 import Prelude hiding (quot)
 
@@ -157,7 +157,7 @@ transformExp (WithAcc inputs lam) = do
     onInput (shape, arrs, Just (op_lam, nes)) = do
       bound_outside <- asks $ namesFromList . M.keys
       let -- XXX: fake a SegLevel, which we don't have here.  We will not
-          -- use it for anything, as we will not allow irregular
+          -- use it for anything, as we will not allow nonuniform
           -- allocations inside the update function.
           lvl = SegThread SegNoVirt Nothing
           (op_lam', lam_allocs) =
@@ -171,7 +171,7 @@ transformExp (WithAcc inputs lam) = do
           throwError $
             "Cannot handle un-sliceable allocation size: "
               ++ prettyString v
-              ++ "\nLikely cause: irregular nested operations inside accumulator update operator."
+              ++ "\nLikely cause: nonuniform nested operations inside accumulator update operator."
         [] ->
           pure ()
 
@@ -234,7 +234,7 @@ transformScanRed lvl space ops kbody = do
       throwError $
         "Cannot handle un-sliceable allocation size: "
           ++ prettyString v
-          ++ "\nLikely cause: irregular nested operations inside parallel constructs."
+          ++ "\nLikely cause: nonuniform nested operations inside parallel constructs."
     Nothing ->
       pure ()
 
@@ -678,7 +678,7 @@ addParamsContext ps = localScope (scopeOfFParams ps) $ do
   (ps_ctx, ps') <- mapAccumLM onType [] ps
   pure $ ps' <> ps_ctx
   where
-    onType acc (Param attr v (MemArray pt shape u (ArrayIn mem lmad))) = do
+    onType acc (Param attr v (MemArray pt shape o (ArrayIn mem lmad))) = do
       space <- lookupMemSpace mem
       mem' <- newVName $ baseName mem <> "_ext"
       let num_exts = length (LMAD.existentialized lmad)
@@ -688,7 +688,7 @@ addParamsContext ps = localScope (scopeOfFParams ps) $ do
       let lmad' = lmadFrom (LMAD.shape lmad) $ map (le64 . paramName) lmad_exts
       pure
         ( acc ++ Param mempty mem' (MemMem space) : lmad_exts,
-          Param attr v $ MemArray pt shape u $ ArrayIn mem' lmad'
+          Param attr v $ MemArray pt shape o $ ArrayIn mem' lmad'
         )
     onType acc t = pure (acc, t)
 
@@ -704,7 +704,7 @@ offsetBranch (Pat pes) ts = do
     onType
       acc
       ( PatElem pe_v (MemArray _ pe_shape pe_u (ArrayIn pe_mem pe_lmad)),
-        MemArray pt shape u meminfo
+        MemArray pt shape o meminfo
         ) = do
         (space, lmad) <- case meminfo of
           ReturnsInBlock mem lmad -> do
@@ -726,7 +726,7 @@ offsetBranch (Pat pes) ts = do
               ++ (PatElem pe_mem' $ MemMem space, MemMem space)
               : map (,MemPrim int64) lmad_exts,
             ( PatElem pe_v $ MemArray pt pe_shape pe_u $ ArrayIn pe_mem' pe_lmad',
-              MemArray pt shape u . ReturnsNewBlock space start . fmap ext $
+              MemArray pt shape o . ReturnsNewBlock space start . fmap ext $
                 LMAD.mkExistential (shapeDims shape) (1 + start)
             )
           )
@@ -737,10 +737,10 @@ offsetMemoryInPat offsets (Pat pes) rets = do
   Pat $ zipWith onPE pes rets
   where
     onPE
-      (PatElem name (MemArray pt shape u (ArrayIn mem _)))
+      (PatElem name (MemArray pt shape o (ArrayIn mem _)))
       (MemArray _ _ _ info)
         | Just lmad <- getLMAD info =
-            PatElem name . MemArray pt shape u . ArrayIn mem $
+            PatElem name . MemArray pt shape o . ArrayIn mem $
               fmap (fmap unExt) lmad
     onPE pe _ =
       offsetMemoryInMemBound offsets <$> pe
@@ -750,22 +750,22 @@ offsetMemoryInPat offsets (Pat pes) rets = do
     getLMAD (Just (ReturnsInBlock _ lmad)) = Just lmad
     getLMAD _ = Nothing
 
-offsetMemoryInParam :: RebaseMap -> Param (MemBound u) -> Param (MemBound u)
+offsetMemoryInParam :: RebaseMap -> Param (MemBound o) -> Param (MemBound o)
 offsetMemoryInParam offsets = fmap $ offsetMemoryInMemBound offsets
 
-offsetMemoryInMemBound :: RebaseMap -> MemBound u -> MemBound u
-offsetMemoryInMemBound offsets (MemArray pt shape u (ArrayIn mem lmad))
-  | Just (o, p) <- lookupNewBase mem (LMAD.shape lmad) offsets =
-      MemArray pt shape u $ ArrayIn mem $ LMAD.expand o p lmad
+offsetMemoryInMemBound :: RebaseMap -> MemBound o -> MemBound o
+offsetMemoryInMemBound offsets (MemArray pt shape o (ArrayIn mem lmad))
+  | Just (base, p) <- lookupNewBase mem (LMAD.shape lmad) offsets =
+      MemArray pt shape o $ ArrayIn mem $ LMAD.expand base p lmad
 offsetMemoryInMemBound _ info = info
 
 offsetMemoryInBodyReturns :: RebaseMap -> BodyReturns -> BodyReturns
-offsetMemoryInBodyReturns offsets (MemArray pt shape u (ReturnsInBlock mem lmad))
+offsetMemoryInBodyReturns offsets (MemArray pt shape o (ReturnsInBlock mem lmad))
   | Just lmad' <- isStaticLMAD lmad,
-    Just (o, p) <- lookupNewBase mem (LMAD.shape lmad') offsets =
-      MemArray pt shape u $
+    Just (base, p) <- lookupNewBase mem (LMAD.shape lmad') offsets =
+      MemArray pt shape o $
         ReturnsInBlock mem $
-          LMAD.expand (Free <$> o) (fmap Free p) lmad
+          LMAD.expand (Free <$> base) (fmap Free p) lmad
 offsetMemoryInBodyReturns _ br = br
 
 offsetMemoryInLambda :: RebaseMap -> Lambda GPUMem -> OffsetM (Lambda GPUMem)
@@ -853,10 +853,10 @@ offsetMemoryInStm offsets (Let pat dec e) = do
   pure $ Let pat'' dec e'
   where
     pick
-      (PatElem name (MemArray pt s u _ret))
+      (PatElem name (MemArray pt s o _ret))
       (MemArray _ _ _ (Just (ReturnsInBlock m extlmad)))
         | Just lmad <- instantiateLMAD extlmad =
-            PatElem name (MemArray pt s u (ArrayIn m lmad))
+            PatElem name (MemArray pt s o (ArrayIn m lmad))
     pick p _ = p
 
     instantiateLMAD :: ExtLMAD -> Maybe LMAD
@@ -925,10 +925,10 @@ unAllocGPUStms = unAllocStms False
           mapOnVName = Right
         }
 
-unMem :: MemInfo d u ret -> TypeBase (ShapeBase d) u
+unMem :: MemInfo d o ret -> TypeBase (ShapeBase d) o
 unMem (MemPrim pt) = Prim pt
-unMem (MemArray pt shape u _) = Array pt shape u
-unMem (MemAcc acc ispace ts u) = Acc acc ispace ts u
+unMem (MemArray pt shape o _) = Array pt shape o
+unMem (MemAcc acc ispace ts) = Acc acc ispace ts
 unMem MemMem {} = Prim Unit
 
 unAllocScope :: Scope GPUMem -> Scope GPU.GPU
@@ -953,6 +953,108 @@ copyConsumed stms = do
     addStms $ substituteNames substs stms
   where
     copy v = letExp (baseName v <> "_copy") $ BasicOp $ Replicate mempty $ Var v
+
+data KernelInput = KernelInput
+  { kernelInputName :: VName,
+    kernelInputType :: Type,
+    kernelInputArray :: VName,
+    kernelInputIndices :: [SubExp]
+  }
+  deriving (Show)
+
+readKernelInput :: (MonadBuilder m, Rep m ~ GPU.GPU) => KernelInput -> m ()
+readKernelInput inp = do
+  let pe = PatElem (kernelInputName inp) $ kernelInputType inp
+  letBind (Pat [pe]) . BasicOp $
+    case kernelInputType inp of
+      Acc {} ->
+        SubExp $ Var $ kernelInputArray inp
+      _ ->
+        Index (kernelInputArray inp) . Slice $
+          map DimFix (kernelInputIndices inp)
+            ++ map sliceDim (arrayDims (kernelInputType inp))
+
+prepareRedOrScan ::
+  (MonadBuilder m, Rep m ~ GPU.GPU) =>
+  Certs ->
+  SubExp ->
+  Lambda GPU.GPU ->
+  [VName] ->
+  [(VName, SubExp)] ->
+  [KernelInput] ->
+  m (SegSpace, KernelBody GPU.GPU)
+prepareRedOrScan cs w map_lam arrs ispace inps = do
+  gtid <- newVName "gtid"
+  space <- mkSegSpace $ ispace ++ [(gtid, w)]
+  kbody <- fmap (uncurry (flip (Body ()))) $
+    runBuilder $
+      localScope (scopeOfSegSpace space) $ do
+        mapM_ readKernelInput inps
+        certifying cs . mapM_ readKernelInput $ do
+          (p, arr) <- zip (lambdaParams map_lam) arrs
+          pure $ KernelInput (paramName p) (paramType p) arr [Var gtid]
+        res <- bodyBind (lambdaBody map_lam)
+        forM res $ \(SubExpRes res_cs se) -> pure $ Returns ResultMaySimplify res_cs se
+
+  pure (space, kbody)
+
+segRed ::
+  (MonadBuilder m, Rep m ~ GPU.GPU) =>
+  SegOpLevel (Rep m) ->
+  Pat (LetDec (Rep m)) ->
+  Certs ->
+  SubExp -> -- segment size
+  [SegBinOp (Rep m)] ->
+  Lambda (Rep m) ->
+  [VName] ->
+  [(VName, SubExp)] -> -- ispace = pair of (gtid, size) for the maps on "top" of this reduction
+  [KernelInput] -> -- inps = inputs that can be looked up by using the gtids from ispace
+  m (Stms (Rep m))
+segRed lvl pat cs w ops map_lam arrs ispace inps = runBuilder_ $ do
+  (kspace, kbody) <- prepareRedOrScan cs w map_lam arrs ispace inps
+  letBind pat . Op . segOp $
+    SegRed lvl kspace (lambdaReturnType map_lam) kbody ops
+
+dummyDim ::
+  (MonadBuilder m) =>
+  Pat Type ->
+  m (Pat Type, [(VName, SubExp)], m ())
+dummyDim pat = do
+  -- We add a unit-size segment on top to ensure that the result
+  -- of the SegRed is an array, which we then immediately index.
+  -- This is useful in the case that the value is used on the
+  -- device afterwards, as this may save an expensive
+  -- host-device copy (scalars are kept on the host, but arrays
+  -- may be on the device).
+  let addDummyDim t = t `arrayOfRow` intConst Int64 1
+  pat' <- fmap addDummyDim <$> renamePat pat
+  dummy <- newVName "dummy"
+  let ispace = [(dummy, intConst Int64 1)]
+
+  pure
+    ( pat',
+      ispace,
+      forM_ (zip (patNames pat') (patNames pat)) $ \(from, to) -> do
+        from_t <- lookupType from
+        letBindNames [to] . BasicOp $
+          case from_t of
+            Acc {} -> SubExp $ Var from
+            _ -> Index from $ fullSlice from_t [DimFix $ intConst Int64 0]
+    )
+
+nonSegRed ::
+  (MonadBuilder m, Rep m ~ GPU.GPU) =>
+  SegOpLevel (Rep m) ->
+  Pat Type ->
+  SubExp ->
+  [SegBinOp (Rep m)] ->
+  Lambda (Rep m) ->
+  [VName] ->
+  m (Stms (Rep m))
+nonSegRed lvl pat w ops map_lam arrs = runBuilder_ $ do
+  (pat', ispace, read_dummy) <- dummyDim pat
+  addStms =<< segRed lvl pat' mempty w ops map_lam arrs ispace []
+  read_dummy
 
 -- Important for edge cases (#1838) that the Stms here still have the
 -- Allocs we are actually trying to get rid of.

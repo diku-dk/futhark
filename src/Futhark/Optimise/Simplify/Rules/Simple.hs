@@ -131,7 +131,7 @@ simplifyBinOp _ _ (BinOp SDiv {} e1 e2)
   | isCt0 e1 = resIsSubExp e1
   | isCt1 e2 = resIsSubExp e1
   | isCt0 e2 = Nothing
-simplifyBinOp _ _ (BinOp SDivUp {} e1 e2)
+simplifyBinOp _ _ (BinOp SCeilDiv {} e1 e2)
   | isCt0 e1 = resIsSubExp e1
   | isCt1 e2 = resIsSubExp e1
   | isCt0 e2 = Nothing

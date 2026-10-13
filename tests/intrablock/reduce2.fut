@@ -5,5 +5,5 @@
 -- structure gpu { SegMap/SegRed 1 }
 
 def main xs =
-  #[incremental_flattening(only_intra)]
+  #[flattening(only_intra)]
   map (map i32.abs >-> i32.sum) xs

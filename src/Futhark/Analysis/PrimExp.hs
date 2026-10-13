@@ -460,8 +460,8 @@ instance (IntExp t, Pretty v) => IntegralExp (TPrimExp t v) where
         TPrimExp $ constFoldPrimExp z
     | otherwise = numBad "rem" (x, y)
 
-  TPrimExp x `divUp` TPrimExp y
-    | Just z <- msum [asIntOp (`SDivUp` Unsafe) x y] =
+  TPrimExp x `ceilDiv` TPrimExp y
+    | Just z <- msum [asIntOp (`SCeilDiv` Unsafe) x y] =
         TPrimExp $ constFoldPrimExp z
     | otherwise = numBad "divRoundingUp" (x, y)
 

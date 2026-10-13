@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Install Nix
       uses: cachix/install-nix-action@v27
@@ -24,7 +24,7 @@ jobs:
     - name: Build Futhark
       run: nix build .#tarball-nightly
 
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v5
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
         path: result/futhark-nightly-linux-x86_64.tar.xz
@@ -33,7 +33,7 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Workaround runner image issue
       # https://github.com/actions/runner-images/issues/7061
@@ -41,9 +41,9 @@ jobs:
 
     - uses: haskell-actions/setup@v2
       with:
-        ghc-version: '9.10.3'
+        ghc-version: '9.12.3'
 
-    - uses: actions/cache@v4
+    - uses: actions/cache@v5
       name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
       with:
         path: |
@@ -68,7 +68,7 @@ jobs:
     runs-on: macos-latest
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Install dependencies
       run: |
@@ -76,7 +76,7 @@ jobs:
         echo "/opt/homebrew/opt/sphinx-doc/bin" >> $GITHUB_PATH
         echo "/opt/homebrew/opt/ghc/bin" >> $GITHUB_PATH
 
-    - uses: actions/cache@v4
+    - uses: actions/cache@v5
       name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
       with:
         path: |
@@ -101,7 +101,7 @@ jobs:
         echo "${GITHUB_SHA}" > futhark-nightly-macos-arm64/commit-id
         tar -Jcf futhark-nightly-macos-arm64.tar.xz futhark-nightly-macos-arm64
 
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v5
       with:
         name: futhark-nightly-macos-arm64.tar.xz
         path: futhark-nightly-macos-arm64.tar.xz
@@ -110,14 +110,14 @@ jobs:
     runs-on: windows-latest
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - id: setup-haskell
       uses: haskell-actions/setup@v2
       with:
-        ghc-version: '9.10.3'
+        ghc-version: '9.12.3'
 
-    - uses: actions/cache@v4
+    - uses: actions/cache@v5
       name: Cache cabal stuff
       with:
         path: |
@@ -131,12 +131,12 @@ jobs:
         cabal update
         try() { cabal install --install-method=copy --overwrite-policy=always --installdir=.; }
         try || try || try
-    - uses: vimtor/action-zip@v1.2
+    - uses: vimtor/action-zip@v1.3
       with:
         files: futhark.exe
         dest: futhark-nightly-windows-x86_64.zip
 
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v5
       with:
         name: futhark-nightly-windows-x86_64.zip
         path: futhark-nightly-windows-x86_64.zip
@@ -146,12 +146,12 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Install Nix
       uses: cachix/install-nix-action@v27
 
-    - uses: actions/cache@v4
+    - uses: actions/cache@v5
       name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
       with:
         path: |
@@ -172,7 +172,7 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Install Nix
       uses: cachix/install-nix-action@v27
@@ -191,12 +191,12 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Install Nix
-      uses: cachix/install-nix-action@v18
+      uses: cachix/install-nix-action@v27
 
-    - uses: actions/cache@v4
+    - uses: actions/cache@v5
       name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
       with:
         path: |
@@ -219,9 +219,9 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v8
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -238,9 +238,9 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v8
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -252,21 +252,46 @@ jobs:
     - run: |
         futhark test -s tests
 
+  test-ir-interpreter:
+    runs-on: ubuntu-24.04
+    needs: [build-linux-nix]
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - uses: actions/download-artifact@v8
+      with:
+        name: futhark-nightly-linux-x86_64.tar.xz
+
+    - name: Install from nightly tarball
+      run: |
+        tar xvf futhark-nightly-linux-x86_64.tar.xz
+        make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - name: Interpret SOACS IR
+      run: |
+        futhark test --interpret-soacs tests --exclude=autodiff
+
+    - name: Interpret GPU IR
+      run: |
+        futhark test --interpret-gpu tests --exclude=autodiff
+
   test-c:
     runs-on: ubuntu-24.04
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Install Nix
-      uses: cachix/install-nix-action@v18
+      uses: cachix/install-nix-action@v27
 
     - uses: rrbutani/use-nix-shell-action@v1
       with:
         devShell: .#test
 
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v8
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -285,16 +310,16 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Install Nix
-      uses: cachix/install-nix-action@v18
+      uses: cachix/install-nix-action@v27
 
     - uses: rrbutani/use-nix-shell-action@v1
       with:
         devShell: .#test
 
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v8
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -313,16 +338,16 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Install Nix
-      uses: cachix/install-nix-action@v18
+      uses: cachix/install-nix-action@v27
 
     - uses: rrbutani/use-nix-shell-action@v1
       with:
         devShell: .#test
 
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v8
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -342,16 +367,16 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Install Nix
-      uses: cachix/install-nix-action@v18
+      uses: cachix/install-nix-action@v27
 
     - uses: rrbutani/use-nix-shell-action@v1
       with:
         devShell: .#test
 
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v8
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -369,16 +394,16 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [build-linux-nix]
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Install Nix
-      uses: cachix/install-nix-action@v18
+      uses: cachix/install-nix-action@v27
 
     - uses: rrbutani/use-nix-shell-action@v1
       with:
         devShell: .#test
 
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v8
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -395,16 +420,16 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [build-linux-nix]
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Install Nix
-      uses: cachix/install-nix-action@v18
+      uses: cachix/install-nix-action@v27
 
     - uses: rrbutani/use-nix-shell-action@v1
       with:
         devShell: .#test
 
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v8
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -422,7 +447,7 @@ jobs:
     needs: [build-linux-nix]
     if: github.repository == 'diku-dk/futhark'
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - uses: ./.github/actions/futhark-slurm
       with:
@@ -433,7 +458,7 @@ jobs:
           source virtualenv/bin/activate
           pip install jsonschema
           module unload cuda
-          module load cuda/11.8
+          module load cuda/12.2
           futhark test tests \
             --backend=opencl \
             --cache-extension=cache \
@@ -446,7 +471,7 @@ jobs:
     needs: [build-linux-nix]
     if: github.repository == 'diku-dk/futhark'
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - uses: ./.github/actions/futhark-slurm
       with:
@@ -455,9 +480,9 @@ jobs:
           hostname
           python -m venv virtualenv
           source virtualenv/bin/activate
-          pip install numpy pyopencl jsonschema
+          pip install numpy pyopencl jsonschema mako
           module unload cuda
-          module load cuda/11.8
+          module load cuda/12.2
           futhark test tests \
              --backend=pyopencl \
              --tuning=tuning_gpu
@@ -484,7 +509,7 @@ jobs:
     needs: [build-linux-nix]
     if: github.repository == 'diku-dk/futhark'
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - uses: ./.github/actions/futhark-slurm
       with:
@@ -495,7 +520,7 @@ jobs:
           source virtualenv/bin/activate
           pip install jsonschema
           module unload cuda
-          module load cuda/11.8
+          module load cuda/12.2
           nvidia-smi --query-gpu=gpu_name --format=csv,noheader
           futhark test tests \
             --backend=cuda \
@@ -510,7 +535,7 @@ jobs:
     needs: [build-linux-nix]
     if: github.repository == 'diku-dk/futhark'
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - run: |
         python -m venv virtualenv
@@ -534,7 +559,7 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - uses: mymindstorm/setup-emsdk@v14
       with:
@@ -542,11 +567,11 @@ jobs:
         actions-cache-folder: 'emsdk-cache'
         cache-key: emsdk-wasm
 
-    - uses: actions/setup-node@v4
+    - uses: actions/setup-node@v6
       with:
         node-version: '22.x'
 
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v8
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -571,7 +596,7 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - uses: mymindstorm/setup-emsdk@v14
       with:
@@ -579,11 +604,11 @@ jobs:
         actions-cache-folder: 'emsdk-mc-cache'
         cache-key: emsdk-wasm-multicore
 
-    - uses: actions/setup-node@v4
+    - uses: actions/setup-node@v6
       with:
         node-version: '22.x'
 
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v8
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -604,7 +629,7 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - uses: mymindstorm/setup-emsdk@v14
       with:
@@ -612,11 +637,11 @@ jobs:
         actions-cache-folder: 'emsdk-cache'
         cache-key: emsdk-wasm-lib
 
-    - uses: actions/setup-node@v4
+    - uses: actions/setup-node@v6
       with:
         node-version: '22.x'
 
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v8
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -635,9 +660,9 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v8
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -655,9 +680,9 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v8
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -675,16 +700,16 @@ jobs:
     needs: [build-linux-nix]
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Install Nix
-      uses: cachix/install-nix-action@v18
+      uses: cachix/install-nix-action@v27
 
     - uses: rrbutani/use-nix-shell-action@v1
       with:
         devShell: .#test
 
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v8
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
@@ -722,7 +747,7 @@ jobs:
         futhark doc -o prelude-docs /dev/null
         tar -Jcf prelude-docs.tar.xz prelude-docs
 
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v5
       with:
         name: prelude-docs.tar.xz
         path: prelude-docs.tar.xz
@@ -739,19 +764,19 @@ jobs:
         key: ${{ secrets.SSHKEY }}
         known_hosts: ${{ secrets.KNOWN_HOSTS }}
 
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v8
       with:
         name: futhark-nightly-windows-x86_64.zip
 
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v8
       with:
         name: futhark-nightly-macos-arm64.tar.xz
 
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v8
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
 
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v8
       with:
         name: prelude-docs.tar.xz
 
@@ -765,12 +790,11 @@ jobs:
         rsync -rv -e 'ssh -o "StrictHostKeyChecking no"' prelude-docs/* futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/docs/prelude/
 
     - name: make nightly release
-      uses: "mathieucarbou/marvinpinto-action-automatic-releases@latest"
+      uses: "softprops/action-gh-release@v3.0.3"
       with:
-        repo_token: "${{ secrets.GITHUB_TOKEN }}"
-        automatic_release_tag: "nightly"
+        tag_name: "nightly"
         prerelease: true
-        title: "nightly"
+        name: "nightly"
         files: |
           futhark-nightly-linux-x86_64.tar.xz
           futhark-nightly-macos-arm64.tar.xz

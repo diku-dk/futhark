@@ -36,7 +36,7 @@ def get_prefered_context(
     interactive=False, platform_pref=None, device_pref=None
 ):
     if device_pref != None:
-        (device_pref, device_num) = parse_preferred_device(device_pref)
+        device_pref, device_num = parse_preferred_device(device_pref)
     else:
         device_num = 0
 
@@ -288,6 +288,15 @@ def initialise_opencl_object(
     # compiler should provide us with the variables to which
     # parameters are mapped.
     if len(program_src) >= 0:
+        is_rusticl_asahi = (
+            self.platform.name == "rusticl"
+            and self.device.name.startswith("Apple M")
+        )
+        if is_rusticl_asahi and not any(
+            opt.startswith("-cl-std=") for opt in build_options
+        ):
+            build_options += ["-cl-std=CL2.0"]
+
         build_options += ["-DLOCKSTEP_WIDTH={}".format(lockstep_width)]
 
         build_options += [
@@ -512,7 +521,7 @@ def lmad_copy_gpu2gpu(
     else:
         tr = lmad_map_tr(dst_strides, src_strides, shape)
         if tr is not None:
-            (k, n, m) = tr
+            k, n, m = tr
             map_transpose_gpu2gpu(
                 self, elem_size, dst, dst_offset, src, src_offset, k, m, n
             )

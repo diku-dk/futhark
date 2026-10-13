@@ -63,6 +63,9 @@ instance HasSegOp GPU where
   asSegOp _ = Nothing
   segOp = SegOp
 
+instance TraverseOpStms GPU where
+  traverseOpStms = traverseHostOpStms traverseSOACStms
+
 -- Note [GPU Terminology]
 --
 -- For lack of a better spot to put it, this Note summarises the

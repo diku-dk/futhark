@@ -177,7 +177,8 @@ recordMemRefUses td_env bu_env stm =
           M.toList active_tab
             & foldl
               ( \state (m_b, entry) ->
-                  if not $ null $ patNames (stmPat stm) `intersect` M.keys (vartab entry)
+                  if not (null $ patNames (stmPat stm) `intersect` M.keys (vartab entry))
+                    || touchesCoal m_b entry
                     then markFailedCoal state m_b
                     else state
               )
@@ -210,6 +211,11 @@ recordMemRefUses td_env bu_env stm =
               (_, inhibit_tab1) = foldl markFailedCoal (failed_tab, inhibit_tab) $ M.keys failed_tab
            in (active_tab1, inhibit_tab1)
   where
+    stm_free = freeIn $ stmExp stm
+    touchesCoal m_b entry =
+      (namesFromList (m_b : dstmem entry : M.keys (vartab entry)) <> alsmem entry)
+        `namesIntersect` stm_free
+
     checkOverlapAndExpand (stm_wrts, stm_uses) active_tab (m_b, etry) =
       let alias_m_b = getAliases mempty m_b
           stm_uses' = filter ((`notNameIn` alias_m_b) . tupFst) stm_uses

@@ -1,7 +1,10 @@
--- A lambda function must not return a global array.
+-- A lambda may return a global array, but then the result of applying it
+-- cannot be consumed.
 -- ==
--- error: aliases the free variable "global"
+-- error: "f", which is not consumable
 
 def global : []i32 = [1, 2, 3]
 
-def main = \(b: bool) -> if b then global else []
+def f = \(b: bool) -> if b then global else []
+
+def main (b: bool) = f b with [0] = 0

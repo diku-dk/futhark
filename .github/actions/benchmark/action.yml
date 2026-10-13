@@ -32,7 +32,7 @@ runs:
         script: |
           hostname
           module unload cuda
-          module load cuda/11.8
+          module load cuda/12.2
           futhark bench futhark-benchmarks \
             --backend ${{inputs.backend}} \
             --exclude no_${{inputs.system}} \
@@ -40,7 +40,7 @@ runs:
             --ignore-files /lib/ ${{inputs.futhark-options}}
         slurm-options: --time=0-02:00:00 ${{inputs.slurm-options}}
 
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v5
       with:
         name: futhark-${{inputs.backend}}-${{inputs.system}}-${{ github.sha }}.json
         path: futhark-${{inputs.backend}}-${{inputs.system}}-${{ github.sha }}.json

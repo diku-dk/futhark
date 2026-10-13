@@ -2,8 +2,8 @@ module type field = {
   module R: real
   type t
   val zero : t
-  val (+) : t -> t -> t
-  val (*) : R.t -> t -> t
+  val (+) : t -> t -> *t
+  val (*) : R.t -> t -> *t
 
   -- dummy function to generate new non-zero values of for t
   val tab3 : i64 -> i64 -> i64 -> t

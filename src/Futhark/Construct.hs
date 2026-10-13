@@ -68,6 +68,7 @@ module Futhark.Construct
 
     -- * Monadic expression builders
     eSubExp,
+    eVar,
     eParam,
     eMatch',
     eMatch,
@@ -106,8 +107,9 @@ module Futhark.Construct
     sliceDim,
     fullSlice,
     fullSliceNum,
-    isFullSlice,
+    isIdentitySlice,
     sliceAt,
+    iota64,
 
     -- * Result types
     instantiateShapes,
@@ -203,6 +205,13 @@ eSubExp ::
   SubExp ->
   m (Exp (Rep m))
 eSubExp = pure . BasicOp . SubExp
+
+-- | Turn a variable into a monad expression, through 'eSubExp'.
+eVar ::
+  (MonadBuilder m) =>
+  VName ->
+  m (Exp (Rep m))
+eVar = eSubExp . Var
 
 -- | Treat a parameter as a monadic expression.
 eParam ::
@@ -575,19 +584,27 @@ sliceAt :: Type -> Int -> [DimIndex SubExp] -> Slice SubExp
 sliceAt t n slice =
   fullSlice t $ map sliceDim (take n $ arrayDims t) ++ slice
 
+-- | Produce a straightforward `Int64` `Iota` of the given length with offset 0
+-- and stride 1.
+iota64 :: SubExp -> Exp rep
+iota64 n = BasicOp $ Iota n (intConst Int64 0) (intConst Int64 1) Int64
+
 -- | Like 'fullSlice', but the dimensions are simply numeric.
 fullSliceNum :: (Num d) => [d] -> [DimIndex d] -> Slice d
 fullSliceNum dims slice =
   Slice $ slice ++ map (\d -> DimSlice 0 d 1) (drop (length slice) dims)
 
--- | Does the slice describe the full size of the array?  The most
--- obvious such slice is one that 'DimSlice's the full span of every
--- dimension, but also one that fixes all unit dimensions.
-isFullSlice :: Shape -> Slice SubExp -> Bool
-isFullSlice shape slice = and $ zipWith allOfIt (shapeDims shape) (unSlice slice)
+-- | Does indexing an array of this shape with this slice produce the array
+-- itself? This is a slice that selects every element (which may be fixing unit
+-- dimensions) and has zero offset and unit stride.
+isIdentitySlice :: Shape -> Slice SubExp -> Bool
+isIdentitySlice shape slice =
+  length (shapeDims shape) == length (unSlice slice)
+    && and (zipWith allOfIt (shapeDims shape) (unSlice slice))
   where
     allOfIt (Constant v) DimFix {} = oneIsh v
-    allOfIt d (DimSlice _ n _) = d == n
+    allOfIt d (DimSlice (Constant off) n (Constant s)) =
+      d == n && zeroIsh off && oneIsh s
     allOfIt _ _ = False
 
 -- | Conveniently construct a body that contains no bindings.
@@ -646,8 +663,8 @@ mapResult f (Body _ stms res) =
 instantiateShapes ::
   (Monad m) =>
   (Int -> m SubExp) ->
-  [TypeBase ExtShape u] ->
-  m [TypeBase Shape u]
+  [TypeBase ExtShape o] ->
+  m [TypeBase Shape o]
 instantiateShapes f ts = evalStateT (mapM instantiate ts) M.empty
   where
     instantiate t = do
@@ -666,7 +683,7 @@ instantiateShapes f ts = evalStateT (mapM instantiate ts) M.empty
 -- | Like 'instantiateShapes', but obtains names from the provided
 -- list.  If an 'Ext' is out of bounds of this list, the function
 -- fails with 'error'.
-instantiateShapes' :: [VName] -> [TypeBase ExtShape u] -> [TypeBase Shape u]
+instantiateShapes' :: [VName] -> [TypeBase ExtShape o] -> [TypeBase Shape o]
 instantiateShapes' names ts =
   -- Carefully ensure that the order of idents we produce corresponds
   -- to their existential index.

@@ -1,5 +1,5 @@
 -- ==
--- error: consumption
+-- error: contains-consumption
 
 def update (xs: *[]i32) (i: i32) (y: i32) =
   xs with [i] = y

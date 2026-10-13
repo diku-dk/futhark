@@ -1,6 +1,6 @@
 -- ==
 -- tags { autodiff }
--- entry: fwd_J rev_J
+-- entry: fwd_J rev_J fwd_vec_J rev_vec_J
 -- input
 -- {
 -- [[1.0,2.0],[3.0,4.0]] [[5.0,6.0],[7.0,8.0]]
@@ -32,3 +32,16 @@ entry fwd_J [n] [m] [p] (xss: [n][m]f64) (yss: [m][p]f64) =
 
 entry rev_J [n] [m] [p] (xss: [n][m]f64) (yss: [m][p]f64) =
   tabulate_2d n p (\i j -> vjp (matmul xss) yss (onehot_2d n p (i, j)))
+
+entry fwd_vec_J [n] [m] [p] (xss: [n][m]f64) (yss: [m][p]f64) =
+  let seeds = tabulate (m * p) (\k -> onehot_2d m p (k / p, k % p))
+  in jmp (matmul xss) yss seeds
+  |> unflatten
+  |> transpose
+  |> map transpose
+  |> transpose
+
+entry rev_vec_J [n] [m] [p] (xss: [n][m]f64) (yss: [m][p]f64) =
+  let seeds = tabulate (n * p) (\k -> onehot_2d n p (k / p, k % p))
+  in mjp (matmul xss) yss seeds
+  |> unflatten

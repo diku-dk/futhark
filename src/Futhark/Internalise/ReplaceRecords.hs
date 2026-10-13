@@ -58,7 +58,7 @@ withRecordReplacements rr = local $ \env ->
 lookupRecordReplacement :: VName -> RecordM (Maybe RecordReplacement)
 lookupRecordReplacement v = asks $ M.lookup v . envRecordReplacements
 
-wildcard :: TypeBase Size u -> SrcLoc -> Pat (TypeBase Size u)
+wildcard :: TypeBase Size o -> SrcLoc -> Pat (TypeBase Size o)
 wildcard (Scalar (Record fs)) loc =
   RecordPat (zip (map (L noLoc) (M.keys fs)) $ map ((`Wildcard` loc) . Info) $ M.elems fs) loc
 wildcard t loc =
@@ -93,14 +93,14 @@ memoClear = modify $ \s ->
     }
 
 transformPat ::
-  (TypeBase Size u -> RecordM (TypeBase Size u)) ->
-  Pat (TypeBase Size u) ->
-  RecordM (Pat (TypeBase Size u), RecordReplacements)
-transformPat _ (Id v (Info (Scalar (Record fs))) loc) = do
+  (TypeBase Size o -> RecordM (TypeBase Size o)) ->
+  Pat (TypeBase Size o) ->
+  RecordM (Pat (TypeBase Size o), RecordReplacements)
+transformPat onType (Id v (Info (Scalar (Record fs))) loc) = do
   let fs' = M.toList fs
   (fs_ks, fs_ts) <- fmap unzip $
     forM fs' $ \(f, ft) ->
-      (,) <$> newVName f <*> pure ft
+      (,) <$> newVName f <*> onType ft
   pure
     ( RecordPat
         (zip (map (L noLoc . fst) fs') (zipWith3 Id fs_ks (map Info fs_ts) $ repeat loc))
@@ -193,7 +193,14 @@ onValBind :: ValBind -> RecordM ValBind
 onValBind vb = do
   (params', rrs) <- mapAndUnzipM (transformPat transformParamType) $ valBindParams vb
   e' <- withRecordReplacements (mconcat rrs) $ transformExp $ valBindBody vb
-  ret <- traverse (bitraverse transformExp pure) $ valBindRetType vb
+  -- The return type may mention record parameters through projections
+  -- (e.g. a size @g.n@), so it must see the same substitutions as the
+  -- body.  Otherwise the projection would be left referring to a
+  -- parameter that the record pattern has replaced.
+  ret <-
+    withRecordReplacements (mconcat rrs) $
+      traverse (bitraverse transformExp pure) $
+        valBindRetType vb
   memoClear
   pure $
     vb

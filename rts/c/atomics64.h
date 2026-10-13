@@ -33,6 +33,10 @@ SCALAR_FUN_ATTR double atomic_fadd_f64_shared(volatile __local double *p, double
 SCALAR_FUN_ATTR int64_t atomic_xchg_i64_global(volatile __global int64_t *p, int64_t x) {
 #if defined(FUTHARK_CUDA) || defined(FUTHARK_HIP)
   return atomicExch((unsigned long long*)p, x);
+#elif defined(FUTHARK_OPENCL_DEVICE_ATOMICS)
+  return atomic_exchange_explicit((volatile atomic_long*)p, x,
+                                  memory_order_acq_rel,
+                                  memory_scope_device);
 #else
   return atom_xchg(p, x);
 #endif
@@ -50,6 +54,11 @@ SCALAR_FUN_ATTR int64_t atomic_cmpxchg_i64_global(volatile __global int64_t *p,
                                                          int64_t cmp, int64_t val) {
 #if defined(FUTHARK_CUDA) || defined(FUTHARK_HIP)
   return atomicCAS((unsigned long long*)p, cmp, val);
+#elif defined(FUTHARK_OPENCL_DEVICE_ATOMICS)
+  atomic_compare_exchange_strong_explicit(
+    (volatile atomic_long*)p, &cmp, val,
+    memory_order_acq_rel, memory_order_acquire, memory_scope_device);
+  return cmp;
 #else
   return atom_cmpxchg(p, cmp, val);
 #endif
@@ -67,6 +76,10 @@ SCALAR_FUN_ATTR int64_t atomic_cmpxchg_i64_shared(volatile __local int64_t *p,
 SCALAR_FUN_ATTR int64_t atomic_add_i64_global(volatile __global int64_t *p, int64_t x) {
 #if defined(FUTHARK_CUDA) || defined(FUTHARK_HIP)
   return atomicAdd((unsigned long long*)p, x);
+#elif defined(FUTHARK_OPENCL_DEVICE_ATOMICS)
+  return atomic_fetch_add_explicit((volatile atomic_long*)p, x,
+                                   memory_order_acq_rel,
+                                   memory_scope_device);
 #else
   return atom_add(p, x);
 #endif
@@ -144,6 +157,10 @@ SCALAR_FUN_ATTR int64_t atomic_smax_i64_global(volatile __global int64_t *p, int
     old = atomic_cmpxchg_i64_global((volatile __global int64_t*)p, assumed, old);
   } while (assumed != old);
   return old;
+#elif defined(FUTHARK_OPENCL_DEVICE_ATOMICS)
+  return atomic_fetch_max_explicit((volatile atomic_long*)p, x,
+                                   memory_order_acq_rel,
+                                   memory_scope_device);
 #else
   return atom_max(p, x);
 #endif
@@ -178,6 +195,10 @@ SCALAR_FUN_ATTR int64_t atomic_smin_i64_global(volatile __global int64_t *p, int
     old = atomic_cmpxchg_i64_global((volatile __global int64_t*)p, assumed, old);
   } while (assumed != old);
   return old;
+#elif defined(FUTHARK_OPENCL_DEVICE_ATOMICS)
+  return atomic_fetch_min_explicit((volatile atomic_long*)p, x,
+                                   memory_order_acq_rel,
+                                   memory_scope_device);
 #else
   return atom_min(p, x);
 #endif
@@ -203,6 +224,10 @@ SCALAR_FUN_ATTR int64_t atomic_smin_i64_shared(volatile __local int64_t *p, int6
 SCALAR_FUN_ATTR uint64_t atomic_umax_i64_global(volatile __global uint64_t *p, uint64_t x) {
 #if defined(FUTHARK_CUDA) || defined(FUTHARK_HIP)
   return atomicMax((unsigned long long*)p, x);
+#elif defined(FUTHARK_OPENCL_DEVICE_ATOMICS)
+  return atomic_fetch_max_explicit((volatile atomic_ulong*)p, x,
+                                   memory_order_acq_rel,
+                                   memory_scope_device);
 #else
   return atom_max(p, x);
 #endif
@@ -219,6 +244,10 @@ SCALAR_FUN_ATTR uint64_t atomic_umax_i64_shared(volatile __local uint64_t *p, ui
 SCALAR_FUN_ATTR uint64_t atomic_umin_i64_global(volatile __global uint64_t *p, uint64_t x) {
 #if defined(FUTHARK_CUDA) || defined(FUTHARK_HIP)
   return atomicMin((unsigned long long*)p, x);
+#elif defined(FUTHARK_OPENCL_DEVICE_ATOMICS)
+  return atomic_fetch_min_explicit((volatile atomic_ulong*)p, x,
+                                   memory_order_acq_rel,
+                                   memory_scope_device);
 #else
   return atom_min(p, x);
 #endif
@@ -235,6 +264,10 @@ SCALAR_FUN_ATTR uint64_t atomic_umin_i64_shared(volatile __local uint64_t *p, ui
 SCALAR_FUN_ATTR int64_t atomic_and_i64_global(volatile __global int64_t *p, int64_t x) {
 #if defined(FUTHARK_CUDA) || defined(FUTHARK_HIP)
   return atomicAnd((unsigned long long*)p, x);
+#elif defined(FUTHARK_OPENCL_DEVICE_ATOMICS)
+  return atomic_fetch_and_explicit((volatile atomic_long*)p, x,
+                                   memory_order_acq_rel,
+                                   memory_scope_device);
 #else
   return atom_and(p, x);
 #endif
@@ -251,6 +284,10 @@ SCALAR_FUN_ATTR int64_t atomic_and_i64_shared(volatile __local int64_t *p, int64
 SCALAR_FUN_ATTR int64_t atomic_or_i64_global(volatile __global int64_t *p, int64_t x) {
 #if defined(FUTHARK_CUDA) || defined(FUTHARK_HIP)
   return atomicOr((unsigned long long*)p, x);
+#elif defined(FUTHARK_OPENCL_DEVICE_ATOMICS)
+  return atomic_fetch_or_explicit((volatile atomic_long*)p, x,
+                                  memory_order_acq_rel,
+                                  memory_scope_device);
 #else
   return atom_or(p, x);
 #endif
@@ -267,6 +304,10 @@ SCALAR_FUN_ATTR int64_t atomic_or_i64_shared(volatile __local int64_t *p, int64_
 SCALAR_FUN_ATTR int64_t atomic_xor_i64_global(volatile __global int64_t *p, int64_t x) {
 #if defined(FUTHARK_CUDA) || defined(FUTHARK_HIP)
   return atomicXor((unsigned long long*)p, x);
+#elif defined(FUTHARK_OPENCL_DEVICE_ATOMICS)
+  return atomic_fetch_xor_explicit((volatile atomic_long*)p, x,
+                                   memory_order_acq_rel,
+                                   memory_scope_device);
 #else
   return atom_xor(p, x);
 #endif

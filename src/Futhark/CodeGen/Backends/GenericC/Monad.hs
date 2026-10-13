@@ -515,10 +515,13 @@ fatMemUnRef :: Space -> String
 fatMemUnRef (Space sid) = "memblock_unref_" ++ sid
 fatMemUnRef _ = "memblock_unref"
 
-rawMem :: VName -> CompilerM op s C.Exp
-rawMem v = rawMem' <$> fat <*> pure v
+-- | The C expression for the raw pointer (or array) underlying a memory block.
+rawMem :: VName -> Space -> CompilerM op s C.Exp
+rawMem v space = rawMem' <$> fat <*> pure v
   where
-    fat = asks ((&&) . opsFatMemory . envOperations) <*> (isNothing <$> cacheMem v)
+    fat = case space of
+      ScalarSpace {} -> pure False
+      _ -> asks ((&&) . opsFatMemory . envOperations) <*> (isNothing <$> cacheMem v)
 
 rawMem' :: (C.ToExp a) => Bool -> a -> C.Exp
 rawMem' True e = [C.cexp|$exp:e.mem|]

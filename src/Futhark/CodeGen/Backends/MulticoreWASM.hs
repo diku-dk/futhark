@@ -59,7 +59,7 @@ compileProg version prog = do
     ( ws,
       ( prog'',
         javascriptWrapper (fRepMyRep prog') (opaqueToJS (Imp.defTypes prog')),
-        "_futhark_context_config_set_num_threads" : emccExportNames (fRepMyRep prog') (opaqueToJS (Imp.defTypes prog'))
+        "_futhark_context_config_set_num_threads" : emccExportNames (GC.cManifest prog'')
       )
     )
 
@@ -67,7 +67,7 @@ fRepMyRep :: Imp.Definitions Imp.Multicore -> [JSEntryPoint]
 fRepMyRep prog =
   let Imp.Functions fs = Imp.defFuns prog
       function fun = do
-        Imp.EntryPoint n res args <- Imp.functionEntry fun
+        Imp.EntryPoint n res args _ <- Imp.functionEntry fun
         Just $
           JSEntryPoint
             { name = nameToString n,

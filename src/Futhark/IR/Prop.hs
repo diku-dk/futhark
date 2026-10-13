@@ -34,6 +34,8 @@ module Futhark.IR.Prop
     lamIsBinOp,
     isIdentityLambda,
     isNilLambda,
+    builtinName,
+    isBuiltinName,
     ASTConstraints,
     IsOp (..),
     ASTRep (..),
@@ -46,6 +48,7 @@ import Data.List (elemIndex, find)
 import Data.Map.Strict qualified as M
 import Data.Maybe (isJust, mapMaybe)
 import Data.Set qualified as S
+import Data.Text qualified as T
 import Futhark.IR.Pretty
 import Futhark.IR.Prop.Constants
 import Futhark.IR.Prop.Names
@@ -76,29 +79,47 @@ asBasicOp :: Exp rep -> Maybe BasicOp
 asBasicOp (BasicOp op) = Just op
 asBasicOp _ = Nothing
 
--- | An expression is safe if it is always well-defined (assuming that
--- any required certificates have been checked) in any context.  For
--- example, array indexing is not safe, as the index may be out of
--- bounds.  On the other hand, adding two numbers cannot fail.
+-- | An expression is safe if it is always well-defined in any context, assuming
+-- data dependencies are satisfied - and note that certificates are just a
+-- special case of data dependencies. For example, array indexing is not safe,
+-- as the index may be out of bounds. Array slicing is also considered unsafe,
+-- as semantically we consider this to be a copy (even if operationally it is
+-- usually a view). On the other hand, adding two numbers cannot fail.
+--
+-- The certificate requirement is subtle but important: Iota is safe only when
+-- the argument given is non-negative, which is assumed checked by a
+-- certificate.
+--
+-- Essentially the rule is this: if an expression is safe, then it means we can
+-- hoist it out of control flow without a soundness issue.
+--
+-- Some of these operations are less safe than you might intuitively expect,
+-- e.g. Reshape is considered unsafe despite usually not resulting in any code
+-- generation. Reshape can *semantically* fail if the original array does not
+-- have the same number of elements as the new shape.
+--
+-- Being very generous with unsafety-status is to ease program transformation,
+-- such that we do not have to worry too much about turning unsafe operations
+-- into "safe" operations.
 safeExp :: (ASTRep rep) => Exp rep -> Bool
 safeExp (BasicOp op) = safeBasicOp op
   where
     safeBasicOp (BinOp (SDiv _ Safe) _ _) = True
-    safeBasicOp (BinOp (SDivUp _ Safe) _ _) = True
+    safeBasicOp (BinOp (SCeilDiv _ Safe) _ _) = True
     safeBasicOp (BinOp (SQuot _ Safe) _ _) = True
     safeBasicOp (BinOp (UDiv _ Safe) _ _) = True
-    safeBasicOp (BinOp (UDivUp _ Safe) _ _) = True
+    safeBasicOp (BinOp (UCeilDiv _ Safe) _ _) = True
     safeBasicOp (BinOp (SMod _ Safe) _ _) = True
     safeBasicOp (BinOp (SRem _ Safe) _ _) = True
     safeBasicOp (BinOp (UMod _ Safe) _ _) = True
     safeBasicOp (BinOp SDiv {} _ (Constant y)) = not $ zeroIsh y
     safeBasicOp (BinOp SDiv {} _ _) = False
-    safeBasicOp (BinOp SDivUp {} _ (Constant y)) = not $ zeroIsh y
-    safeBasicOp (BinOp SDivUp {} _ _) = False
+    safeBasicOp (BinOp SCeilDiv {} _ (Constant y)) = not $ zeroIsh y
+    safeBasicOp (BinOp SCeilDiv {} _ _) = False
     safeBasicOp (BinOp UDiv {} _ (Constant y)) = not $ zeroIsh y
     safeBasicOp (BinOp UDiv {} _ _) = False
-    safeBasicOp (BinOp UDivUp {} _ (Constant y)) = not $ zeroIsh y
-    safeBasicOp (BinOp UDivUp {} _ _) = False
+    safeBasicOp (BinOp UCeilDiv {} _ (Constant y)) = not $ zeroIsh y
+    safeBasicOp (BinOp UCeilDiv {} _ _) = False
     safeBasicOp (BinOp SMod {} _ (Constant y)) = not $ zeroIsh y
     safeBasicOp (BinOp SMod {} _ _) = False
     safeBasicOp (BinOp UMod {} _ (Constant y)) = not $ zeroIsh y
@@ -117,7 +138,6 @@ safeExp (BasicOp op) = safeBasicOp op
     safeBasicOp ConvOp {} = True
     safeBasicOp Scratch {} = True
     safeBasicOp Concat {} = True
-    safeBasicOp Reshape {} = True
     safeBasicOp Rearrange {} = True
     safeBasicOp Manifest {} = True
     safeBasicOp Iota {} = True
@@ -295,3 +315,12 @@ isNilLambda :: Lambda rep -> Bool
 isNilLambda lam =
   null (lambdaParams lam)
     && isIdentityLambda lam
+
+-- | Construct a name for a builtin function. This name will be recognised by
+-- 'isBuiltinName'.
+builtinName :: T.Text -> Name
+builtinName = nameFromText . ("builtin/" <>)
+
+-- | Is this a builtin name, and if so, what is the underlying name?
+isBuiltinName :: Name -> Maybe T.Text
+isBuiltinName v = "builtin/" `T.stripPrefix` nameToText v

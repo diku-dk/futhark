@@ -137,7 +137,7 @@ onEntryPoint ::
   Function op ->
   CompilerM op s (Maybe (C.Definition, (T.Text, Manifest.EntryPoint)))
 onEntryPoint _ _ _ (Function Nothing _ _ _ _) = pure Nothing
-onEntryPoint get_consts relevant_params fname (Function (Just (EntryPoint ename results args)) outputs inputs attrs _) = inNewFunction $ do
+onEntryPoint get_consts relevant_params fname (Function (Just (EntryPoint ename results args doc)) outputs inputs attrs _) = inNewFunction $ do
   let out_args = map (\p -> [C.cexp|&$id:(paramName p)|]) outputs
       in_args = map (\p -> [C.cexp|$id:(paramName p)|]) inputs
 
@@ -216,7 +216,8 @@ onEntryPoint get_consts relevant_params fname (Function (Just (EntryPoint ename 
             -- manifest and ImpCode.
             Manifest.entryPointOutput = outputManifest results,
             Manifest.entryPointInputs = map inputManifest args,
-            Manifest.entryPointAttrs = map prettyText (S.toList (unAttrs attrs))
+            Manifest.entryPointAttrs = map prettyText (S.toList (unAttrs attrs)),
+            Manifest.entryPointDoc = doc
           }
 
   pure $ Just (cdef, (nameToText ename, manifest))
@@ -235,14 +236,14 @@ onEntryPoint get_consts relevant_params fname (Function (Just (EntryPoint ename 
     vdType (OpaqueValue name _) =
       nameToText name
 
-    outputManifest (u, vd) =
+    outputManifest (o, vd) =
       Manifest.Output
         { Manifest.outputType = vdType vd,
-          Manifest.outputUnique = u == Unique
+          Manifest.outputFresh = o == Consume
         }
-    inputManifest ((v, u), vd) =
+    inputManifest ((v, o), vd) =
       Manifest.Input
         { Manifest.inputName = nameToText v,
           Manifest.inputType = vdType vd,
-          Manifest.inputUnique = u == Unique
+          Manifest.inputConsumed = o == Consume
         }

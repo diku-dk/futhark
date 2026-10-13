@@ -25,6 +25,7 @@ import Futhark.CodeGen.RTS.C (backendsWebGPUH)
 import Futhark.CodeGen.RTS.WGSL qualified as RTS
 import Futhark.CodeGen.RTS.WebGPU (serverWsJs, utilJs, valuesJs, wrappersJs)
 import Futhark.IR.GPUMem (GPUMem, Prog)
+import Futhark.Manifest qualified as Manifest
 import Futhark.MonadFreshNames
 import Futhark.Util (chunk)
 import Language.C.Quote.C qualified as C
@@ -413,7 +414,7 @@ compileProg version prog = do
       (Space "device", [Space "device", DefaultSpace])
       cliOptions
       prog'
-  let (js, exports) = jsBoilerplate prog' (GC.cJsonManifest c)
+  let (js, exports) = jsBoilerplate prog' (Manifest.manifestToJSON (GC.cManifest c))
   pure (ws, (c, js, exports))
   where
     operations :: GC.Operations HostOp ()

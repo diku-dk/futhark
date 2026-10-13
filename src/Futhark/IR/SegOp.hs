@@ -681,14 +681,13 @@ mapOnSegOpType ::
   Type ->
   m Type
 mapOnSegOpType _tv t@Prim {} = pure t
-mapOnSegOpType tv (Acc acc ispace ts u) =
+mapOnSegOpType tv (Acc acc ispace ts) =
   Acc
     <$> mapOnSegOpVName tv acc
     <*> traverse (mapOnSegOpSubExp tv) ispace
     <*> traverse (bitraverse (traverse (mapOnSegOpSubExp tv)) pure) ts
-    <*> pure u
-mapOnSegOpType tv (Array et shape u) =
-  Array et <$> traverse (mapOnSegOpSubExp tv) shape <*> pure u
+mapOnSegOpType tv (Array et shape o) =
+  Array et <$> traverse (mapOnSegOpSubExp tv) shape <*> pure o
 mapOnSegOpType _tv (Mem s) = pure $ Mem s
 
 rephraseBinOp ::
@@ -888,20 +887,46 @@ instance CanBeWise (SegOp lvl) where
       add =
         SegOpMapper pure (pure . informLambda) (pure . informLambda) (pure . informBody) pure pure
 
+-- | The element at the given index of an array literal with the given prim-typed
+-- elements, as a chain of conditionals. The index is assumed to be in bounds,
+-- so the last element is selected without testing for it.
+indexArrayLit ::
+  PrimType -> TPrimExp Int64 VName -> [PrimExp VName] -> Maybe (PrimExp VName)
+indexArrayLit t i = select 0
+  where
+    select _ [] = Nothing
+    select _ [x] = Just x
+    select j (x : xs) = do
+      y <- select (j + 1) xs
+      pure $ FunExp (condFun t) [untyped (i .==. fromInteger j), x, y] t
+
 instance (ASTRep rep) => ST.IndexOp (SegOp lvl rep) where
   indexOp vtable k (SegMap _ space _ kbody) is = do
     Returns ResultMaySimplify _ se <- maybeNth k $ bodyResult kbody
     guard $ length gtids <= length is
     let idx_table = M.fromList $ zip gtids $ map (ST.Indexed mempty . untyped) is
-        idx_table' = foldl' expandIndexedTable idx_table $ bodyStms kbody
     case se of
-      Var v -> M.lookup v idx_table'
+      Var v ->
+        M.lookup v $
+          foldl' expandIndexedTable idx_table $
+            dependedOn v (bodyStms kbody)
       _ -> Nothing
     where
       (gtids, _) = unzip $ unSegSpace space
       -- Indexes in excess of what is used to index through the
       -- segment dimensions.
       excess_is = drop (length gtids) is
+
+      -- The table entry for a variable depends only on the statements
+      -- that variable is (transitively) computed from, and computing an
+      -- entry is expensive, so skip the rest. See Note [Pruning the
+      -- index table].
+      dependedOn v = snd . foldr onStm (oneName v, [])
+        where
+          onStm stm (needed, acc)
+            | any ((`nameIn` needed) . patElemName) (patElems (stmPat stm)) =
+                (freeIn stm <> needed, stm : acc)
+            | otherwise = (needed, acc)
 
       expandIndexedTable table stm
         | [v] <- patNames $ stmPat stm,
@@ -919,6 +944,12 @@ instance (ASTRep rep) => ST.IndexOp (SegOp lvl rep) where
                     arr
                     (fixSlice (fmap isInt64 slice') excess_is)
              in M.insert v idx table
+        | [v] <- patNames $ stmPat stm,
+          BasicOp (ArrayLit ses (Prim t)) <- stmExp stm,
+          [i] <- excess_is,
+          Just (pes, cs) <- runWriterT $ mapM (primExpFromSubExpM (asPrimExp table)) ses,
+          Just pe <- indexArrayLit t i pes =
+            M.insert v (ST.Indexed (stmCerts stm <> cs) pe) table
         | otherwise =
             table
 
@@ -962,12 +993,43 @@ segOpBlocker space = do
   pure $
     Engine.hasFree bound_here
       `Engine.orIf` Engine.isOp
+      `Engine.orIf` isSlice
       `Engine.orIf` par_blocker
       `Engine.orIf` Engine.isConsumed
       `Engine.orIf` Engine.isConsuming
       `Engine.orIf` Engine.isDeviceMigrated
   where
     bound_here = namesFromList $ M.keys $ scopeOfSegSpace space
+    -- Hoisting out slicing is useless and potentially dangerous, as protecting
+    -- it can cause nonuniform parallelism.
+    isSlice _ _ (Let _ _ (BasicOp (Index _ slice))) =
+      sliceShape slice /= mempty
+    isSlice _ _ _ = False
+
+-- | We are willing to hoist potentially unsafe statements out of segops, but
+-- they must be protected by adding a branch on top of them.
+protectSegOpHoisted ::
+  (Engine.SimplifiableRep rep) =>
+  SegSpace ->
+  Engine.SimpleM rep (a, b, Stms (Wise rep)) ->
+  Engine.SimpleM rep (a, b, Stms (Wise rep))
+protectSegOpHoisted space m = do
+  (x, y, stms) <- m
+  ops <- asks $ Engine.protectHoistedOpS . fst
+  stms' <- runBuilder_ $ do
+    if not $ all (safeExp . stmExp) stms
+      then do
+        is_nonempty <- checkIfNonEmpty
+        mapM_ (Engine.protectIf ops (not . safeExp) is_nonempty) stms
+      else addStms stms
+  pure (x, y, stms')
+  where
+    checkIfNonEmpty = do
+      segop_size <-
+        letSubExp "segop_size"
+          =<< foldBinOp (Mul Int64 OverflowWrap) (intConst Int64 1) (segSpaceDims space)
+      letSubExp "segop_nonempty" . BasicOp $
+        CmpOp (CmpSlt Int64) (intConst Int64 0) segop_size
 
 simplifyKernelBody ::
   (Engine.SimplifiableRep rep, BodyDec rep ~ ()) =>
@@ -979,7 +1041,8 @@ simplifyKernelBody space (Body _ stms res) = do
 
   -- Ensure we do not try to use anything that is consumed in the result.
   (body_res, body_stms, hoisted) <-
-    Engine.localVtable (segSpaceSymbolTable space)
+    protectSegOpHoisted space
+      . Engine.localVtable (segSpaceSymbolTable space)
       . Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True})
       . Engine.enterLoop
       $ Engine.blockIf blocker stms
@@ -1011,8 +1074,9 @@ simplifySegBinOp ::
   Engine.SimpleM rep (SegBinOp (Wise rep), Stms (Wise rep))
 simplifySegBinOp phys_id (SegBinOp comm lam nes shape) = do
   (lam', hoisted) <-
-    Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True}) $
-      simplifyLambda (oneName phys_id) lam
+    Engine.enterLoop
+      . Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True})
+      $ simplifyLambda (oneName phys_id) lam
   shape' <- Engine.simplify shape
   nes' <- mapM Engine.simplify nes
   pure (SegBinOp comm lam' nes' shape', hoisted)
@@ -1024,8 +1088,9 @@ simplifySegPostOp ::
   Engine.SimpleM rep (SegPostOp (Wise rep), Stms (Wise rep))
 simplifySegPostOp space (SegPostOp lam) = do
   (lam', hoisted) <-
-    Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True}) $
-      simplifyLambda bound_here lam
+    Engine.enterLoop
+      . Engine.localVtable (\vtable -> vtable {ST.simplifyMemory = True})
+      $ simplifyLambda bound_here lam
   pure (SegPostOp lam', hoisted)
   where
     bound_here = namesFromList $ M.keys $ scopeOfSegSpace space
@@ -1445,3 +1510,22 @@ segOpReturns k@(SegScan {}) =
   extReturns <$> opType k
 segOpReturns (SegHist _ _ _ _ ops) =
   concat <$> mapM (mapM varReturns . histDest) ops
+
+-- Note [Pruning the index table]
+--
+-- The 'ST.IndexOp' instance for 'SegMap' answers the question "what is the
+-- value of element @is@ of the array produced by this kernel?". It does so by
+-- symbolically evaluating the kernel body into a table mapping each variable to
+-- a 'ST.Indexed', then looking up the variable returned by the kernel.
+--
+-- Only one entry of that table is ever read, and an entry depends solely on the
+-- entries of the variables that are free in the statement that binds it. Hence
+-- the answer is unchanged if we first drop every statement that the result does
+-- not transitively depend on, which is what 'dependedOn' does.
+--
+-- This matters because building an entry is expensive (it constructs a
+-- 'PrimExp' for the entire statement), while deciding whether a statement is
+-- depended upon is a set membership test and a set union. Kernel bodies are
+-- often large while the slice that computes any single result is small, and the
+-- simplifier asks this question once per indexing of the array, in every one of
+-- its many passes; without pruning, that is quadratic in the size of the kernel.

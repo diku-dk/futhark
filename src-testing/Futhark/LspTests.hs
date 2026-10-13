@@ -7,12 +7,14 @@
 module Futhark.LspTests (tests, main) where
 
 import Colog.Core (LogAction (LogAction))
+import Control.Applicative ((<|>))
 import Control.Concurrent (forkIO)
 import Control.Lens ((^.))
 import Control.Monad (zipWithM_)
 import Control.Monad.IO.Class (liftIO)
 import Data.Foldable (for_)
 import Data.Functor (void)
+import Data.List (sortOn)
 import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -20,27 +22,41 @@ import Futhark.CLI.LSP (serverDefinition)
 import Futhark.Fmt.Printer (fmtToText)
 import Language.Futhark.Parser.Monad (SyntaxError (..))
 import Language.LSP.Protocol.Lens (uri)
-import Language.LSP.Protocol.Message (SMethod (SMethod_WorkspaceApplyEdit))
+import Language.LSP.Protocol.Message
+  ( SMethod (SMethod_TextDocumentFormatting, SMethod_WindowShowMessage, SMethod_WorkspaceApplyEdit),
+    TNotificationMessage (TNotificationMessage),
+    TResponseError (TResponseError),
+    TResponseMessage (TResponseMessage),
+  )
 import Language.LSP.Protocol.Types
   ( CodeAction (..),
     CodeLens (CodeLens),
     Definition (Definition),
+    Diagnostic (..),
+    DiagnosticSeverity (DiagnosticSeverity_Error, DiagnosticSeverity_Warning),
+    DocumentFormattingParams (DocumentFormattingParams),
     FormattingOptions (FormattingOptions),
     Hover (Hover),
     InlayHint (..),
     InlayHintKind (InlayHintKind_Type),
+    LSPErrorCodes (LSPErrorCodes_RequestFailed),
     LanguageKind (LanguageKind_Custom),
     Location (..),
     MarkupContent (..),
     MarkupKind (MarkupKind_PlainText),
+    MessageType (MessageType_Error),
     Position (..),
     Range (..),
+    SemanticTokens (..),
+    ShowMessageParams (ShowMessageParams),
     TextDocumentIdentifier,
     type (|?) (..),
   )
 import Language.LSP.Server (runServerWithHandles)
 import Language.LSP.Test
   ( Session,
+    SessionConfig (..),
+    anyMessage,
     createDoc,
     defaultConfig,
     documentContents,
@@ -53,17 +69,23 @@ import Language.LSP.Test
     getCodeActions,
     getDefinitions,
     getHover,
+    getSemanticTokens,
     message,
+    request,
     runSessionWithHandles,
+    waitForDiagnostics,
   )
 import NeatInterpolation (text)
 import System.IO (hClose)
 import System.Process (createPipe)
 import Test.Tasty (TestName, TestTree, defaultMain, testGroup)
-import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
+import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
 runServerSessionPair :: Session a -> IO a
-runServerSessionPair session = do
+runServerSessionPair = runServerSessionPairWith defaultConfig
+
+runServerSessionPairWith :: SessionConfig -> Session a -> IO a
+runServerSessionPairWith config session = do
   (serverIn, clientOut) <- createPipe
   (clientIn, serverOut) <- createPipe
   futharkServer <- serverDefinition
@@ -74,7 +96,7 @@ runServerSessionPair session = do
     forkIO . void $
       runServerWithHandles ignoreLog ignoreLog serverIn serverOut futharkServer
 
-  result <- runSessionWithHandles clientOut clientIn defaultConfig fullLatestClientCaps "." session
+  result <- runSessionWithHandles clientOut clientIn config fullLatestClientCaps "." session
 
   for_ [serverIn, clientOut, clientIn, serverOut] hClose
 
@@ -88,6 +110,41 @@ createMainDoc = createDoc "main.fut" futharkLanguage
 
 serverTestCase :: TestName -> Session () -> TestTree
 serverTestCase testName = testCase testName . runServerSessionPair
+
+testDiagnosticsOnOpen :: TestTree
+testDiagnosticsOnOpen = serverTestCase "Diagnostics on open" $ do
+  _ <- createMainDoc "def main = 1i32 + true"
+  diags <- waitForDiagnostics
+  liftIO $ map severityAndRange diags @?= [(Just DiagnosticSeverity_Error, expectedRange)]
+  where
+    expectedRange =
+      Range
+        { _start = Position {_line = 0, _character = 18},
+          _end = Position {_line = 0, _character = 22}
+        }
+
+    severityAndRange Diagnostic {..} = (_severity, _range)
+
+testWarningsWithErrors :: TestTree
+testWarningsWithErrors = serverTestCase "Warnings with errors" $ do
+  _ <- createMainDoc "def f (x: i32) = let y = x in x\ndef g (x: i32) = x + true"
+  diags <- waitForDiagnostics
+  liftIO $
+    sortOn fst (map lineAndSeverity diags)
+      @?= [(0, Just DiagnosticSeverity_Warning), (1, Just DiagnosticSeverity_Error)]
+  where
+    lineAndSeverity Diagnostic {..} = (_line (_start _range), _severity)
+
+testUnlocatedError :: TestTree
+testUnlocatedError = testCase "Error without location" . runServerSessionPairWith config $ do
+  _ <- createDoc "main.txt" (LanguageKind_Custom "Futhark") "def main = 0i32"
+  TNotificationMessage _ _ (ShowMessageParams message_type msg) <- showMessage
+  liftIO $ message_type @?= MessageType_Error
+  liftIO $ assertBool "Mentions extension" $ ".fut extension" `T.isInfixOf` msg
+  where
+    -- By default, lsp-test discards window/showMessage.
+    config = defaultConfig {ignoreLogNotifications = False}
+    showMessage = message SMethod_WindowShowMessage <|> (anyMessage *> showMessage)
 
 testHoverInformation :: TestTree
 testHoverInformation = serverTestCase "Hover" $ do
@@ -107,7 +164,7 @@ testHoverInformation = serverTestCase "Hover" $ do
     expectedRange =
       Range
         { _start = Position {_line = 0, _character = 30},
-          _end = Position {_line = 0, _character = 34}
+          _end = Position {_line = 0, _character = 33}
         }
 
 testDefinition :: TestTree
@@ -122,7 +179,7 @@ testDefinition = serverTestCase "Go To Definition" $ do
               { _uri = docIdent ^. uri,
                 _range =
                   Range
-                    { _end = Position 0 15,
+                    { _end = Position 0 14,
                       _start = Position 0 0
                     }
               }
@@ -141,6 +198,12 @@ testDefinition = serverTestCase "Go To Definition" $ do
         { _line = 1,
           _character = 12
         }
+
+testSemanticTokens :: TestTree
+testSemanticTokens = serverTestCase "Semantic tokens" $ do
+  docIdent <- createMainDoc "def main = 0i32"
+  tokens <- getSemanticTokens docIdent
+  liftIO $ tokens @?= InL (SemanticTokens Nothing [])
 
 testFormatting :: TestTree
 testFormatting = serverTestCase "Formatting" $ do
@@ -164,12 +227,28 @@ testFormatting = serverTestCase "Formatting" $ do
           0i32
       |]
 
+testFormattingSyntaxError :: TestTree
+testFormattingSyntaxError = serverTestCase "Formatting syntax error" $ do
+  docIdent <- createMainDoc "def main = ("
+  TResponseMessage _ _ result <-
+    request SMethod_TextDocumentFormatting $
+      DocumentFormattingParams Nothing docIdent formattingOptions
+  liftIO $ case result of
+    Left (TResponseError code msg _) -> do
+      code @?= InL LSPErrorCodes_RequestFailed
+      assertBool ("Unexpected message: " <> T.unpack msg) $
+        "main.fut:" `T.isInfixOf` msg
+    Right edits ->
+      assertFailure $ "Expected an error, got: " <> show edits
+  where
+    formattingOptions = FormattingOptions 0 False Nothing Nothing Nothing
+
 main :: IO ()
 main = defaultMain testEvaluationComment
 
-testEvaluationComment :: TestTree
-testEvaluationComment = serverTestCase "Evaluation Comment" $ do
-  docIdent <- createMainDoc mainContents
+-- | Evaluate the single evaluation comment in the document.
+evaluateComment :: TextDocumentIdentifier -> Session ()
+evaluateComment docIdent = do
   lensCommand <-
     getAndResolveCodeLenses docIdent >>= \case
       [CodeLens _ (Just command) _] -> pure command
@@ -178,8 +257,12 @@ testEvaluationComment = serverTestCase "Evaluation Comment" $ do
   executeCommand lensCommand
 
   -- this is important, it crashes with an IOError otherwise
-  _workspaceEdit <- message SMethod_WorkspaceApplyEdit
+  void $ message SMethod_WorkspaceApplyEdit
 
+testEvaluationComment :: TestTree
+testEvaluationComment = serverTestCase "Evaluation Comment" $ do
+  docIdent <- createMainDoc mainContents
+  evaluateComment docIdent
   newContents <- documentContents docIdent
   liftIO $ newContents @?= expectedContents
   where
@@ -191,6 +274,18 @@ testEvaluationComment = serverTestCase "Evaluation Comment" $ do
       def x = 42i32
       -- >>> x + 5
       |]
+
+testEvaluationCommentReplacesResult :: TestTree
+testEvaluationCommentReplacesResult =
+  serverTestCase "Evaluation Comment replaces result" $ do
+    docIdent <- createMainDoc mainContents
+    evaluateComment docIdent
+    evaluateComment docIdent
+    newContents <- documentContents docIdent
+    liftIO $ newContents @?= expectedContents
+  where
+    mainContents = "def x = 42i32\n-- >>> x + 5\ndef y = x\n"
+    expectedContents = "def x = 42i32\n-- >>> x + 5\n-- 47\ndef y = x\n"
 
 fullRange :: Range
 fullRange =
@@ -356,10 +451,16 @@ tests :: TestTree
 tests =
   testGroup
     "Futhark.LspTests"
-    [ testHoverInformation,
+    [ testDiagnosticsOnOpen,
+      testWarningsWithErrors,
+      testUnlocatedError,
+      testHoverInformation,
       testDefinition,
+      testSemanticTokens,
       testFormatting,
+      testFormattingSyntaxError,
       testEvaluationComment,
+      testEvaluationCommentReplacesResult,
       testInlayTypeHint,
       testTypeCompletionCodeAction
     ]

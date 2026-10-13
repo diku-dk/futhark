@@ -14,7 +14,6 @@ roots = [
   , "^Futhark.Analysis.PrimExp"
   , "^Futhark.Builder"
   , "^Futhark.Construct.eConvOp"
-  , "^Futhark.Pass.ExtractKernels.Distribution.ppKernelNest"
   , "^Futhark.Representation.AST.Attributes.Types.int16"
   , "^Futhark.Representation.AST.Attributes.Types.float32"
   , "^Futhark.Representation.AST.Attributes.Types.float64"

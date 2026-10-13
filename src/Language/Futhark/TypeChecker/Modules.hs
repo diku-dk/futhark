@@ -58,19 +58,19 @@ substituteTypesInBoundV substs (BoundV tps t) =
 -- | All names defined anywhere in the 'Env'.
 allNamesInEnv :: Env -> S.Set VName
 allNamesInEnv (Env vtable ttable stable modtable _names) =
-  S.fromList
-    ( M.keys vtable
-        ++ M.keys ttable
-        ++ M.keys stable
-        ++ M.keys modtable
-    )
-    <> mconcat
-      ( map allNamesInMTy (M.elems stable)
-          ++ map allNamesInMod (M.elems modtable)
-          ++ map allNamesInType (M.elems ttable)
-      )
+  S.unions
+    [ M.keysSet vtable,
+      M.keysSet ttable,
+      M.keysSet stable,
+      M.keysSet modtable,
+      foldMap allNamesInVal (M.elems vtable),
+      foldMap allNamesInMTy (M.elems stable),
+      foldMap allNamesInMod (M.elems modtable),
+      foldMap allNamesInType (M.elems ttable)
+    ]
   where
     allNamesInType (TypeAbbr _ ps _) = S.fromList $ map typeParamName ps
+    allNamesInVal (BoundV ps _) = S.fromList $ map typeParamName ps
 
 allNamesInMod :: Mod -> S.Set VName
 allNamesInMod (ModEnv env) = allNamesInEnv env
@@ -148,17 +148,17 @@ newNamesForMTy orig_mty = do
             (substituteInMod mod)
             (substituteInMTy substs mty)
 
-        substituteInTypeBinding (TypeAbbr l ps (RetType dims t)) =
-          TypeAbbr l (map substituteInTypeParam ps) $ RetType dims $ substituteInType t
+        substituteInTypeBinding (TypeAbbr l ps t) =
+          TypeAbbr l (map substituteInTypeParam ps) $ substituteInRetType t
 
         substituteInTypeParam (TypeParamDim p loc) =
           TypeParamDim (substitute p) loc
         substituteInTypeParam (TypeParamType l p loc) =
           TypeParamType l (substitute p) loc
 
-        substituteInScalarType :: ScalarTypeBase Size u -> ScalarTypeBase Size u
-        substituteInScalarType (TypeVar u v targs) =
-          TypeVar u (substituteInQualName v) $ map substituteInTypeArg targs
+        substituteInScalarType :: ScalarTypeBase Size o -> ScalarTypeBase Size o
+        substituteInScalarType (TypeVar o v targs) =
+          TypeVar o (substituteInQualName v) $ map substituteInTypeArg targs
         substituteInScalarType (Prim t) =
           Prim t
         substituteInScalarType (Record ts) =
@@ -168,13 +168,14 @@ newNamesForMTy orig_mty = do
         substituteInScalarType (Arrow als v d1 t1 (RetType dims t2)) =
           Arrow als v d1 (substituteInType t1) $ RetType dims $ substituteInType t2
 
-        substituteInRetType :: RetTypeBase Size u -> RetTypeBase Size u
-        substituteInRetType (RetType ext t) = RetType ext $ substituteInType t
+        substituteInRetType :: RetTypeBase Size o -> RetTypeBase Size o
+        substituteInRetType (RetType ext t) =
+          RetType (map substitute ext) $ substituteInType t
 
-        substituteInType :: TypeBase Size u -> TypeBase Size u
+        substituteInType :: TypeBase Size o -> TypeBase Size o
         substituteInType (Scalar t) = Scalar $ substituteInScalarType t
-        substituteInType (Array u shape t) =
-          Array u (substituteInShape shape) $ substituteInScalarType t
+        substituteInType (Array o shape t) =
+          Array o (substituteInShape shape) $ substituteInScalarType t
 
         substituteInShape (Shape ds) = Shape $ map substituteInExp ds
 

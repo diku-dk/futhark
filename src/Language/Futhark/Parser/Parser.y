@@ -101,6 +101,7 @@ import Language.Futhark.Parser.Monad
       '^'             { L $$ HAT }
       '~'             { L $$ TILDE }
       '|'             { L $$ PIPE  }
+      '$'             { L $$ DOLLAR }
 
       '+...'          { L _ (SYMBOL Plus _ _) }
       '-...'          { L _ (SYMBOL Minus _ _) }
@@ -469,7 +470,7 @@ TypeExpDims :: { [Name] }
 
 TypeExpTerm :: { UncheckedTypeExp }
          : '*' TypeExpTerm
-           { TEUnique $2 (srcspan $1 $>) }
+           { TEStar $2 (srcspan $1 $>) }
          | TypeExpApply %prec typeprec { $1 }
          | SumClauses %prec sumprec
            { let (cs, loc) = $1 in TESum cs (srclocOf loc) }
@@ -930,6 +931,7 @@ AttrAtom :: { (AttrAtom Name, Loc) }
           : id     { let L loc (ID s) =     $1 in (AtomName s, loc) }
           | intlit { let L loc (INTLIT x) = $1 in (AtomInt x, loc) }
           | natlit { let L loc (NATLIT _ x) = $1 in (AtomInt x, loc) }
+          | '$' id { let L loc (ID s) = $2 in (AtomVar s, locOf (srcspan $1 loc)) }
 
 AttrInfo :: { AttrInfo Name }
          : AttrAtom         { let (x,y) = $1 in AttrAtom x (srclocOf y) }

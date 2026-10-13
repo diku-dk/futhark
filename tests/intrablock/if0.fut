@@ -6,7 +6,7 @@
 -- }
 
 def main (bs: []bool) (xss: [][]i32) =
-  #[incremental_flattening(only_intra)]
+  #[flattening(only_intra)]
   map2 (\b xs ->
           if b
           then map (+ 2) xs

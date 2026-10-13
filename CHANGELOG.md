@@ -5,13 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.27.0]
+## [0.29.0]
 
 ### Added
-
-* The `hip` backend previously simulated `f16` operations with `f32`, but now it
-  uses the hardware support for `f16`, similarly to the CUDA backend.
-  Implemented by Jérôme Wagner. (#2470)
 
 ### Removed
 
@@ -19,7 +15,201 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* `futhark lsp` now handles `textDocument/semanticTokens/full` in a trivial way
+  to work around a bug in the `lsp` library.
+
+* `futhark lsp` had an off-by-one error when computing column offsets.
+
+## [0.28.1]
+
+### Added
+
+* Attributes may now also reference variables in scope, by prefixing a name with
+  `$`. There is no builtin use for this feature.
+
+* The "uniqueness" terminology for in-place updates has now been completely
+  replaced with the notions of "consumption" and "freshness".
+
+* `futhark bench`: JSON files now contain metadata about the configuration and
+  execution environment (#2381). Work by Yifan Chen.
+
+* New attribute: `cpu_function`.
+
+* Support for ISPC 1.31 (and that is now also the minimum version). (#2557)
+
+* `futhark repl` and `futhark eval` can now run code available via a compiled
+  server executable.
+
+* `futhark test`: `auto output` now works with `script input`.
+
+### Removed
+
+* The `futhark script` command has been removed.
+
+### Changed
+
+* FutharkScript has been replaced by ordinary Futhark. The magical builtins have
+  been replaced by magical functions, e.g., `$loadbytes` is now `io.loadbytes`.
+  Obviously only works in interpreted code. Futhark is not an exact
+  functionality match for FutharkScript, but most things should be able to work.
+
+* `futhark literate` no longer implicitly marks functions used in directives as
+  entry points. Use ``entry`` when you actually want compiled entry points.
+
+* The consumption/aliasing system has been reimplemented. The main change is
+  that annotated freshness on functions now takes precedence even if a more
+  fresh type is inferred - some existing programs may need `*` added to their
+  return type. Beyond that, the system should generally just be more flexible.
+
+### Fixed
+
+* Python input reading no longer hangs on an unsuffixed `0`, an unsuffixed
+  hexadecimal integer, or a line comment at EOF.
+
+* File names are now always encoded as UTF-8. Non-UTF-8 locales are not
+  supported.
+
+* Propagation of flattening attributes in some cases.
+
+* GPU code generation now supports reductions with more than 25 operators.
+
+* `reduce` and `reduce_comm` now produce alias-free results.
+
+* AD is now supported for scans with array operators (#2208). Work by Yifan Chen.
+
+* AD operators now return alias-free results.
+
+* Shared memory histograms no longer occasionally exceed the shared memory
+  limit when chunking the buckets.
+
+* Tiling would produce invalid code in some cases.
+
+* Mishandling of abstract types could lead to compiler crash. (#2538)
+
+* Conversion of floating-point numbers to integers would trigger UB whenever the
+  number was too large to fit in the integer. (#2543)
+
+* Horizontal fusion of multi-dimensional histograms. (#2555)
+
+* OpenCL profiling reports on macOS no longer undercount event durations by
+  about 42x: Apple's OpenCL reports Mach time units, not nanoseconds.
+
+* Internalisation of reduce_by_index_3d with array-valued elements. (#2554)
+
+* A compiler crash caused by size-polymorphic recursive functions. (#2569)
+
+* Overzealous copy removal in conjunction with AD could result in a compiler
+  crash. (#2567)
+
+* Short-circuiting of function parameters failed to take layout into account.
+  (#2568)
+
+* `futhark literate` now handles indented comments. (#2521)
+
+* Various holes in alias analysis (#1675, #2531).
+
+## [0.27.1]
+
+### Added
+
+* Rewrote partition to be a single kernel.
+
+* The type checker has been rewritten, with contributions from Jacob Aleksandar
+  Siegumfeldt, Laust Kjæp Dengsøe, and Robert Schenck.
+
+* Flattening has been rewritten, with the majority of the work by Amirreza
+  Hashemi. The main consequence is that nonuniform nested parallelism is now
+  supported, although it is not yet necessarily efficient in all cases. More
+  details: https://futhark-lang.org/blog/2026-07-31-full-flattening.html
+
+* Futhark now supports recursive functions, with various restrictions.
+
+* The `incremental_flattening` attributes are now just named `flattening`,
+  although the old name continues to work.
+
+* A simplification rule for branches that return common results (#2526).
+
+### Changed
+
+* Local functions are no longer let-generalised (i.e., made polymorphic).
+  Explicitly polymorphic local functions are still supported.
+
+### Fixed
+
+* Filter now uses the predicate once per element instead of twice.
+
+* Fixed bug in simiplification engine, various SOACs needed to specify
+  the depth of lambdas, scans, and reduces.
+
+* In-place updates with a slice that covers the entire array, but reorders its
+  elements (such as a reversal), were simplified into a copy, discarding the
+  reordering. Among other things this produced wrong gradients for `reverse`
+  (#2522).
+
+* A case where complex sizes referring to explicit parameters were mishandled by
+  monomorphisation (#2230).
+
+* An issue where `#[scratch]` would apply to subexpressions in undesirable ways,
+  changing the type of the expression at the IR level.
+
+* Simplified fusibility check by removing redundant accumulator overlap check
+  and fixed fusibility check by giving the correct number of elements.
+
+* A compiler crash due to missing double buffering inside sequential code
+  migrated to GPU. (#2513)
+
+* Atomics now use device-wide memory scope when compiling for OpenCL C 2.0, or
+  OpenCL C 3.0 with the required atomic features. OpenCL C 2.0 is selected
+  automatically for Rusticl on Asahi; elsewhere it must be selected explicitly.
+  This fixes incorrect results from cross-workgroup operations
+  ([#734](https://github.com/diku-dk/futhark/issues/734)).
+
+* An exotic case in reverse-mode differentiation of accumulators, which in
+  practice would only occur in cases of unrolled `scatter`s.
+
+## [0.26.4]
+
+### Added
+
+* `futhark repl` has a new command: `:string`.
+
+* `futhark benchcmp` has new options `--sort-by` and `--order` for
+  controlling the order in which program groups are printed.
+  `--sort-by=significant` sorts by number of statistically significant
+  regressions, `--sort-by=geomean-significant` and
+  `--sort-by=geomean-all` sort by geometric mean speedup over
+  significant or all datasets respectively.  `--order=worst-first`
+  (default) surfaces regressions at the top; `--order=best-first`
+  surfaces improvements.  The default remains unsorted (alphabetical).
+
+* The `hip` backend previously simulated `f16` operations with `f32`, but now it
+  uses the hardware support for `f16`, similarly to the CUDA backend.
+  Implemented by Jérôme Wagner. (#2470)
+
+* Vector AD, exposed through the functions `jmp` and `mjp`.
+
+* All opaque values available over the C API can now be decomposed into their
+  constituents.
+
+* The manifest now contains documentation for entry points and opaque types.
+
+### Fixed
+
+* Non-exhaustive pattern match warnings were not always emitted when wildcard
+  patterns and explicit constructors were mixed. (#2483)
+
 * Invalid fusion that could cause compiler crash. (#2474)
+
+* GPU code generation of segmented reductions with array operands. (#2227,
+  properly this time, and #2482)
+
+* Use ascripted element type in API functions for arrays of records. (#2485)
+
+* Consumption checking of certain local polymorphic functions (in practice,
+  polymorphic functions that can only be written via holes). (#2488)
+
+* A regression in fusion of forms such as `scatter dest (flatten inds) (flatten
+  vals)`. (#2452)
 
 ## [0.26.3]
 
@@ -405,6 +595,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Reverse mode AD now handles sequential streams. (#2256)
 
+* Invalid simplification in conjunction with array updates, which could crash
+  the compiler. (#2566)
+
+* Invalid short-circuiting could result in compiler crashes and memory errors.
+  (#2565)
+
+* Invalid copy removal could crash the compiler. (#2564)
+
 ## [0.25.29]
 
 ### Fixed
@@ -524,7 +722,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `futhark profile` now supports multiple JSON files.
 
-* `futhark fmt`, by William Due and Therese Lyngby.
+* `futhark fmt`, by Lilje Due and Therese Lyngby.
 
 * Lambdas can now be passed as the last argument to a function application.
 
@@ -1208,7 +1406,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Datasets used in `futhark test` and `futhark bench` can now be named
   (#1859).
 
-* New command `futhark benchcmp` by William Due.
+* New command `futhark benchcmp` by Lilje Due.
 
 ### Changed
 

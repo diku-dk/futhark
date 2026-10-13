@@ -36,7 +36,7 @@ import Futhark.LSP.PositionMapping
     toStalePos,
   )
 import Futhark.LSP.State (State (..), getStaleContent, getStaleMapping)
-import Futhark.Util.Loc (Loc (Loc, NoLoc), Pos (Pos), contains, locOf)
+import Futhark.Util.Loc (Loc (Loc, NoLoc), Pos (Pos), locOf)
 import Futhark.Util.Pretty (prettyText)
 import Language.Futhark.Core (VName, isBuiltinLoc)
 import Language.Futhark.Query
@@ -153,19 +153,13 @@ computeMapping _ _ = pure Nothing
 posToUri :: Pos -> Uri
 posToUri (Pos file _ _ _) = filePathToUri file
 
--- Futhark's parser has a slightly different notion of locations than
--- LSP; so we tweak the positions here.
-getStartPos :: Pos -> Position
-getStartPos (Pos _ l c _) =
+toLspPosition :: Pos -> Position
+toLspPosition (Pos _ l c _) =
   Position (toEnum l - 1) (toEnum c - 1)
-
-getEndPos :: Pos -> Position
-getEndPos (Pos _ l c _) =
-  Position (toEnum l - 1) (toEnum c)
 
 -- | Create an LSP 'Range' from a Futhark 'Loc'.
 rangeFromLoc :: Loc -> Range
-rangeFromLoc (Loc start end) = Range (getStartPos start) (getEndPos end)
+rangeFromLoc (Loc start end) = Range (toLspPosition start) (toLspPosition end)
 rangeFromLoc NoLoc = Range (Position 0 0) (Position 0 5) -- only when file not found, throw error after moving to vfs
 
 -- | Transform VFS to a map of file paths to file contents.
@@ -206,11 +200,11 @@ filterByLspRange mapping range filepath f t = do
   posEnd <- toStalePos mapping $ mkPos l2 c2
   pure $
     F.toList t
-      & filter (isInRange (Loc posStart posEnd) . f)
+      & filter (isInRange posStart posEnd . f)
   where
-    isInRange locRange pos = case pos of
+    isInRange range_start range_end loc = case loc of
       NoLoc -> False
-      Loc start _ -> locRange `contains` start
+      Loc start _ -> start >= range_start && start <= range_end
     -- increment by one: Pos counts from one onwards, LSP starts at zero
     mkPos :: UInt -> UInt -> Pos
     mkPos l c = Pos filepath (1 + fromIntegral l) (1 + fromIntegral c) (-1)

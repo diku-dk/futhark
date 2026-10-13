@@ -79,20 +79,19 @@ removeUnnecessaryCopy (vtable, used) (Pat [d]) aux (Replicate (Shape []) (Var v)
       Simplify $ auxing aux $ letBindNames [patElemName d] $ BasicOp $ SubExp $ Var v
   where
     v_not_used_again = not (v `UT.used` used)
-    v_is_fresh = v `ST.lookupAliases` vtable == mempty
+    -- A parameter has no aliases, but is not fresh: it is the array of
+    -- whoever supplied it, so the result must not come to alias it.
+    v_is_fresh =
+      isJust (ST.lookupStm v vtable) && v `ST.lookupAliases` vtable == mempty
     -- We need to make sure we can even consume the original.  The big
     -- missing piece here is that we cannot do copy removal inside of
     -- 'map' and other SOACs, but that is handled by SOAC-specific rules.
     consumable = fromMaybe False $ do
       e <- ST.lookup v vtable
       guard $ ST.entryDepth e == ST.loopDepth vtable
-      consumableStm e `mplus` consumableFParam e
+      (True <$ guard v_is_fresh) `mplus` consumableFParam e
     consumableFParam =
-      Just . maybe False (unique . declTypeOf) . ST.entryFParam
-    consumableStm e = do
-      void $ ST.entryStm e -- Must be a stm.
-      guard v_is_fresh
-      pure True
+      Just . maybe False (consuming . declTypeOf) . ST.entryFParam
 removeUnnecessaryCopy _ _ _ _ = Skip
 
 constantFoldPrimFun :: (BuilderOps rep) => TopDownRuleGeneric rep
@@ -145,7 +144,7 @@ toScratch _ _ = Skip
 
 simplifyIndex :: (BuilderOps rep) => BottomUpRuleBasicOp rep
 simplifyIndex (vtable, used) pat@(Pat [pe]) aux (Index idd inds)
-  | Just m <- simplifyIndexing vtable seType idd inds consumed consuming =
+  | Just m <- simplifyIndexing vtable seType idd inds consumed consuming' =
       Simplify $ certifying (stmAuxCerts aux) $ do
         res <- m
         attributing (stmAuxAttrs aux) $ case res of
@@ -154,8 +153,8 @@ simplifyIndex (vtable, used) pat@(Pat [pe]) aux (Index idd inds)
           IndexResult extra_cs idd' inds' ->
             certifying extra_cs $ letBindNames (patNames pat) $ BasicOp $ Index idd' inds'
   where
-    consuming = (`UT.isConsumed` used)
-    consumed = consuming $ patElemName pe
+    consuming' = (`UT.isConsumed` used)
+    consumed = consuming' $ patElemName pe
     seType (Var v) = ST.lookupType v vtable
     seType (Constant v) = Just $ Prim $ primValueType v
 simplifyIndex _ _ _ _ = Skip
@@ -231,7 +230,7 @@ elimUpdates get_rid_of = flip runState mempty . onBody
       pure body {bodyStms = stms'}
     onStms = traverse onStm
     onStm (Let pat@(Pat [PatElem _ dec]) aux (BasicOp (UpdateAcc _ acc _ _)))
-      | Acc c _ _ _ <- typeOf dec,
+      | Acc c _ _ <- typeOf dec,
         c `elem` get_rid_of = do
           modify (insert c)
           pure $ Let pat aux $ BasicOp $ SubExp $ Var acc

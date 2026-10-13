@@ -40,7 +40,7 @@ no_trailing_blank_lines() {
 
 file="$1"
 
-if grep -E -n " +$" "$file"; then
+if grep -I -E -n " +$" "$file"; then
     echo
     echo "${cyan}Trailing whitespace in $file:${NC}"
     echo "$output"

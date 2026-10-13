@@ -62,7 +62,7 @@ def gfft [n] (xs: [n]complex) : [n]complex =
 
 def fft3 [m] [n] [k] (A: [m][n][k]complex) =
   #[unsafe]
-  #[incremental_flattening(only_inner)]
+  #[flattening(only_inner)]
   tabulate_2d n k (\i j -> gfft A[:, i, j])
 
 entry main grid = fromReal3d grid |> fft3 |> toReal3d

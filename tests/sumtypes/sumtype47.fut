@@ -1,6 +1,6 @@
 -- ==
 -- tags { no_webgpu }
--- error: cannot match
+-- error: differ in arity
 
 type t = #foo f64
 

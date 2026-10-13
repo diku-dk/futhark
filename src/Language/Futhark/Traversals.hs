@@ -22,6 +22,7 @@ module Language.Futhark.Traversals
   ( ASTMapper (..),
     ASTMappable (..),
     identityMapper,
+    traversePat,
     bareExp,
   )
 where
@@ -74,7 +75,7 @@ instance ASTMappable (AppExpBase Info VName) where
     Match <$> mapOnExp tv e <*> astMap tv cases <*> pure loc
   astMap tv (Apply f args loc) = do
     f' <- mapOnExp tv f
-    args' <- traverse (traverse $ mapOnExp tv) args
+    args' <- traverse onArg args
     -- Safe to disregard return type because existentials cannot be
     -- instantiated here, as the return is necessarily a function.
     pure $ case f' of
@@ -82,6 +83,8 @@ instance ASTMappable (AppExpBase Info VName) where
         Apply f_inner (args_inner <> args') loc
       _ ->
         Apply f' args' loc
+    where
+      onArg (ext, e) = (ext,) <$> mapOnExp tv e
   astMap tv (LetPat sizes pat e body loc) =
     LetPat sizes <$> astMap tv pat <*> mapOnExp tv e <*> mapOnExp tv body <*> pure loc
   astMap tv (LetFun name (tparams, params, ret, t, e) body loc) =
@@ -105,13 +108,15 @@ instance ASTMappable (AppExpBase Info VName) where
     where
       mapStep (UpdateStepSlice slice) = UpdateStepSlice <$> mapM (astMap tv) slice
       mapStep (UpdateStepField f) = pure $ UpdateStepField f
-  astMap tv (BinOp (fname, fname_loc) t (x, xext) (y, yext) loc) =
+  astMap tv (BinOp (fname, fname_loc) t x y loc) =
     BinOp
       <$> ((,) <$> mapOnName tv fname <*> pure fname_loc)
       <*> traverse (mapOnStructType tv) t
-      <*> ((,) <$> mapOnExp tv x <*> pure xext)
-      <*> ((,) <$> mapOnExp tv y <*> pure yext)
+      <*> onArg x
+      <*> onArg y
       <*> pure loc
+    where
+      onArg (e, ext) = (,ext) <$> mapOnExp tv e
   astMap tv (Loop sparams mergepat loopinit form loopbody loc) =
     Loop sparams
       <$> astMap tv mergepat
@@ -246,8 +251,8 @@ instance ASTMappable (TypeExp (ExpBase Info VName) VName) where
     TERecord <$> traverse (traverse $ astMap tv) ts <*> pure loc
   astMap tv (TEArray te dim loc) =
     TEArray <$> astMap tv te <*> astMap tv dim <*> pure loc
-  astMap tv (TEUnique t loc) =
-    TEUnique <$> astMap tv t <*> pure loc
+  astMap tv (TEStar t loc) =
+    TEStar <$> astMap tv t <*> pure loc
   astMap tv (TEApply t1 t2 loc) =
     TEApply <$> astMap tv t1 <*> astMap tv t2 <*> pure loc
   astMap tv (TEArrow v t1 t2 loc) =
@@ -291,11 +296,11 @@ traverseScalarType _ _ _ (Prim t) = pure $ Prim t
 traverseScalarType f g h (Record fs) = Record <$> traverse (traverseType f g h) fs
 traverseScalarType f g h (TypeVar als t args) =
   TypeVar <$> h als <*> f t <*> traverse (traverseTypeArg f g) args
-traverseScalarType f g h (Arrow als v u t1 (RetType dims t2)) =
+traverseScalarType f g h (Arrow als v o t1 (RetType dims t2)) =
   Arrow
     <$> h als
     <*> pure v
-    <*> pure u
+    <*> pure o
     <*> traverseType f g pure t1
     <*> (RetType dims <$> traverseType f g pure t2)
 traverseScalarType f g h (Sum cs) =
@@ -324,7 +329,7 @@ instance ASTMappable StructType where
 instance ASTMappable ParamType where
   astMap tv = traverseType (mapOnName tv) (mapOnExp tv) pure
 
-instance ASTMappable (TypeBase Size Uniqueness) where
+instance ASTMappable (TypeBase Size Freshness) where
   astMap tv = traverseType (mapOnName tv) (mapOnExp tv) pure
 
 instance ASTMappable ResRetType where
@@ -334,6 +339,8 @@ instance ASTMappable (IdentBase Info VName StructType) where
   astMap tv (Ident name (Info t) loc) =
     Ident name <$> (Info <$> mapOnStructType tv t) <*> pure loc
 
+-- | Traverse the types of a pattern, and the expressions in its type
+-- ascriptions.
 traversePat ::
   (Monad m) =>
   (t1 -> m t2) ->
@@ -449,7 +456,7 @@ bareTypeExp (TEParens te loc) = TEParens (bareTypeExp te) loc
 bareTypeExp (TETuple tys loc) = TETuple (map bareTypeExp tys) loc
 bareTypeExp (TERecord fs loc) = TERecord (map (second bareTypeExp) fs) loc
 bareTypeExp (TEArray size ty loc) = TEArray (bareSizeExp size) (bareTypeExp ty) loc
-bareTypeExp (TEUnique ty loc) = TEUnique (bareTypeExp ty) loc
+bareTypeExp (TEStar ty loc) = TEStar (bareTypeExp ty) loc
 bareTypeExp (TEApply ty ta loc) = TEApply (bareTypeExp ty) (bareTypeArgExp ta) loc
   where
     bareTypeArgExp (TypeArgExpSize size) =

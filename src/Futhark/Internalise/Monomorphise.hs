@@ -50,7 +50,7 @@ import Language.Futhark
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Types
 
-i64 :: TypeBase dim als
+i64 :: TypeBase dim o
 i64 = Scalar $ Prim $ Signed Int64
 
 -- The monomorphization monad reads 'PolyBinding's and writes
@@ -178,6 +178,7 @@ type Lifts = M.Map (VName, MonoType) (VName, InferSizeArgs)
 data MonoState = MonoState
   { sVNameSource :: !VNameSource,
     sExpReplacements :: ExpReplacements,
+    sAnySizes :: [(ReplacedExp, Int)],
     sLifts :: Lifts,
     sLiftedNames :: S.Set VName,
     sValBinds :: [ValBind]
@@ -205,7 +206,7 @@ runMonoM src (MonoM m) =
   )
   where
     ((), final_state) = runState (runReaderT m initial_env) initial_state
-    initial_state = MonoState src mempty mempty mempty mempty
+    initial_state = MonoState src mempty mempty mempty mempty mempty
     initial_env = Env mempty mempty mempty mempty
 
 lookupFun :: VName -> MonoM (Maybe PolyBinding)
@@ -302,7 +303,8 @@ scoping :: S.Set VName -> MonoM Exp -> MonoM Exp
 scoping argset m =
   withArgs argset m >>= unscoping argset
 
--- Given instantiated type of function, produce size arguments.
+-- Given instantiated type of function, produce the arguments it must be
+-- applied to: its size arguments, and @()@ for a polymorphic value.
 type InferSizeArgs = StructType -> MonoM [Exp]
 
 -- | The integer encodes an equivalence class, so we can keep
@@ -322,14 +324,14 @@ instance Pretty (Shape MonoSize) where
 -- | The kind of type relative to which we monomorphise. What is most important
 -- to us is not the specific dimensions, but merely whether they are known or
 -- anonymous/local.
-type MonoType = TypeBase MonoSize NoUniqueness
+type MonoType = TypeBase MonoSize NoMode
 
-monoType :: TypeBase Size als -> MonoType
+monoType :: TypeBase Size o -> MonoType
 monoType = noExts . (`evalState` (0, mempty)) . traverseDims onDim . toStruct
   where
     -- Remove exts from return types because we don't use them anymore.
-    noExts :: TypeBase MonoSize u -> TypeBase MonoSize u
-    noExts (Array u shape t) = Array u shape $ noExtsScalar t
+    noExts :: TypeBase MonoSize o -> TypeBase MonoSize o
+    noExts (Array o shape t) = Array o shape $ noExtsScalar t
     noExts (Scalar t) = Scalar $ noExtsScalar t
     noExtsScalar (Record fs) = Record $ M.map noExts fs
     noExtsScalar (Sum fs) = Sum $ M.map (map noExts) fs
@@ -361,6 +363,16 @@ monoType = noExts . (`evalState` (0, mempty)) . traverseDims onDim . toStruct
 sizeVarName :: Exp -> Name
 sizeVarName e = "d<{" <> nameFromText (prettyText (bareExp e)) <> "}>"
 
+-- | Is this size expression already normalised (a single variable or
+-- constant), modulo being surrounded by some parentheses? If so, return the
+-- normalised form.
+maybeNormalisedSize :: Exp -> Maybe Exp
+maybeNormalisedSize e
+  | Just e' <- stripExp e = maybeNormalisedSize e'
+maybeNormalisedSize (Var qn _ loc) = Just $ sizeFromName qn loc
+maybeNormalisedSize (IntLit v _ loc) = Just $ IntLit v (Info i64) loc
+maybeNormalisedSize _ = Nothing
+
 -- | Creates a new expression replacement if needed, this always produces normalised sizes.
 -- (e.g. single variable or constant)
 replaceExp :: Exp -> MonoM Exp
@@ -378,17 +390,38 @@ replaceExp e =
           vn <- newVName $ sizeVarName e
           putExpReplacements . ((e', vn) :) =<< getExpReplacements
           pure $ sizeFromName (qualName vn) (srclocOf e)
-  where
-    -- Avoid replacing of some 'already normalised' sizes that are just surounded by some parentheses.
-    maybeNormalisedSize e'
-      | Just e'' <- stripExp e' = maybeNormalisedSize e''
-    maybeNormalisedSize (Var qn _ loc) = Just $ sizeFromName qn loc
-    maybeNormalisedSize (IntLit v _ loc) = Just $ IntLit v (Info i64) loc
-    maybeNormalisedSize _ = Nothing
+
+-- | Turn a non-trivial size expression occurring in a *type* into an
+-- 'anySize', rather than trying to hoist it into a named size parameter that
+-- 'inferSizeArgs' would later have to (fallibly) reconstruct a concrete
+-- argument for at every reference to the function. Some such expressions
+-- (e.g. a product of several of the function's own parameters, as in #2230)
+-- cannot in general be recovered at the point of reference, so instead of
+-- pretending we can, we erase the information here and let internalisation
+-- resolve it from the actual sizes of the values involved, exactly as is
+-- already done for other 'anySize's (see Note [AnySize]).
+--
+-- Repeated occurrences of the same expression are mapped to the same
+-- equivalence class, so that size equalities implied by the original
+-- expression are not lost.
+anySizeForType :: Exp -> MonoM Exp
+anySizeForType e = do
+  let e' = ReplacedExp e
+  substs <- gets sAnySizes
+  case lookup e' substs of
+    Just i -> pure $ anySize i
+    Nothing -> do
+      i <- baseTag <$> newVName "any_size"
+      modify $ \s -> s {sAnySizes = (e', i) : substs}
+      pure $ anySize i
 
 transformFName :: SrcLoc -> QualName VName -> StructType -> MonoM Exp
 transformFName loc fname ft = do
-  t' <- transformType ft
+  -- The type 't' is later matched structurally, syntactically, against the
+  -- callee's own declared signature (in 'inferSizeArgs', via 'dimMapping'),
+  -- so it must stay fully precise here, even if we are currently inside the
+  -- return type of some outer higher-order parameter.
+  t' <- transformFNameType ft
   let mono_t = monoType ft
   if isIntrinsic (qualLeaf fname)
     then pure $ var fname t'
@@ -398,77 +431,136 @@ transformFName loc fname ft = do
       case (maybe_fname, maybe_funbind) of
         -- The function has already been monomorphised.
         (Just (fname', infer), _) ->
-          applySizeArgs fname' (toRes Nonunique t') <$> infer t'
+          applyArgs fname' (toRes Nonfresh t') <$> infer t'
         -- An intrinsic function.
         (Nothing, Nothing) -> pure $ var fname t'
         -- A polymorphic function.
         (Nothing, Just funbind) -> do
-          (fname', infer, funbind') <- monomorphiseBinding funbind mono_t
-          addValBind funbind'
-          addLifted (qualLeaf fname) mono_t (fname', infer)
-          applySizeArgs fname' (toRes Nonunique t') <$> infer t'
+          (fname', infer) <- monomorphiseBinding funbind mono_t
+          applyArgs fname' (toRes Nonfresh t') <$> infer t'
   where
     var fname' t' = Var fname' (Info t') loc
 
-    applySizeArg t (i, f) size_arg =
-      ( i - 1,
+    argType = toParam Observe . typeOf
+
+    applyArg t (arg_ts, f) arg =
+      ( drop 1 arg_ts,
         mkApply
           f
-          [(Nothing, size_arg)]
-          (AppRes (foldFunType (replicate i i64) (RetType [] t)) [])
+          [(Nothing, arg)]
+          (AppRes (foldFunType (drop 1 arg_ts) (RetType [] t)) [])
       )
 
-    applySizeArgs fname' t size_args =
+    applyArgs fname' t args =
       setApplyLoc loc . snd $
         foldl'
-          (applySizeArg t)
-          ( length size_args - 1,
+          (applyArg t)
+          ( map argType args,
             Var
               (qualName fname')
-              (Info (foldFunType (map (const i64) size_args) (RetType [] t)))
+              (Info (foldFunType (map argType args) (RetType [] t)))
               loc
           )
-          size_args
+          args
 
-transformType :: TypeBase Size u -> MonoM (TypeBase Size u)
-transformType typ =
+-- | General-purpose size transformation for a type, used everywhere except when
+-- reconstructing the type of a function reference (see 'transformFNameType').
+-- Sizes immediately in the type (before any 'Arrow' is crossed) are hoisted
+-- into a reference to a fresh named size variable (see 'replaceExp'), while
+-- sizes found within a higher-order (function-valued) parameter or return
+-- type - i.e. anywhere 'traverseDims' reports a 'DimPos' other than
+-- 'PosImmediate' - are instead erased into an 'anySize'. Whether such a
+-- hoisted name ends up as an actual explicit parameter of the enclosing
+-- function, an ordinary local @let@-binding, or something else again,
+-- depends on what the caller of 'transformType' does with the resulting
+-- 'ExpReplacements' afterwards; 'transformType' itself does not add any
+-- parameters. See Note [Higher-Order Parameter Sizes].
+transformType :: TypeBase Size o -> MonoM (TypeBase Size o)
+transformType = traverseDims onDim
+  where
+    onDim _ pos e
+      | Just _ <- isAnySize e = pure e
+      | otherwise = do
+          e' <- transformExp e
+          case maybeNormalisedSize e' of
+            Just e'' -> pure e''
+            Nothing
+              | PosImmediate <- pos -> replaceExp e'
+              | otherwise -> anySizeForType e'
+
+-- | Like 'transformType', but replaces every non-trivial size, regardless of
+-- where it occurs, with a reference to a fresh named size variable (see
+-- 'replaceExp'), rather than erasing sizes found within higher-order
+-- parameter/return types into an 'anySize'. Note that this does not turn any
+-- of these sizes into an actual parameter of anything: the resulting type has
+-- exactly the same 'Arrow' structure (and hence the same arity) as the input.
+-- The named variables are merely placeholders, used only so that
+-- 'dimMapping' can structurally line this reconstructed type up against the
+-- callee's own declared signature - whose *own* analogous sizes did, when
+-- the callee itself was monomorphised, become real explicit parameters - so
+-- that 'inferSizeArgs' can read off a concrete argument expression for each
+-- of those parameters. Used only to reconstruct the type of a plain function
+-- *reference* (in 'transformFName'); that is why it must stay fully precise,
+-- even through further nested 'Arrow's - which, for this particular type,
+-- are simply the callee's own remaining curried parameters, not necessarily
+-- higher-order values. This also means we cannot use 'traverseDims' here
+-- (unlike in 'transformType'): a size hoisted from deep within this type may
+-- refer to a curried parameter bound by some enclosing 'Arrow' in the very
+-- same type, so each 'Arrow' we cross must, before returning, re-scope any
+-- such size locally to its own return type (via 'transformRetTypeSizesWith').
+-- See Note [Higher-Order Parameter Sizes].
+transformFNameType :: TypeBase Size o -> MonoM (TypeBase Size o)
+transformFNameType typ =
   case typ of
     Scalar scalar ->
       Scalar <$> transformScalarSizes scalar
-    Array u shape scalar ->
-      Array u <$> mapM onDim shape <*> transformScalarSizes scalar
+    Array o shape scalar ->
+      Array o <$> mapM onDim shape <*> transformScalarSizes scalar
   where
-    transformScalarSizes :: ScalarTypeBase Size u -> MonoM (ScalarTypeBase Size u)
+    transformScalarSizes :: ScalarTypeBase Size o -> MonoM (ScalarTypeBase Size o)
     transformScalarSizes (Record fs) =
-      Record <$> traverse transformType fs
+      Record <$> traverse transformFNameType fs
     transformScalarSizes (Sum cs) =
-      Sum <$> (traverse . traverse) transformType cs
+      Sum <$> (traverse . traverse) transformFNameType cs
     transformScalarSizes (Arrow as argName d argT retT) =
       Arrow as argName d
-        <$> transformType argT
-        <*> transformRetTypeSizes argset retT
+        <$> transformFNameType argT
+        <*> transformRetTypeSizesWith transformFNameType argset retT
       where
         argset =
           case argName of
             Unnamed -> mempty
             Named vn -> S.singleton vn
-    transformScalarSizes (TypeVar u qn args) =
-      TypeVar u qn <$> mapM onArg args
+    transformScalarSizes (TypeVar o qn args) =
+      TypeVar o qn <$> mapM onArg args
       where
         onArg (TypeArgDim dim) = TypeArgDim <$> onDim dim
-        onArg (TypeArgType ty) = TypeArgType <$> transformType ty
+        onArg (TypeArgType ty) = TypeArgType <$> transformFNameType ty
     transformScalarSizes ty@Prim {} = pure ty
 
     onDim e
       | Just _ <- isAnySize e = pure e
       | otherwise = replaceExp =<< transformExp e
 
-transformRetTypeSizes :: S.Set VName -> RetTypeBase Size as -> MonoM (RetTypeBase Size as)
-transformRetTypeSizes argset (RetType dims ty) = do
-  ty' <- withArgs argset $ withMono dims $ transformType ty
+-- | Transform the sizes of a return type using the given size transformer,
+-- given the set of parameter names newly in scope for this return type (usually
+-- the name of the 'Arrow' parameter it is the return type of). Any size hoisted
+-- while transforming that turns out to depend on one of these parameters cannot
+-- be a top-level named parameter (those names are not in scope outside), so it
+-- is instead added to the return type's own existentially-bound sizes.
+transformRetTypeSizesWith ::
+  (TypeBase Size o -> MonoM (TypeBase Size o)) ->
+  S.Set VName ->
+  RetTypeBase Size o ->
+  MonoM (RetTypeBase Size o)
+transformRetTypeSizesWith f argset (RetType dims ty) = do
+  ty' <- withArgs argset $ withMono dims $ f ty
   rl <- parametrizing argset
   let dims' = dims <> map snd rl
   pure $ RetType dims' ty'
+
+transformRetTypeSizes :: S.Set VName -> RetTypeBase Size o -> MonoM (RetTypeBase Size o)
+transformRetTypeSizes = transformRetTypeSizesWith transformType
 
 sizesForPat :: (MonadFreshNames m) => Pat ParamType -> m ([VName], Pat ParamType)
 sizesForPat pat = do
@@ -757,7 +849,7 @@ desugarBinOpSection fname e_left e_right t (xp, xtype, xext) (yp, ytype, yext) (
         mkApply
           op
           [(xext, e1)]
-          (AppRes (Scalar $ Arrow mempty yp (diet ytype) (toStruct ytype) (RetType [] $ toRes Nonunique t')) [])
+          (AppRes (Scalar $ Arrow mempty yp (diet ytype) (toStruct ytype) (RetType [] $ toRes Nonfresh t')) [])
       onDim (Var d typ _)
         | Named p <- xp, qualLeaf d == p = Var (qualName v1) typ loc
         | Named p <- yp, qualLeaf d == p = Var (qualName v2) typ loc
@@ -821,15 +913,15 @@ desugarUpdateSection steps (Scalar (Arrow _ _ _ t1 (RetType dims t2))) loc = do
     isFix _ = False
 desugarUpdateSection _ t _ = error $ "desugarUpdateSection: not a function type: " ++ prettyString t
 
-transformPat :: Pat (TypeBase Size u) -> MonoM (Pat (TypeBase Size u))
+transformPat :: Pat (TypeBase Size o) -> MonoM (Pat (TypeBase Size o))
 transformPat = traverse transformType
 
 type DimInst = M.Map VName Size
 
 dimMapping ::
-  (Monoid a) =>
-  TypeBase Size a ->
-  TypeBase Size a ->
+  (Monoid o) =>
+  TypeBase Size o ->
+  TypeBase Size o ->
   ExpReplacements ->
   ExpReplacements ->
   DimInst
@@ -899,14 +991,14 @@ inferSizeArgs tparams bind_t bind_r t = do
 noNamedParams :: MonoType -> MonoType
 noNamedParams = f
   where
-    f :: TypeBase MonoSize u -> TypeBase MonoSize u
-    f (Array u shape t) = Array u shape (f' t)
+    f :: TypeBase MonoSize o -> TypeBase MonoSize o
+    f (Array o shape t) = Array o shape (f' t)
     f (Scalar t) = Scalar $ f' t
-    f' :: ScalarTypeBase MonoSize u -> ScalarTypeBase MonoSize u
+    f' :: ScalarTypeBase MonoSize o -> ScalarTypeBase MonoSize o
     f' (Record fs) = Record $ fmap f fs
     f' (Sum cs) = Sum $ fmap (map f) cs
-    f' (Arrow u _ d1 t1 (RetType dims t2)) =
-      Arrow u Unnamed d1 (f t1) (RetType dims (f t2))
+    f' (Arrow o _ d1 t1 (RetType dims t2)) =
+      Arrow o Unnamed d1 (f t1) (RetType dims (f t2))
     f' t = t
 
 -- | arrowArg takes a return type and returns it
@@ -916,8 +1008,8 @@ arrowArg ::
   S.Set VName -> -- scope
   S.Set VName -> -- set of argument
   [VName] -> -- size parameters
-  RetTypeBase Size as ->
-  (RetTypeBase Size as, S.Set VName)
+  RetTypeBase Size o ->
+  (RetTypeBase Size o, S.Set VName)
 arrowArg scope argset args_params rety =
   let (rety', (funArgs, _)) = runWriter (arrowArgRetType (scope, mempty) argset rety)
       new_params = funArgs `S.union` S.fromList args_params
@@ -931,8 +1023,8 @@ arrowArg scope argset args_params rety =
     arrowArgRetType ::
       (S.Set VName, [VName]) ->
       S.Set VName ->
-      RetTypeBase Size as' ->
-      Writer (S.Set VName, S.Set VName) (RetTypeBase Size as')
+      RetTypeBase Size o' ->
+      Writer (S.Set VName, S.Set VName) (RetTypeBase Size o')
     arrowArgRetType (scope', dimsToPush) argset' (RetType dims ty) = pass $ do
       let dims' = dims <> dimsToPush
       (ty', (_, canExt)) <- listen $ arrowArgType (argset' `S.union` scope', dims') ty
@@ -953,8 +1045,8 @@ arrowArg scope argset args_params rety =
           case argName of
             Unnamed -> argset'
             Named vn -> S.insert vn argset'
-    arrowArgScalar env (TypeVar u qn args) =
-      TypeVar u qn <$> mapM arrowArgArg args
+    arrowArgScalar env (TypeVar o qn args) =
+      TypeVar o qn <$> mapM arrowArgArg args
       where
         arrowArgArg (TypeArgDim dim) = TypeArgDim <$> arrowArgSize dim
         arrowArgArg (TypeArgType ty) = TypeArgType <$> arrowArgType env ty
@@ -962,10 +1054,10 @@ arrowArg scope argset args_params rety =
 
     arrowArgType ::
       (S.Set VName, [VName]) ->
-      TypeBase Size as' ->
-      Writer (S.Set VName, S.Set VName) (TypeBase Size as')
-    arrowArgType env (Array u shape scalar) =
-      Array u <$> traverse arrowArgSize shape <*> arrowArgScalar env scalar
+      TypeBase Size o' ->
+      Writer (S.Set VName, S.Set VName) (TypeBase Size o')
+    arrowArgType env (Array o shape scalar) =
+      Array o <$> traverse arrowArgSize shape <*> arrowArgScalar env scalar
     arrowArgType env (Scalar ty) =
       Scalar <$> arrowArgScalar env ty
 
@@ -973,27 +1065,27 @@ arrowArg scope argset args_params rety =
     arrowArgSize s = pure s
 
     -- \| arrowClean cleans the mess in the type
-    arrowCleanRetType :: S.Set VName -> RetTypeBase Size as -> RetTypeBase Size as
+    arrowCleanRetType :: S.Set VName -> RetTypeBase Size o -> RetTypeBase Size o
     arrowCleanRetType paramed (RetType dims ty) =
       RetType (nubOrd $ filter (`S.notMember` paramed) dims) (arrowCleanType (paramed `S.union` S.fromList dims) ty)
 
-    arrowCleanScalar :: S.Set VName -> ScalarTypeBase Size as -> ScalarTypeBase Size as
+    arrowCleanScalar :: S.Set VName -> ScalarTypeBase Size o -> ScalarTypeBase Size o
     arrowCleanScalar paramed (Record fs) =
       Record $ M.map (arrowCleanType paramed) fs
     arrowCleanScalar paramed (Sum cs) =
       Sum $ (M.map . map) (arrowCleanType paramed) cs
     arrowCleanScalar paramed (Arrow as argName d argT retT) =
       Arrow as argName d argT (arrowCleanRetType paramed retT)
-    arrowCleanScalar paramed (TypeVar u qn args) =
-      TypeVar u qn $ map arrowCleanArg args
+    arrowCleanScalar paramed (TypeVar o qn args) =
+      TypeVar o qn $ map arrowCleanArg args
       where
         arrowCleanArg (TypeArgDim dim) = TypeArgDim dim
         arrowCleanArg (TypeArgType ty) = TypeArgType $ arrowCleanType paramed ty
     arrowCleanScalar _ ty = ty
 
-    arrowCleanType :: S.Set VName -> TypeBase Size as -> TypeBase Size as
-    arrowCleanType paramed (Array u shape scalar) =
-      Array u shape $ arrowCleanScalar paramed scalar
+    arrowCleanType :: S.Set VName -> TypeBase Size o -> TypeBase Size o
+    arrowCleanType paramed (Array o shape scalar) =
+      Array o shape $ arrowCleanScalar paramed scalar
     arrowCleanType paramed (Scalar ty) =
       Scalar $ arrowCleanScalar paramed ty
 
@@ -1001,32 +1093,91 @@ removeEntryPoint :: PolyBinding -> PolyBinding
 removeEntryPoint (PolyBinding (_, name, tparams, params, rettype, body, attrs, loc)) =
   PolyBinding (Nothing, name, tparams, params, rettype, body, attrs, loc)
 
--- Monomorphise a polymorphic function at the types given in the instance
--- list. Monomorphises the body of the function as well. Returns the fresh name
--- of the generated monomorphic function and its 'ValBind' representation.
+-- | Copy freshness from the instantiated type into the result of the declared
+-- one. See 'freshenFromInst'.
+freshenAsType :: TypeBase d Freshness -> TypeBase Size u -> TypeBase Size u
+freshenAsType
+  (Scalar (Arrow _ _ _ _ (RetType _ ir)))
+  (Scalar (Arrow u pn d a (RetType ext r))) =
+    Scalar $ Arrow u pn d a $ RetType ext (freshenAs ir r)
+freshenAsType _ t = t
+
+freshenAs :: TypeBase d Freshness -> ResType -> ResType
+freshenAs it@(Scalar Arrow {}) t = freshenAsType it t
+freshenAs (Scalar (Record ifs)) (Scalar (Record fs))
+  | M.keys ifs == M.keys fs =
+      Scalar $ Record $ M.intersectionWith freshenAs ifs fs
+freshenAs (Scalar (Sum ics)) (Scalar (Sum cs))
+  | M.keys ics == M.keys cs =
+      Scalar $ Sum $ M.intersectionWith (zipWith freshenAs) ics cs
+freshenAs it t
+  -- 'setMode' writes every node, and 'freshness' of a record is Fresh
+  -- if *any* field is, so this must not be reached for compound types.
+  | compound it || compound t = t
+  | freshness it == Fresh = t `setMode` Fresh
+  | otherwise = t
+  where
+    compound (Scalar Record {}) = True
+    compound (Scalar Sum {}) = True
+    compound _ = False
+
+-- | Consumption checking may refine the instantiated type of a polymorphic name
+-- to say that its result is *fresh*, which the declared type cannot express.
+-- The instantiation can, so take the freshness of the result from there, past
+-- the given parameters. The declared return type must already have the type
+-- substitution applied: a type parameter has a single mode, so where it is
+-- instantiated at a record or sum, freshness can only be copied component by
+-- component once the parameter has been replaced. See Note [Parametric
+-- results] in Language.Futhark.TypeChecker.Consumption.
+freshenFromInst :: TypeBase d Freshness -> [Pat ParamType] -> ResRetType -> ResRetType
+freshenFromInst (Scalar (Arrow _ _ _ _ (RetType _ ir))) (_ : ps) rt =
+  freshenFromInst ir ps rt
+freshenFromInst it [] (RetType ext t) = RetType ext (freshenAs it t)
+freshenFromInst _ _ rt = rt
+
+-- | Recursion is monomorphic, so a recursive reference in the body of an
+-- instance is to that same instance. Its type is the declared one, however,
+-- without the freshness that 'freshenFromInst' copied into the instance, and
+-- would otherwise give rise to a second instance that does not justify it.
+freshenRecursive :: VName -> MonoType -> Exp -> Exp
+freshenRecursive name inst_t = onExp
+  where
+    onExp (Var v (Info t) loc)
+      | qualLeaf v == name =
+          Var v (Info $ freshenAsType (second (const Nonfresh) inst_t) t) loc
+    onExp e = runIdentity $ astMap identityMapper {mapOnExp = pure . onExp} e
+
+-- Monomorphises the body of the function as well. Returns the fresh name of the
+-- generated monomorphic function as well a function for constructing additional
+-- size arguments.
 monomorphiseBinding ::
   PolyBinding ->
   MonoType ->
-  MonoM (VName, InferSizeArgs, ValBind)
-monomorphiseBinding (PolyBinding (entry, name, tparams, params, rettype, body, attrs, loc)) inst_t = isolateNormalisation $ do
-  let bind_t = funType params rettype
+  MonoM (VName, InferSizeArgs)
+monomorphiseBinding (PolyBinding (entry, name, tparams, params0, rettype0, body, attrs, loc)) inst_t = isolateNormalisation $ do
+  let bind_t = funType params0 rettype0
   (substs, t_shape_params) <-
     typeSubstsM loc bind_t $ noNamedParams inst_t
   let shape_names = S.fromList $ map typeParamName $ shape_params ++ t_shape_params
       substs' = M.map (Subst []) substs
       substStructType =
         substTypesAny (fmap (fmap (second (const mempty))) . (`M.lookup` substs'))
-      params' = map (substPat substStructType) params
+      params' = map (substPat substStructType) params0
+      rettype =
+        freshenFromInst
+          (second (const Nonfresh) inst_t)
+          params'
+          (applySubst (`M.lookup` substs') rettype0)
   params'' <- withArgs shape_names $ mapM transformPat params'
   exp_naming <- getExpReplacements <* putExpReplacements mempty
 
-  let args = S.fromList $ foldMap patNames params
+  let args = S.fromList $ foldMap patNames params0
       arg_params = map snd exp_naming
 
   rettype' <-
     withParams exp_naming $
       withArgs (args <> shape_names) $
-        hardTransformRetType (applySubst (`M.lookup` substs') rettype)
+        hardTransformRetType rettype
   extNaming <- getExpReplacements <* putExpReplacements mempty
   scope <- S.union shape_names <$> askScope'
   let (rettype'', new_params) = arrowArg scope args arg_params rettype'
@@ -1042,45 +1193,60 @@ monomorphiseBinding (PolyBinding (entry, name, tparams, params, rettype, body, a
 
       bind_t'' = funType params'' rettype''
       bind_r = exp_naming <> extNaming
-  body' <- updateExpTypes (`M.lookup` substs') body
+
+  -- It is important that we record the lifted function before transforming the
+  -- body, in order to handle recursion. Fortunately the "calling convention"
+  -- does not depend on the body.
+  seen_before <- elem name . map fst . M.keys <$> getLifts
+  name' <-
+    if not (any isTypeParam tparams) && isNothing entry && not seen_before
+      then pure name
+      else newName name
+
+  let infer
+        -- If the function is an entry point, then it cannot possibly
+        -- need any explicit size arguments (checked by type checker).
+        | isJust entry = const $ pure []
+        | poly_value =
+            fmap (<> [TupLit [] loc]) . inferSizeArgs shape_params_explicit bind_t'' bind_r
+        | otherwise = inferSizeArgs shape_params_explicit bind_t'' bind_r
+
+  addLifted name inst_t (name', infer)
+
+  body' <- freshenRecursive name inst_t <$> updateExpTypes (`M.lookup` substs') body
   body'' <- withParams exp_naming' $ withArgs (shape_names <> args) $ transformExp body'
   scope' <- S.union (shape_names <> args) <$> askScope'
   body''' <-
     expReplace exp_naming' <$> (calculateDims body'' . canCalculate scope' =<< getExpReplacements)
 
-  seen_before <- elem name . map fst . M.keys <$> getLifts
-  name' <-
-    if null tparams && isNothing entry && not seen_before
-      then pure name
-      else newName name
+  addValBind $
+    if isJust entry
+      then
+        toValBinding
+          name'
+          (shape_params_explicit ++ shape_params_implicit)
+          params''
+          rettype''
+          (entryAssert exp_naming body''')
+      else
+        toValBinding
+          name'
+          shape_params_implicit
+          (map shapeParam shape_params_explicit ++ params'' ++ unit_param)
+          rettype''
+          body'''
 
-  pure
-    ( name',
-      -- If the function is an entry point, then it cannot possibly
-      -- need any explicit size arguments (checked by type checker).
-      if isJust entry
-        then const $ pure []
-        else inferSizeArgs shape_params_explicit bind_t'' bind_r,
-      if isJust entry
-        then
-          toValBinding
-            name'
-            (shape_params_explicit ++ shape_params_implicit)
-            params''
-            rettype''
-            (entryAssert exp_naming body''')
-        else
-          toValBinding
-            name'
-            shape_params_implicit
-            (map shapeParam shape_params_explicit ++ params'')
-            rettype''
-            body'''
-    )
+  pure (name', infer)
   where
-    askScope' = S.filter (`notElem` retDims rettype) <$> askScope
+    askScope' = S.filter (`notElem` retDims rettype0) <$> askScope
 
     shape_params = filter (not . isTypeParam) tparams
+
+    -- A polymorphic value becomes a function of @()@, so that each use computes
+    -- it anew, as a size-polymorphic value is a function of its sizes.
+    -- Consumption checking relies on this; see Note [Parametric results].
+    poly_value = null params0 && any isTypeParam tparams && isNothing entry
+    unit_param = [Wildcard (Info $ Scalar $ Record mempty) loc | poly_value]
 
     updateExpTypes substs = astMap (mapper substs)
 
@@ -1150,7 +1316,7 @@ typeSubstsM loc orig_t1 orig_t2 =
     sub (Scalar Prim {}) (Scalar Prim {}) = pure ()
     sub (Scalar (Arrow _ _ _ t1a (RetType _ t1b))) (Scalar (Arrow _ _ _ t2a t2b)) = do
       sub t1a t2a
-      subRet (toStruct t1b) (second (const NoUniqueness) t2b)
+      subRet (toStruct t1b) (second (const NoMode) t2b)
     sub (Scalar (Sum cs1)) (Scalar (Sum cs2)) =
       zipWithM_ typeSubstClause (sortConstrs cs1) (sortConstrs cs2)
       where
@@ -1208,9 +1374,7 @@ transformValBind valbind = do
           funType (valBindParams valbind) $
             unInfo $
               valBindRetType valbind
-    (name, infer, valbind'') <- monomorphiseBinding valbind' $ monoType t
-    addValBind valbind''
-    addLifted (valBindName valbind) (monoType t) (name, infer)
+    void $ monomorphiseBinding valbind' $ monoType t
 
   let global =
         if null (valBindParams valbind)
@@ -1225,9 +1389,7 @@ transformValBind valbind = do
           M.insert (valBindName valbind) (removeEntryPoint valbind') $
             envPolyBindings env,
         envGlobalScope = global <> envGlobalScope env,
-        envScope =
-          S.insert (valBindName valbind) global
-            <> envScope env
+        envScope = S.insert (valBindName valbind) global <> envScope env
       }
 
 transformValBinds :: [ValBind] -> MonoM ()
@@ -1265,3 +1427,84 @@ transformProg decs = do
               map fst $
                 M.toList b
     )
+
+-- Note [Higher-Order Parameter Sizes]
+--
+-- Normally, when 'transformType' (via 'onDim') encounters a size that is some
+-- non-trivial expression rather than a single variable or a constant (say, 'm *
+-- n'), it hoists that expression into a fresh named size parameter, tracked via
+-- 'ExpReplacements' ('replaceExp'). Any function that ends up with such a
+-- parameter in its (monomorphised) signature has it turned into an explicit
+-- leading argument, and every reference to that function must then be augmented
+-- with a concrete argument for it. This augmentation happens in
+-- 'inferSizeArgs', which tries to recover a concrete expression for the
+-- parameter by structurally comparing the callee's own declared type against
+-- the type at the point of reference ('dimMapping').
+--
+-- This works fine as long as the expression's free variables are all reliably
+-- available, spelled out the same way, at every place the function is
+-- referenced. But consider (#2230):
+--
+--   def f (n: i64) (m: i64) (g: f64 -> [m ** n]f64) = g 0
+--   entry main n m = f n m (\x -> replicate (m ** n) x)
+--
+-- Here 'm ** n' only occurs as the return size of a *parameter* of 'f' (the
+-- higher-order function 'g'), not as a size of 'f' itself. Because
+-- 'transformFName' processes the bare reference to 'f' before its arguments
+-- have been applied, 'dimMapping' has no way to know, at that point, that the
+-- surrounding application happens to supply concrete values for 'n' and 'm'.
+-- (In general it may not even be a full application - 'f' could be passed
+-- onward as a value.) 'inferSizeArgs' then has no honest answer and used to
+-- fall back to inserting a literal '0' as the argument, which will then be
+-- treated as ground truth by the internaliser.
+--
+-- The same thing happens if the problematic size instead occurs in the *
+-- argument* type of a returned or parameter-bound function, e.g.
+--
+--   def f (n: i64) (m: i64) =
+--     \(g: [m ** n]f64 -> f64) -> g (replicate (m ** n) 0.0)
+--   entry main n m = f n m (\x -> head x)
+--
+-- (see @test.fut@ in the repository root at the time of writing). 'd = m ** n'
+-- is here unwitnessed by anything else in 'f's own signature, so it again
+-- becomes an explicit parameter of 'f' that 'inferSizeArgs' cannot recover at
+-- the unsaturated reference to 'f'.
+--
+-- The fix implemented here recognises that a size occurring anywhere in the
+-- type of a higher-order (function-valued) parameter or return value - whether
+-- describing what it consumes or what it produces - is different in kind from
+-- an ordinary size: the function that declares it (here 'f') always has the
+-- free variables it depends on in scope, since such a size can only be built
+-- from parameters of the enclosing function itself. So nothing ever needs its
+-- value threaded in externally as an explicit argument; the enclosing function
+-- can always reconstruct it itself, wherever it actually needs it (to type the
+-- result of calling 'g', to build an array to pass to 'g', or just to pass it
+-- on to a further nested 'Arrow'). We erase the expression into a fresh
+-- 'anySize' right where it occurs, instead of pretending we can reconstruct it
+-- as an explicit argument (see Note [AnySize]). Since the size is never turned
+-- into an explicit parameter of 'f' in the first place, there is also nothing
+-- for 'inferSizeArgs' to fail to supply.
+--
+-- Deciding when we are in "the type of a higher-order parameter or return
+-- value" is the job of the 'DimPos' that 'traverseDims' reports for each
+-- size it visits: 'PosImmediate' means the size is not (yet) inside any
+-- 'Arrow', while 'PosParam'/'PosReturn' mean it is on the argument or return
+-- side of one (we treat the two identically). 'transformType' is thus
+-- simply 'traverseDims' with a callback that hoists at 'PosImmediate' and
+-- erases to an 'anySize' otherwise; unlike the hand-rolled traversal this
+-- replaced, it gets the structural recursion through 'Record'/'Sum'/'Arrow'
+-- for free. The one place that cannot use 'traverseDims' directly is
+-- 'transformFNameType', which must stay precise through every nested
+-- 'Arrow' regardless of position (see its docstring for why).
+--
+-- Repeated occurrences of the same original expression within one binding group
+-- (e.g. the same higher-order parameter's size mentioned twice, or two
+-- different higher-order parameters sharing a size) are mapped to the same
+-- 'anySize' equivalence class via the 'sAnySizes' cache in 'MonoState', rather
+-- than each minting a fresh one, mirroring 'sizesForPat' below. Two erasures
+-- that end up in *different* equivalence classes (e.g. one introduced while
+-- processing 'f's own parameter list, another introduced independently at some
+-- call site's reconstructed argument type) are not a problem: 'anySize'
+-- equivalence classes are only ever compared within a single binding group,
+-- never across independent functions or call sites, so there is nothing to keep
+-- synchronised between the two.

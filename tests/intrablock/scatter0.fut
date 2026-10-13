@@ -4,7 +4,7 @@
 
 def main (is: []i64) (vs: [][]f64) =
   map (\xsss ->
-         #[incremental_flattening(only_intra)]
+         #[flattening(only_intra)]
          map (\xss ->
                 scatter (copy xss) is vs)
              xsss)

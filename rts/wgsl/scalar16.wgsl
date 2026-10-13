@@ -57,16 +57,16 @@ fn udiv_i16(a: i16, b: i16) -> i16 {
   return norm_i16(udiv_i32(norm_u16(a), norm_u16(b)));
 }
 
-fn udiv_up_i16(a: i16, b: i16) -> i16 {
-  return norm_i16(udiv_up_i32(norm_u16(a), norm_u16(b)));
+fn uceil_div_i16(a: i16, b: i16) -> i16 {
+  return norm_i16(uceil_div_i32(norm_u16(a), norm_u16(b)));
 }
 
 fn sdiv_i16(a: i16, b: i16) -> i16 {
   return sdiv_i32(a, b);
 }
 
-fn sdiv_up_i16(a: i16, b: i16) -> i16 {
-  return sdiv_up_i32(a, b);
+fn sceil_div_i16(a: i16, b: i16) -> i16 {
+  return sceil_div_i32(a, b);
 }
 
 fn umod_i16(a: i16, b: i16) -> i16 {

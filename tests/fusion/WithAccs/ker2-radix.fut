@@ -1,5 +1,5 @@
-def mapIntra f as = #[incremental_flattening(only_intra)] #[seq_factor(22)] map f as
-def map3Intra f as bs cs = #[incremental_flattening(only_intra)] #[seq_factor(22)] map3 f as bs cs
+def mapIntra f as = #[flattening(only_intra)] #[seq_factor(22)] map f as
+def map3Intra f as bs cs = #[flattening(only_intra)] #[seq_factor(22)] map3 f as bs cs
 
 -- def mapIntra  f as = map f as
 -- def map3Intra f as bs cs = map3 f as bs cs
@@ -79,6 +79,11 @@ def ker2Blk [n]
 
 -- Simple test for fusing scatter-flatten with the preceding
 -- map nest that produces its indices and values
+--
+-- The structure test checks that the map3Intra(ker2Blk) Screma (which contains
+-- a loop, which in turn contains the partition2 scatter as a WithAcc) ends up
+-- inside the outermost WithAcc (from the scatter at the end of radixIt).
+-- The path /WithAcc/Screma/Loop/WithAcc captures this nesting exactly.
 -- ==
 -- entry: radixIt
 -- input { 3i64 8i64 0u32
@@ -93,6 +98,7 @@ def ker2Blk [n]
 --          , 9u32, 9u32, 10u32, 10u32, 11u32, 11u32, 12u32, 12u32
 --          ]
 -- }
+-- structure { /WithAcc/Screma/Loop/WithAcc 1 }
 
 entry radixIt (m: i64)
               (bq: i64)

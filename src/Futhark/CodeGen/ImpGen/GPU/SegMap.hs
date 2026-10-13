@@ -12,7 +12,7 @@ import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.GPU.Base
 import Futhark.CodeGen.ImpGen.GPU.Block
 import Futhark.IR.GPUMem
-import Futhark.Util.IntegralExp (divUp)
+import Futhark.Util.IntegralExp (ceilDiv)
 import Prelude hiding (quot, rem)
 
 -- | Compile 'SegMap' instance code.
@@ -32,7 +32,7 @@ compileSegMap pat lvl space kbody = do
   emit $ Imp.DebugPrint "\n# SegMap" Nothing
   case lvl of
     SegThread {} -> do
-      virt_num_tblocks <- dPrimVE "virt_num_tblocks" $ sExt32 $ product dims' `divUp` unCount tblock_size'
+      virt_num_tblocks <- dPrimVE "virt_num_tblocks" $ sExt32 $ product dims' `ceilDiv` unCount tblock_size'
       sKernelThread "segmap" (segFlat space) attrs $
         virtualiseBlocks (segVirt lvl) virt_num_tblocks $ \tblock_id -> do
           local_tid <- kernelLocalThreadId . kernelConstants <$> askEnv

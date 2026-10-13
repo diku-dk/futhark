@@ -49,7 +49,7 @@ compileProg version prog = do
       (DefaultSpace, [DefaultSpace])
       []
       prog'
-  pure (ws, (prog'', javascriptWrapper (fRepMyRep prog') (opaqueToJS (Imp.defTypes prog')), emccExportNames (fRepMyRep prog') (opaqueToJS (Imp.defTypes prog'))))
+  pure (ws, (prog'', javascriptWrapper (fRepMyRep prog') (opaqueToJS (Imp.defTypes prog')), emccExportNames (GC.cManifest prog'')))
   where
     operations :: GC.Operations Imp.Sequential ()
     operations =
@@ -61,7 +61,7 @@ fRepMyRep :: Imp.Program -> [JSEntryPoint]
 fRepMyRep prog =
   let Imp.Functions fs = Imp.defFuns prog
       function (Imp.Function entry _ _ _ _) = do
-        Imp.EntryPoint n res args <- entry
+        Imp.EntryPoint n res args _doc <- entry
         Just $
           JSEntryPoint
             { name = nameToString n,

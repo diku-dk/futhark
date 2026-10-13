@@ -1,4 +1,4 @@
 -- ==
--- error: Ambiguous size.*instantiated size parameter of "f32.sum"
+-- error: Ambiguous size.*use as function argument
 
 def main = f32.sum ???

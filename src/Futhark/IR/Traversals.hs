@@ -259,7 +259,7 @@ walkOnShape tv (Shape ds) = mapM_ (walkOnSubExp tv) ds
 
 walkOnType :: (Monad m) => Walker rep m -> Type -> m ()
 walkOnType _ Prim {} = pure ()
-walkOnType tv (Acc acc ispace ts _) = do
+walkOnType tv (Acc acc ispace ts) = do
   walkOnVName tv acc
   traverse_ (walkOnSubExp tv) ispace
   mapM_ (walkOnType tv) ts
@@ -367,6 +367,6 @@ class TraverseOpStms rep where
   traverseOpStms :: (Monad m) => OpStmsTraverser m (Op rep) rep
 
 -- | A helper for defining 'traverseOpStms'.
-traverseLambdaStms :: (Monad m) => OpStmsTraverser m (Lambda rep) rep
+traverseLambdaStms :: (Monad m) => OpStmsTraverser m (GLambda rep t) rep
 traverseLambdaStms f (Lambda ps ret (Body dec stms res)) =
   Lambda ps ret <$> (Body dec <$> f (scopeOfLParams ps) stms <*> pure res)

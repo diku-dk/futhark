@@ -14,7 +14,8 @@
 -- structure gpu-mem { Alloc 5 }
 
 -- The GPU pipeline has additional allocations for the two 'replicate'
--- expressions.
+-- expressions, as their results are manifested in parallel rather than
+-- fused into the kernels that compute the replicated values.
 
 def main [n] (a: [n]i32) : [][n]i32 =
   let x = map (\i -> replicate n (i + 10)) a |> opaque

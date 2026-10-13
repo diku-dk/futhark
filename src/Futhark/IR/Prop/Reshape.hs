@@ -19,6 +19,7 @@ module Futhark.IR.Prop.Reshape
 
     -- * Shape calculations
     reshapeIndex,
+    unreshapeSlice,
     flattenIndex,
     unflattenIndex,
     sliceSizes,
@@ -30,7 +31,7 @@ module Futhark.IR.Prop.Reshape
   )
 where
 
-import Control.Monad (guard, mplus)
+import Control.Monad (foldM, guard, mplus)
 import Data.Foldable
 import Data.Maybe
 import Futhark.IR.Prop.Rearrange (isMapTranspose, rearrangeInverse, rearrangeShape)
@@ -91,6 +92,41 @@ reshapeIndex ::
   [num]
 reshapeIndex to_dims from_dims is =
   unflattenIndex to_dims $ flattenIndex from_dims is
+
+-- | @unreshapeSlice shape newshape slice@ transforms @slice@, which is a
+-- slice of an array of shape @shape@ that has been reshaped with
+-- @newshape@, into an equivalent slice of the original array. This is done
+-- one splice at a time (working backwards), which requires that the
+-- dimensions produced by each splice are all indexed with 'DimFix', unless
+-- the splice is a coercion. As a consequence, indexing an unflattened
+-- dimension requires no division, and indexing a flattened dimension
+-- requires only division by the sizes of the dimensions that were
+-- flattened. Returns 'Nothing' if the slice cannot be transformed. The
+-- slice must be of the same length as the rank of @newshape@.
+unreshapeSlice ::
+  (IntegralExp num) =>
+  ShapeBase num ->
+  NewShape num ->
+  [DimIndex num] ->
+  Maybe [DimIndex num]
+unreshapeSlice shape (NewShape ss _) slice =
+  foldM onSplice slice $ reverse $ zip (scanl applySplice shape ss) ss
+  where
+    onSplice is (shape_bef, DimSplice i k s)
+      -- A coercion does not change the index space.
+      | k == 1,
+        shapeRank s == 1 =
+          Just is
+      | (is_bef, is') <- splitAt i is,
+        (is_s, is_aft) <- splitAt (shapeRank s) is',
+        length is_s == shapeRank s,
+        Just js <- mapM dimFix is_s =
+          let flat = flattenIndex (shapeDims s) js
+              js'
+                | k == 1 = [flat]
+                | otherwise = unflattenIndex (take k $ drop i $ shapeDims shape_bef) flat
+           in Just $ is_bef ++ map DimFix js' ++ is_aft
+      | otherwise = Nothing
 
 -- | @unflattenIndex dims i@ computes a list of indices into an array
 -- with dimension @dims@ given the flat index @i@.  The resulting list
@@ -171,7 +207,9 @@ flipReshapeRearrange v0_shape v1_shape perm = do
       num_b_dims_expanded = length v0_shape - num_map_dims - num_a_dims
       num_a_dims_expanded = length v0_shape - num_map_dims - num_b_dims
       caseA = do
-        guard $ take num_a_dims v0_shape == take num_b_dims v1_shape
+        guard $
+          take num_a_dims (drop num_map_dims v0_shape)
+            == take num_b_dims (drop num_map_dims v1_shape)
         let perm' =
               [0 .. num_map_dims - 1]
                 ++ map (+ num_map_dims) ([1 .. num_b_dims_expanded] ++ [0])
@@ -298,8 +336,9 @@ move (_, DimSplice i1 1 (Shape [_])) (DimSplice i2 n2 s2 : ss)
       Just $ DimSplice i2 n2 s2 : ss
 --
 -- A flatten with an inverse unflatten turns into nothing.
-move (shape_bef, DimSplice i1 n1 _s1) (DimSplice i2 _n2 s2 : ss)
+move (shape_bef, DimSplice i1 n1 s1) (DimSplice i2 n2 s2 : ss)
   | i1 == i2,
+    length s1 == n2,
     dimSpan i1 n1 shape_bef == s2 =
       Just ss
 --

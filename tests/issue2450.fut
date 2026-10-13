@@ -4,4 +4,4 @@
 -- compiled random input { [100][256]i32 } auto output
 -- compiled random input { [100][512]i32 } auto output
 
-def main xs = #[incremental_flattening(only_inner)] map (reduce (\x y -> opaque x + y) 0i32) xs
+def main xs = #[flattening(only_inner)] map (reduce (\x y -> opaque x + y) 0i32) xs

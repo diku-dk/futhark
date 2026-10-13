@@ -18,6 +18,11 @@ module Futhark.IR.SOACS.SOAC
     composeBinds,
     scremaType,
     soacType,
+    flatMapNonuniform,
+    flatMapRowTypes,
+    flatMapUniformTypes,
+    flatMapSplitMeta,
+    flatMapSplitValues,
     typeCheckSOAC,
     mkIdentityLambda,
     nilFn,
@@ -50,6 +55,7 @@ import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.State.Strict
 import Control.Monad.Writer
+import Data.Either (partitionEithers)
 import Data.List (intersperse)
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -79,14 +85,38 @@ data SOAC rep
     -- The final lambda produces indexes and values for the 'HistOp's.
     Hist SubExp [VName] [HistOp rep] (Lambda rep)
   | -- FIXME: this should not be here
-    JVP [SubExp] [SubExp] (Lambda rep)
+    JVP Shape [SubExp] [SubExp] (Lambda rep)
   | -- FIXME: this should not be here
-    VJP [SubExp] [SubExp] (Lambda rep)
+    VJP Shape [SubExp] [SubExp] (Lambda rep)
   | -- FIXME: this should not be here
     WithVJP [SubExp] (Lambda rep) (Lambda rep)
   | -- | A combination of scan, reduction, and map.  The first
     -- t'SubExp' is the size of the input arrays.
     Screma SubExp [VName] (ScremaForm rep)
+  | -- | Nonuniform map where the nonuniform results are implicitly concatenated.
+    -- The 'ExtLambda' first returns a size @k@, then its value results, each of
+    -- which is either /nonuniform/ (an array with @k@ as its outermost size) or
+    -- /uniform/ (not mentioning @k@ at all). The size @k@ may be used *only* as
+    -- an outermost dimension.
+    --
+    -- For input of length @n@ returns the following:
+    --
+    -- * An integer @m@ denoting the size of the data arrays.
+    --
+    -- * The "shape array" of type @[n]i64@, giving the size of each segment.
+    --   This array sums to @m@.
+    --
+    -- * The "flag array" of type @[m]bool@, indicating for each element when a
+    --   new segment begins.
+    --
+    -- * The "offset array" of type @[n]i64@, indicating for each segment where
+    --   its values begin in the data array.
+    --
+    -- * Finally one array per value result of the lambda, in the same order: a
+    --   nonuniform result becomes its concatenation across all iterations, of
+    --   outer size @[m]@, and a uniform result the collection of its values, of
+    --   outer size @[n]@.
+    FlatMap SubExp [VName] (ExtLambda rep)
   deriving (Eq, Ord, Show)
 
 -- | Information about computing a single histogram.
@@ -381,6 +411,7 @@ isMapSOAC (ScremaForm map_lam scans reds post_lam) = do
 data SOACMapper frep trep m = SOACMapper
   { mapOnSOACSubExp :: SubExp -> m SubExp,
     mapOnSOACLambda :: Lambda frep -> m (Lambda trep),
+    mapOnSOACExtLambda :: ExtLambda frep -> m (ExtLambda trep),
     mapOnSOACVName :: VName -> m VName
   }
 
@@ -390,6 +421,7 @@ identitySOACMapper =
   SOACMapper
     { mapOnSOACSubExp = pure,
       mapOnSOACLambda = pure,
+      mapOnSOACExtLambda = pure,
       mapOnSOACVName = pure
     }
 
@@ -401,14 +433,16 @@ mapSOACM ::
   SOACMapper frep trep m ->
   SOAC frep ->
   m (SOAC trep)
-mapSOACM tv (JVP args vec lam) =
+mapSOACM tv (JVP shape args vec lam) =
   JVP
-    <$> mapM (mapOnSOACSubExp tv) args
+    <$> mapM (mapOnSOACSubExp tv) shape
+    <*> mapM (mapOnSOACSubExp tv) args
     <*> mapM (mapOnSOACSubExp tv) vec
     <*> mapOnSOACLambda tv lam
-mapSOACM tv (VJP args vec lam) =
+mapSOACM tv (VJP shape args vec lam) =
   VJP
-    <$> mapM (mapOnSOACSubExp tv) args
+    <$> mapM (mapOnSOACSubExp tv) shape
+    <*> mapM (mapOnSOACSubExp tv) args
     <*> mapM (mapOnSOACSubExp tv) vec
     <*> mapOnSOACLambda tv lam
 mapSOACM tv (WithVJP args lam0 lam1) =
@@ -447,6 +481,11 @@ mapSOACM tv (Screma w arrs (ScremaForm map_lam scans reds post_lam)) =
             <*> mapM (mapOnSOACReduce tv) reds
             <*> mapOnSOACLambda tv post_lam
         )
+mapSOACM tv (FlatMap w arrs lam) =
+  FlatMap
+    <$> mapOnSOACSubExp tv w
+    <*> mapM (mapOnSOACVName tv) arrs
+    <*> mapOnSOACExtLambda tv lam
 
 mapOnSOACScan :: (Monad m) => SOACMapper frep trep m -> Scan frep -> m (Scan trep)
 mapOnSOACScan tv (Scan red_lam red_nes) =
@@ -464,7 +503,11 @@ mapOnSOACReduce tv (Reduce comm red_lam red_nes) =
 traverseSOACStms :: (Monad m) => OpStmsTraverser m (SOAC rep) rep
 traverseSOACStms f = mapSOACM mapper
   where
-    mapper = identitySOACMapper {mapOnSOACLambda = traverseLambdaStms f}
+    mapper =
+      identitySOACMapper
+        { mapOnSOACLambda = traverseLambdaStms f,
+          mapOnSOACExtLambda = traverseLambdaStms f
+        }
 
 instance (ASTRep rep) => FreeIn (Scan rep) where
   freeIn' (Scan lam ne) = freeIn' lam <> freeIn' ne
@@ -488,6 +531,7 @@ instance (ASTRep rep) => FreeIn (SOAC rep) where
         SOACMapper
           { mapOnSOACSubExp = walk freeIn',
             mapOnSOACLambda = walk freeIn',
+            mapOnSOACExtLambda = walk freeIn',
             mapOnSOACVName = walk freeIn'
           }
 
@@ -499,36 +543,99 @@ instance (ASTRep rep) => Substitute (SOAC rep) where
         SOACMapper
           { mapOnSOACSubExp = pure . substituteNames subst,
             mapOnSOACLambda = pure . substituteNames subst,
+            mapOnSOACExtLambda = pure . substituteNames subst,
             mapOnSOACVName = pure . substituteNames subst
           }
 
 instance (ASTRep rep) => Rename (SOAC rep) where
   rename = mapSOACM renamer
     where
-      renamer = SOACMapper rename rename rename
+      renamer = SOACMapper rename rename rename rename
 
 -- | The type of a SOAC.
-soacType :: (Typed (LParamInfo rep)) => SOAC rep -> [Type]
-soacType (JVP _ _ lam) =
-  lambdaReturnType lam ++ lambdaReturnType lam
-soacType (VJP _ _ lam) =
-  lambdaReturnType lam ++ map paramType (lambdaParams lam)
+soacType :: (Typed (LParamInfo rep)) => SOAC rep -> [ExtType]
+soacType (JVP shape _ _ lam) =
+  staticShapes $
+    lambdaReturnType lam
+      ++ map (`arrayOfShape` shape) (lambdaReturnType lam)
+soacType (VJP shape _ _ lam) =
+  staticShapes $ lambdaReturnType lam ++ map ((`arrayOfShape` shape) . paramType) (lambdaParams lam)
 soacType (WithVJP _ lam _) =
-  lambdaReturnType lam
+  staticShapes $ lambdaReturnType lam
 soacType (Stream outersize _ accs lam) =
-  map (substNamesInType substs) rtp
+  staticShapes $ map (substNamesInType substs) rtp
   where
     nms = map paramName $ take (1 + length accs) params
     substs = M.fromList $ zip nms (outersize : accs)
     Lambda params rtp _ = lam
-soacType (Hist _ _ ops _bucket_fun) = do
+soacType (Hist _ _ ops _bucket_fun) = staticShapes $ do
   op <- ops
   map (`arrayOfShape` histShape op) (lambdaReturnType $ histOp op)
 soacType (Screma w _arrs form) =
-  scremaType w form
+  staticShapes $ scremaType w form
+soacType (FlatMap w _ lam) =
+  [ Prim int64,
+    arrayOfRow (Prim int64) (Free w),
+    arrayOfRow (Prim Bool) (Ext 0),
+    arrayOfRow (Prim int64) (Free w)
+  ]
+    ++ map onValueRet (drop 1 (lambdaReturnType lam))
+  where
+    onValueRet t
+      -- An irregular result is concatenated, so its outer size becomes the
+      -- total size @m@.
+      | flatMapNonuniform t = t `setOuterSize` Ext 0
+      -- A regular result is merely collected, one per input element.
+      | otherwise = t `arrayOfRow` Free w
+
+-- | Is this the type of an irregular result of a 'FlatMap' lambda - one that is
+-- concatenated with the results of the other iterations, rather than merely
+-- collected? These are exactly the results whose outermost size is the
+-- existential size returned by the lambda.
+flatMapNonuniform :: ExtType -> Bool
+flatMapNonuniform t =
+  case shapeDims $ arrayShape t of
+    Ext 0 : _ -> True
+    _ -> False
+
+-- | The element types of the irregular (concatenated) arrays produced by a
+-- 'FlatMap' lambda, with the existential outer dimension stripped. The
+-- remaining dimensions are never existential.
+flatMapRowTypes :: ExtLambda rep -> [Type]
+flatMapRowTypes lam =
+  fromMaybe (error "flatMapRowTypes: existential inner dimension.") $
+    mapM (hasStaticShape . rowType) $
+      filter flatMapNonuniform $
+        drop 1 (lambdaReturnType lam)
+
+-- | Split a list with one element per result of a 'FlatMap' into its metadata
+-- results - the size, the shape array, the flag array, and the offset array -
+-- and its value results.
+flatMapSplitMeta :: [a] -> ((a, a, a, a), [a])
+flatMapSplitMeta (m : shape : flags : offset : vals) =
+  ((m, shape, flags, offset), vals)
+flatMapSplitMeta _ =
+  error "flatMapSplitMeta: too few results."
+
+-- | Split a list with one element per value result of a 'FlatMap' lambda into
+-- the irregular and the regular parts.
+flatMapSplitValues :: ExtLambda rep -> [a] -> ([a], [a])
+flatMapSplitValues lam =
+  partitionEithers . zipWith f (drop 1 (lambdaReturnType lam))
+  where
+    f t x = if flatMapNonuniform t then Left x else Right x
+
+-- | The types of the regular results of a 'FlatMap' lambda - the ones that are
+-- collected rather than concatenated. These never have existential sizes.
+flatMapUniformTypes :: ExtLambda rep -> [Type]
+flatMapUniformTypes lam =
+  fromMaybe (error "flatMapUniformTypes: existential size.") $
+    mapM hasStaticShape $
+      filter (not . flatMapNonuniform) $
+        drop 1 (lambdaReturnType lam)
 
 instance TypedOp SOAC where
-  opType = pure . staticShapes . soacType
+  opType = pure . soacType
 
 instance AliasedOp SOAC where
   opAliases = map (const mempty) . soacType
@@ -536,6 +643,7 @@ instance AliasedOp SOAC where
   consumedInOp JVP {} = mempty
   consumedInOp VJP {} = mempty
   consumedInOp WithVJP {} = mempty
+  consumedInOp FlatMap {} = mempty
   -- Only map functions can consume anything.  The operands to scan
   -- and reduce functions are always considered "fresh".
   consumedInOp (Screma _ arrs (ScremaForm map_lam _ _ _)) =
@@ -561,15 +669,17 @@ mapHistOp f (HistOp w rf dests nes lam) =
   HistOp w rf dests nes $ f lam
 
 instance CanBeAliased SOAC where
-  addOpAliases aliases (JVP args vec lam) =
-    JVP args vec (Alias.analyseLambda aliases lam)
-  addOpAliases aliases (VJP args vec lam) =
-    VJP args vec (Alias.analyseLambda aliases lam)
+  addOpAliases aliases (JVP shape args vec lam) =
+    JVP shape args vec (Alias.analyseLambda aliases lam)
+  addOpAliases aliases (VJP shape args vec lam) =
+    VJP shape args vec (Alias.analyseLambda aliases lam)
   addOpAliases aliases (WithVJP args lam lam_adj) =
     WithVJP
       args
       (Alias.analyseLambda aliases lam)
       (Alias.analyseLambda aliases lam_adj)
+  addOpAliases aliases (FlatMap w arrs lam) =
+    FlatMap w arrs $ Alias.analyseLambda aliases lam
   addOpAliases aliases (Stream size arr accs lam) =
     Stream size arr accs $ Alias.analyseLambda aliases lam
   addOpAliases aliases (Hist w arrs ops bucket_fun) =
@@ -618,12 +728,12 @@ instance IsOp SOAC where
       concatIndicesToEachValue is vs =
         let is_flat = mconcat is
          in map (is_flat <>) vs
-  opDependencies (JVP args vec lam) =
+  opDependencies (JVP _ args vec lam) =
     mconcat $
       replicate 2 $
         lambdaDependencies mempty lam $
           zipWith (<>) (map depsOf' args) (map depsOf' vec)
-  opDependencies (VJP args vec lam) =
+  opDependencies (VJP _ args vec lam) =
     lambdaDependencies
       mempty
       lam
@@ -635,6 +745,11 @@ instance IsOp SOAC where
       lam
       (map depsOf' args)
       <> map (const $ freeIn args <> freeIn lam) (lambdaParams lam)
+  opDependencies (FlatMap w arrs lam) =
+    -- FIXME: this is strictly speaking not accurate, although it will not cause
+    -- trouble anytime soon.
+    replicate 4 mempty
+      ++ drop 1 (lambdaDependencies mempty lam (depsOfArrays w arrs))
   opDependencies (Screma w arrs (ScremaForm map_lam scans reds post_lam)) =
     let (scans_in, reds_in, map_deps) =
           splitAt3 (scanResults scans) (redResults reds) $
@@ -654,9 +769,9 @@ substNamesInType :: M.Map VName SubExp -> Type -> Type
 substNamesInType _ t@Prim {} = t
 substNamesInType _ t@Acc {} = t
 substNamesInType _ (Mem space) = Mem space
-substNamesInType subs (Array btp shp u) =
+substNamesInType subs (Array btp shp o) =
   let shp' = Shape $ map (substNamesInSubExp subs) (shapeDims shp)
-   in Array btp shp' u
+   in Array btp shp' o
 
 substNamesInSubExp :: M.Map VName SubExp -> SubExp -> SubExp
 substNamesInSubExp _ e@(Constant _) = e
@@ -664,7 +779,7 @@ substNamesInSubExp subs (Var idd) =
   M.findWithDefault (Var idd) idd subs
 
 instance CanBeWise SOAC where
-  addOpWisdom = runIdentity . mapSOACM (SOACMapper pure (pure . informLambda) pure)
+  addOpWisdom = runIdentity . mapSOACM (SOACMapper pure (pure . informLambda) (pure . informLambda) pure)
 
 instance (RepTypes rep) => ST.IndexOp (SOAC rep) where
   indexOp vtable k soac [i] = do
@@ -708,26 +823,32 @@ instance (RepTypes rep) => ST.IndexOp (SOAC rep) where
 
 -- | Type-check a SOAC.
 typeCheckSOAC :: (TC.Checkable rep) => SOAC (Aliases rep) -> TC.TypeM rep ()
-typeCheckSOAC (VJP args vec lam) = do
+typeCheckSOAC (VJP shape args vec lam) = do
+  mapM_ (TC.require $ Prim int64) shape
   args' <- mapM TC.checkArg args
   TC.checkLambda lam $ map TC.noArgAliases args'
   vec_ts <- mapM TC.checkSubExp vec
-  unless (vec_ts == lambdaReturnType lam) $
+  unless (vec_ts == map (`arrayOfShape` shape) (lambdaReturnType lam)) $
     TC.bad . TC.TypeError . docText $
       "Return type"
         </> PP.indent 2 (pretty (lambdaReturnType lam))
-        </> "does not match type of seed vector"
+        </> "inconsistent with type of seed vector"
         </> PP.indent 2 (pretty vec_ts)
-typeCheckSOAC (JVP args vec lam) = do
+        </> "with shape"
+        </> PP.indent 2 (pretty shape)
+typeCheckSOAC (JVP shape args vec lam) = do
+  mapM_ (TC.require $ Prim int64) shape
   args' <- mapM TC.checkArg args
   TC.checkLambda lam $ map TC.noArgAliases args'
   vec_ts <- mapM TC.checkSubExp vec
-  unless (vec_ts == map TC.argType args') $
+  unless (vec_ts == map ((`arrayOfShape` shape) . TC.argType) args') $
     TC.bad . TC.TypeError . docText $
       "Parameter type"
         </> PP.indent 2 (pretty $ map TC.argType args')
         </> "does not match type of seed vector"
         </> PP.indent 2 (pretty vec_ts)
+        </> "with shape"
+        </> PP.indent 2 (pretty shape)
 typeCheckSOAC (WithVJP args lam lam_adj) = do
   args' <- mapM TC.checkArg args
   TC.checkLambda lam $ map TC.noArgAliases args'
@@ -739,6 +860,10 @@ typeCheckSOAC (WithVJP args lam lam_adj) = do
         </> PP.indent 2 (pretty $ lambdaReturnType lam_adj)
         </> "does not match type of arguments"
         </> PP.indent 2 (pretty $ map TC.argType args')
+typeCheckSOAC (FlatMap w arrs lam) = do
+  TC.require (Prim int64) w
+  arrs' <- TC.checkSOACArrayArgs w arrs
+  TC.checkExtLambda lam arrs'
 typeCheckSOAC (Stream size arrexps accexps lam) = do
   TC.require (Prim int64) size
   accargs <- mapM TC.checkArg accexps
@@ -850,12 +975,14 @@ typeCheckReduce (Reduce _ red_lam red_nes) = do
   pure red_nes'
 
 instance RephraseOp SOAC where
-  rephraseInOp r (VJP args vec lam) =
-    VJP args vec <$> rephraseLambda r lam
-  rephraseInOp r (JVP args vec lam) =
-    JVP args vec <$> rephraseLambda r lam
+  rephraseInOp r (VJP shape args vec lam) =
+    VJP shape args vec <$> rephraseLambda r lam
+  rephraseInOp r (JVP shape args vec lam) =
+    JVP shape args vec <$> rephraseLambda r lam
   rephraseInOp r (WithVJP args lam lam_adj) =
     WithVJP args <$> rephraseLambda r lam <*> rephraseLambda r lam_adj
+  rephraseInOp r (FlatMap w arrs lam) =
+    FlatMap w arrs <$> rephraseLambda r lam
   rephraseInOp r (Stream w arrs acc lam) =
     Stream w arrs acc <$> rephraseLambda r lam
   rephraseInOp r (Hist w arrs ops lam) =
@@ -881,13 +1008,15 @@ rephraseScan r (Scan op nes) =
   Scan <$> rephraseLambda r op <*> pure nes
 
 instance (OpMetrics (Op rep)) => OpMetrics (SOAC rep) where
-  opMetrics (VJP _ _ lam) =
+  opMetrics (VJP _ _ _ lam) =
     inside "VJP" $ lambdaMetrics lam
-  opMetrics (JVP _ _ lam) =
+  opMetrics (JVP _ _ _ lam) =
     inside "JVP" $ lambdaMetrics lam
   opMetrics (WithVJP _ lam lam_adj) = do
     inside "WithVJP" $ lambdaMetrics lam
     inside "WithVJP" $ lambdaMetrics lam_adj
+  opMetrics (FlatMap _ _ lam) = do
+    inside "FlatMap" $ lambdaMetrics lam
   opMetrics (Stream _ _ _ lam) =
     inside "Stream" $ lambdaMetrics lam
   opMetrics (Hist _ _ ops bucket_fun) =
@@ -900,19 +1029,21 @@ instance (OpMetrics (Op rep)) => OpMetrics (SOAC rep) where
       lambdaMetrics post_lam
 
 instance (PrettyRep rep) => PP.Pretty (SOAC rep) where
-  pretty (VJP args vec lam) =
+  pretty (VJP shape args vec lam) =
     "vjp"
       <> parens
         ( PP.align $
-            PP.braces (commasep $ map pretty args)
+            pretty shape
+              <> comma </> PP.braces (commasep $ map pretty args)
               <> comma </> PP.braces (commasep $ map pretty vec)
               <> comma </> pretty lam
         )
-  pretty (JVP args vec lam) =
+  pretty (JVP shape args vec lam) =
     "jvp"
       <> parens
         ( PP.align $
-            PP.braces (commasep $ map pretty args)
+            pretty shape
+              <> comma </> PP.braces (commasep $ map pretty args)
               <> comma </> PP.braces (commasep $ map pretty vec)
               <> comma </> pretty lam
         )
@@ -923,6 +1054,13 @@ instance (PrettyRep rep) => PP.Pretty (SOAC rep) where
             PP.braces (commasep $ map pretty args)
               <> comma </> pretty lam
               <> comma </> pretty lam_adj
+        )
+  pretty (FlatMap w arrs lam) =
+    "flatmap"
+      <> (parens . align)
+        ( pretty w
+            <> comma </> ppTuple' (map pretty arrs)
+            <> comma </> pretty lam
         )
   pretty (Stream size arrs acc lam) =
     ppStream size arrs acc lam
@@ -1016,7 +1154,7 @@ ppHist ::
   Doc ann
 ppHist w arrs ops bucket_fun =
   "hist"
-    <> parens
+    <> (parens . align)
       ( pretty w
           <> comma
             </> ppTuple' (map pretty arrs)

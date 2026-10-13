@@ -71,16 +71,16 @@ fn udiv_i8(a: i8, b: i8) -> i8 {
   return norm_i8(udiv_i32(norm_u8(a), norm_u8(b)));
 }
 
-fn udiv_up_i8(a: i8, b: i8) -> i8 {
-  return norm_i8(udiv_up_i32(norm_u8(a), norm_u8(b)));
+fn uceil_div_i8(a: i8, b: i8) -> i8 {
+  return norm_i8(uceil_div_i32(norm_u8(a), norm_u8(b)));
 }
 
 fn sdiv_i8(a: i8, b: i8) -> i8 {
   return sdiv_i32(a, b);
 }
 
-fn sdiv_up_i8(a: i8, b: i8) -> i8 {
-  return sdiv_up_i32(a, b);
+fn sceil_div_i8(a: i8, b: i8) -> i8 {
+  return sceil_div_i32(a, b);
 }
 
 fn umod_i8(a: i8, b: i8) -> i8 {

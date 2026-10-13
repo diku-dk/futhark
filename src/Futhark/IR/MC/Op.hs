@@ -90,7 +90,7 @@ instance (AliasedOp op) => AliasedOp (MCOp op) where
   opAliases (ParOp _ op) = opAliases op
   opAliases (OtherOp op) = opAliases op
 
-  consumedInOp (ParOp _ op) = consumedInOp op
+  consumedInOp (ParOp seq_op op) = maybe mempty consumedInOp seq_op <> consumedInOp op
   consumedInOp (OtherOp op) = consumedInOp op
 
 instance (CanBeAliased op) => CanBeAliased (MCOp op) where

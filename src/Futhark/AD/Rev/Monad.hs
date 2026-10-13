@@ -9,10 +9,12 @@
 module Futhark.AD.Rev.Monad
   ( ADM,
     RState (..),
+    REnv,
     runADM,
     Adj (..),
     InBounds (..),
     Sparse (..),
+    askShape,
     adjFromParam,
     adjFromVar,
     lookupAdj,
@@ -43,6 +45,7 @@ module Futhark.AD.Rev.Monad
     zeroArray,
     unitAdjOfType,
     addLambda,
+    vecOpExp,
     --
     VjpOps (..),
     --
@@ -50,14 +53,22 @@ module Futhark.AD.Rev.Monad
     lookupLoopTape,
     substLoopTape,
     renameLoopTape,
+    --
+    locallyNonvector,
+    vecToInner,
+    vecSlice,
+    withOperatorAccs,
+    isOperatorAcc,
   )
 where
 
 import Control.Monad
+import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Bifunctor (second)
 import Data.Map qualified as M
 import Data.Maybe
+import Futhark.AD.Shared
 import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Builder
@@ -104,10 +115,17 @@ data InBounds
 -- | A symbolic representation of an array that is all zeroes, except
 -- at certain indexes.
 data Sparse = Sparse
-  { -- | The shape of the array.
+  { -- | The full shape of the array (including any vector dimensions, which are
+    -- stored in sparseVecDims).
     sparseShape :: Shape,
     -- | Element type of the array.
     sparseType :: PrimType,
+    -- | Number of leading dimensions that are \"vector\" dimensions, due to
+    -- vector AD. These are not indexed by the sparse index, but are present in
+    -- the values. When zero, this is the ordinary non-vector case. This is
+    -- equivalent to the rank of `askShape`, but it is convenient to store it
+    -- here as well.
+    sparseVecDims :: Int,
     -- | Locations and values of nonzero values.  Indexes may be
     -- negative, in which case the value is ignored (unless
     -- 'AssumeBounds' is used).
@@ -140,14 +158,15 @@ zeroArray shape t
           Replicate shape zero
 
 sparseArray :: (MonadBuilder m, Rep m ~ SOACS) => Sparse -> m VName
-sparseArray (Sparse shape t ivs) = do
+sparseArray (Sparse shape t vec_dims ivs) = do
   flip (foldM f) ivs =<< zeroArray shape (Prim t)
   where
     arr_t = Prim t `arrayOfShape` shape
+    vec_slice = map sliceDim $ take vec_dims $ shapeDims shape
     f arr (check, i, se) = do
       let stm s =
             letExp "sparse" . BasicOp $
-              Update s arr (fullSlice arr_t [DimFix i]) se
+              Update s arr (fullSlice arr_t (vec_slice ++ [DimFix i])) se
       case check of
         AssumeBounds -> stm Unsafe
         CheckBounds _ -> stm Safe
@@ -170,8 +189,8 @@ unitAdjOfType t = AdjVal <$> letSubExp "adj_unit" (oneExp t)
 adjRep :: Adj -> ([SubExp], [SubExp] -> Adj)
 adjRep (AdjVal se) = ([se], \[se'] -> AdjVal se')
 adjRep (AdjZero shape pt) = ([], \[] -> AdjZero shape pt)
-adjRep (AdjSparse (Sparse shape pt ivs)) =
-  (concatMap ivRep ivs, AdjSparse . Sparse shape pt . repIvs ivs)
+adjRep (AdjSparse (Sparse shape pt vd ivs)) =
+  (concatMap ivRep ivs, AdjSparse . Sparse shape pt vd . repIvs ivs)
   where
     ivRep (_, i, v) = [i, v]
     repIvs ((check, _, _) : ivs') (i : v : ses) =
@@ -197,12 +216,22 @@ data RState = RState
     stateNameSource :: VNameSource
   }
 
-newtype ADM a = ADM (BuilderT SOACS (State RState) a)
+data REnv = REnv
+  { envAdjShape :: Shape,
+    envAttrs :: Attrs,
+    -- | The certificates of those accumulators that have a combining operator,
+    -- and so do not behave like overwrites.  See Note [Adjoints of
+    -- accumulators].
+    envOperatorAccs :: Names
+  }
+
+newtype ADM a = ADM (BuilderT SOACS (ReaderT REnv (State RState)) a)
   deriving
     ( Functor,
       Applicative,
       Monad,
       MonadState RState,
+      MonadReader REnv,
       MonadFreshNames,
       HasScope SOACS,
       LocalScope SOACS
@@ -221,16 +250,21 @@ instance MonadFreshNames (State RState) where
   getNameSource = gets stateNameSource
   putNameSource src = modify (\env -> env {stateNameSource = src})
 
-runADM :: (MonadFreshNames m) => ADM a -> m a
-runADM (ADM m) =
+askShape :: ADM Shape
+askShape = ADM $ lift $ asks envAdjShape
+
+runADM :: (MonadFreshNames m) => Shape -> Attrs -> ADM a -> m a
+runADM shape attrs (ADM m) =
   modifyNameSource $ \vn ->
     second stateNameSource $
       runState
-        (fst <$> runBuilderT m mempty)
+        ( runReaderT (fst <$> runBuilderT m mempty) $
+            REnv shape attrs mempty
+        )
         (RState mempty mempty mempty vn)
 
 adjVal :: Adj -> ADM VName
-adjVal (AdjVal se) = letExp "const_adj" $ BasicOp $ SubExp se
+adjVal (AdjVal se) = letExp "const_val_adj" $ BasicOp $ SubExp se
 adjVal (AdjSparse sparse) = sparseArray sparse
 adjVal (AdjZero shape t) = zeroArray shape $ Prim t
 
@@ -312,13 +346,12 @@ noAdjsFor names m = do
   where
     names' = namesToList names
 
-addBinOp :: PrimType -> BinOp
-addBinOp (IntType it) = Add it OverflowWrap
-addBinOp (FloatType ft) = FAdd ft
-addBinOp Bool = LogAnd
-addBinOp Unit = LogAnd
-
-tabNest :: Int -> [VName] -> ([VName] -> [VName] -> ADM [VName]) -> ADM [VName]
+tabNest ::
+  (MonadBuilder m, Rep m ~ SOACS) =>
+  Int ->
+  [VName] ->
+  ([VName] -> [VName] -> m [VName]) ->
+  m [VName]
 tabNest = tabNest' []
   where
     tabNest' is 0 vs f = f (reverse is) vs
@@ -338,13 +371,14 @@ tabNest = tabNest' []
       let lam = Lambda (iparam : params) ret (Body () stms res)
       letTupExp "tab" . Op . Screma w (iota : vs) =<< mapSOAC lam
 
--- | Construct a lambda for adding two values of the given type.
-addLambda :: Type -> ADM (Lambda SOACS)
-addLambda (Prim pt) = binOpLambda (addBinOp pt) pt
-addLambda t@Array {} = do
+-- | Construct a lambda for binop'ing two values of the given type,
+-- which may be arrays.
+vecOpLambda :: (PrimType -> BinOp) -> Type -> ADM (Lambda SOACS)
+vecOpLambda bop (Prim pt) = binOpLambda (bop pt) pt
+vecOpLambda bop t@Array {} = do
   xs_p <- newParam "xs" t
   ys_p <- newParam "ys" t
-  lam <- addLambda $ rowType t
+  lam <- vecOpLambda bop $ rowType t
   body <- insertStmsM $ do
     res <-
       letSubExp "lam_map"
@@ -358,10 +392,10 @@ addLambda t@Array {} = do
         lambdaReturnType = [t],
         lambdaBody = body
       }
-addLambda t =
-  error $ "addLambda: " ++ show t
+vecOpLambda _ t =
+  error $ "vecOpLambda: " ++ show t
 
--- Construct an expression for adding the two variables.
+-- | Construct an expression for adding the two variables.
 addExp :: VName -> VName -> ADM (Exp SOACS)
 addExp x y = do
   x_t <- lookupType x
@@ -374,17 +408,31 @@ addExp x y = do
     _ ->
       error $ "addExp: unexpected type: " ++ prettyString x_t
 
+-- | Construct an expression for performing this binary operation on two variables.
+vecOpExp :: (PrimType -> BinOp) -> VName -> VName -> ADM (Exp SOACS)
+vecOpExp bop x y = do
+  x_t <- lookupType x
+  case x_t of
+    Prim pt ->
+      pure $ BasicOp $ BinOp (bop pt) (Var x) (Var y)
+    Array {} -> do
+      lam <- vecOpLambda bop $ rowType x_t
+      Op . Screma (arraySize 0 x_t) [x, y] <$> mapSOAC lam
+    _ ->
+      error $ "vecOpExp: unexpected type: " ++ prettyString x_t
+
 lookupAdj :: VName -> ADM Adj
 lookupAdj v = do
   maybeAdj <- gets $ M.lookup v . stateAdjs
+  adj_shape <- askShape
   case maybeAdj of
     Nothing -> do
       v_t <- lookupType v
       case v_t of
-        Acc _ shape [Prim t] _ -> pure $ AdjZero shape t
-        Acc _ shape [t] _ -> pure $ AdjZero (shape <> arrayShape t) (elemType t)
+        Acc _ shape [Prim t] -> pure $ AdjZero shape t
+        Acc _ shape [t] -> pure $ AdjZero (shape <> arrayShape t) (elemType t)
         Acc {} -> error $ "lookupAdj: Non-singleton accumulator adjoint: " <> prettyString v_t
-        _ -> pure $ AdjZero (arrayShape v_t) (elemType v_t)
+        _ -> pure $ AdjZero (adj_shape <> arrayShape v_t) (elemType v_t)
     Just v_adj -> pure v_adj
 
 lookupAdjVal :: VName -> ADM VName
@@ -394,27 +442,34 @@ updateAdjIndex :: VName -> (InBounds, SubExp) -> SubExp -> ADM ()
 updateAdjIndex v (check, i) se = do
   maybeAdj <- gets $ M.lookup v . stateAdjs
   t <- lookupType v
+  adj_shape <- askShape
   let iv = (check, i, se)
+      vec_dims = shapeRank adj_shape
+      full_shape = adj_shape <> arrayShape t
   case maybeAdj of
-    Nothing -> do
-      setAdj v $ AdjSparse $ Sparse (arrayShape t) (elemType t) [iv]
-    Just AdjZero {} ->
-      setAdj v $ AdjSparse $ Sparse (arrayShape t) (elemType t) [iv]
-    Just (AdjSparse (Sparse shape pt ivs)) ->
-      setAdj v $ AdjSparse $ Sparse shape pt $ iv : ivs
+    Nothing ->
+      setAdj v $ AdjSparse $ Sparse full_shape (elemType t) vec_dims [iv]
+    Just (AdjZero {}) ->
+      setAdj v $ AdjSparse $ Sparse full_shape (elemType t) vec_dims [iv]
+    Just (AdjSparse (Sparse shape pt vd ivs)) ->
+      setAdj v $ AdjSparse $ Sparse shape pt vd $ iv : ivs
     Just adj@AdjVal {} -> do
       v_adj <- adjVal adj
       v_adj_t <- lookupType v_adj
       se_v <- letExp "se_v" $ BasicOp $ SubExp se
+      vec_shape <- askShape
       insAdj v
         =<< case v_adj_t of
           Acc {} -> do
             let stms s = do
+                  attrs <- asks envAttrs
                   dims <- arrayDims <$> lookupType se_v
                   ~[v_adj'] <-
-                    tabNest (length dims) [se_v, v_adj] $ \is [se_v', v_adj'] ->
-                      letTupExp "acc" . BasicOp $
-                        UpdateAcc s v_adj' (i : map Var is) [Var se_v']
+                    attributing attrs $
+                      tabNest (length dims) [se_v, v_adj] $ \is [se_v', v_adj'] -> do
+                        let (vec_is, val_is) = splitAt (shapeRank vec_shape) $ map Var is
+                        letTupExp "acc" . BasicOp $
+                          UpdateAcc s v_adj' (vec_is ++ i : val_is) [Var se_v']
                   pure v_adj'
             case check of
               CheckBounds _ -> stms Safe
@@ -422,13 +477,15 @@ updateAdjIndex v (check, i) se = do
               OutOfBounds -> pure v_adj
           _ -> do
             let stms s = do
+                  let slice =
+                        fullSlice v_adj_t $
+                          map sliceDim (shapeDims vec_shape) ++ [DimFix i]
                   v_adj_i <-
                     letExp (baseName v_adj <> "_i") . BasicOp $
-                      Index v_adj $
-                        fullSlice v_adj_t [DimFix i]
+                      Index v_adj slice
                   se_update <- letSubExp "updated_adj_i" =<< addExp se_v v_adj_i
                   letExp (baseName v_adj) . BasicOp $
-                    Update s v_adj (fullSlice v_adj_t [DimFix i]) se_update
+                    Update s v_adj slice se_update
             case check of
               CheckBounds _ -> stms Safe
               AssumeBounds -> stms Unsafe
@@ -479,11 +536,12 @@ updateAdjSliceWithSafety slice v d safety = do
             UpdateAcc safety v_adj' slice' [Var d']
       pure v_adj'
     _ -> do
+      vec_slice <- vecSlice v_adj_t $ unSlice slice
       v_adjslice <-
         if primType t
           then pure v_adj
-          else letExp (baseName v <> "_slice") $ BasicOp $ Index v_adj slice
-      letInPlace "updated_adj" v_adj slice =<< addExp v_adjslice d
+          else letExp (baseName v <> "_slice") $ BasicOp $ Index v_adj vec_slice
+      letInPlace "updated_adj" v_adj vec_slice =<< addExp v_adjslice d
   insAdj v v_adj'
 
 updateAdj :: VName -> VName -> ADM ()
@@ -518,7 +576,8 @@ subSubsts m = do
 
 data VjpOps = VjpOps
   { vjpLambda :: [Adj] -> [VName] -> Lambda SOACS -> ADM (Lambda SOACS),
-    vjpStm :: Stm SOACS -> ADM () -> ADM ()
+    vjpStm :: Stm SOACS -> ADM () -> ADM (),
+    vjpBody :: [Adj] -> [VName] -> Body SOACS -> ADM (Body SOACS)
   }
 
 -- | @setLoopTape v vs@ establishes @vs@ as the name of the array
@@ -543,6 +602,70 @@ substLoopTape v v' = mapM_ (setLoopTape v') =<< lookupLoopTape v
 renameLoopTape :: Substitutions -> ADM ()
 renameLoopTape = mapM_ (uncurry substLoopTape) . M.toList
 
+-- | Disable vector AD within the provided action. This results in a map that
+-- computes each adjoint explicitly, then assembles the resulting adjoint
+-- vectors. This is useful for constructs (such as scans) where vector AD is
+-- impractical or inefficient.
+locallyNonvector ::
+  (FreeIn e) =>
+  -- | Something that represents all the free variables used in the action.
+  -- Usually just an expression or statement.
+  e ->
+  ADM () ->
+  ADM ()
+locallyNonvector e m = do
+  adj_shape <- askShape
+  if adj_shape == mempty
+    then m
+    else do
+      -- We map over all adjoints of free variables in 'e'. To avoid clutter, we
+      -- only consider those that actually have known nonzero adjoints.
+      e_adjs <- filterM knownAdjoint e_free
+      e_adjs_vals <- mapM lookupAdjVal e_adjs
+      e_free_adjs <- mkMap "nonvec_adj" adj_shape e_adjs_vals $ \e_adjs_vals' -> do
+        zipWithM_ insAdj e_adjs e_adjs_vals'
+        local (\env -> env {envAdjShape = mempty}) m
+        mapM lookupAdjVal e_free
+      zipWithM_ insAdj e_free e_free_adjs
+  where
+    e_free = namesToList $ freeIn e
+    knownAdjoint v = do
+      v_adj <- lookupAdj v
+      pure $ case v_adj of
+        AdjZero {} -> False
+        _ -> True
+
+-- | Note that these accumulator certificates belong to accumulators that have
+-- a combining operator, for the duration of the action.
+withOperatorAccs :: [VName] -> ADM a -> ADM a
+withOperatorAccs certs = local $ \env ->
+  env {envOperatorAccs = namesFromList certs <> envOperatorAccs env}
+
+-- | Does this accumulator certificate belong to an accumulator with a
+-- combining operator, rather than a scatter-like one that overwrites?  See Note
+-- [Adjoints of accumulators].
+isOperatorAcc :: VName -> ADM Bool
+isOperatorAcc cert = ADM $ lift $ asks $ (cert `nameIn`) . envOperatorAccs
+
+-- | @vecSlice t is@ indexes an adjoint of type @t@ with @is@, which is written
+-- against the type of the corresponding primal value.  As the vector
+-- dimensions are outermost in the adjoint, they must be skipped past.
+vecSlice :: Type -> [DimIndex SubExp] -> ADM (Slice SubExp)
+vecSlice t is = do
+  adj_shape <- askShape
+  pure $ sliceAt t (shapeRank adj_shape) is
+
+-- | If we are doing vector AD, apply 'vecPerm' to the array.
+vecToInner :: VName -> ADM VName
+vecToInner v = do
+  adj_shape <- askShape
+  if adj_shape == mempty
+    then pure v
+    else do
+      v_t <- lookupType v
+      letExp (baseName v <> "_tr") . BasicOp . Rearrange v $
+        vecPerm adj_shape v_t
+
 -- Note [Consumption]
 --
 -- Parts of this transformation depends on duplicating computation.
@@ -560,11 +683,10 @@ renameLoopTape = mapM_ (uncurry substLoopTape) . M.toList
 --
 --  let ys_copy = copy ys
 --
--- Then we generate code for the return sweep as normal, but replace
--- _every instance_ of 'ys' in the generated code with 'ys_copy'.
--- This works because Futhark does not have *semantic* in-place
--- updates - any uniqueness violation can be replaced with copies (on
--- arrays, anyway).
+-- Then we generate code for the return sweep as normal, but replace _every
+-- instance_ of 'ys' in the generated code with 'ys_copy'. This works because
+-- Futhark does not have *semantic* in-place updates - any consumption violation
+-- can be replaced with copies (on arrays, anyway).
 --
 -- If we are lucky, the uses of 'ys_copy' will be removed by
 -- simplification, and there will be no overhead.  But even if not,

@@ -186,7 +186,7 @@ ruleBasicOp vtable pat aux (Update _ dest destis (Var v))
       False
 ruleBasicOp vtable pat aux (Update Unsafe dest is se)
   | Just dest_t <- ST.lookupType dest vtable,
-    isFullSlice (arrayShape dest_t) is = Simplify . auxing aux $
+    isIdentitySlice (arrayShape dest_t) is = Simplify . auxing aux $
       case se of
         Var v | not $ null $ sliceDims is -> do
           v_t <- lookupType v
@@ -195,7 +195,7 @@ ruleBasicOp vtable pat aux (Update Unsafe dest is se)
               Reshape v $
                 reshapeAll (arrayShape v_t) (arrayShape dest_t)
           letBind pat $ BasicOp $ Replicate mempty v_reshaped
-        _ -> letBind pat $ BasicOp $ ArrayLit [se] $ rowType dest_t
+        _ -> letBind pat $ BasicOp $ Replicate (arrayShape dest_t) se
 ruleBasicOp vtable pat aux (Update safety1 dest1 is1 (Var v1))
   | Just (Update safety2 dest2 is2 se2, cs2) <- ST.lookupBasicOp v1 vtable,
     Just (Replicate (Shape []) (Var v3), cs3) <- ST.lookupBasicOp dest2 vtable,
@@ -252,27 +252,6 @@ ruleBasicOp _ pat _ (ArrayLit (se : ses) _)
       Simplify $
         let n = constant (fromIntegral (length ses) + 1 :: Int64)
          in letBind pat $ BasicOp $ Replicate (Shape [n]) se
-ruleBasicOp vtable pat aux (Index idd slice)
-  | Just inds <- sliceIndices slice,
-    Just (BasicOp (Reshape idd2 newshape), idd_cs) <- ST.lookupExp idd vtable,
-    shapeRank (newShape newshape) == length inds = Simplify $
-      case reshapeKind newshape of
-        ReshapeCoerce ->
-          certifying idd_cs . auxing aux . letBind pat . BasicOp $
-            Index idd2 slice
-        ReshapeArbitrary -> do
-          -- Linearise indices and map to old index space.
-          oldshape <- arrayDims <$> lookupType idd2
-          let new_inds =
-                reshapeIndex
-                  (map pe64 oldshape)
-                  (map pe64 $ shapeDims $ newShape newshape)
-                  (map pe64 inds)
-          new_inds' <-
-            mapM (toSubExp "new_index") new_inds
-          certifying idd_cs . auxing aux . letBind pat . BasicOp $
-            Index idd2 (Slice $ map DimFix new_inds')
-
 -- Copying an iota is pointless; just make it an iota instead.
 ruleBasicOp vtable pat aux (Replicate (Shape []) (Var v))
   | Just (Iota n x s it, v_cs) <- ST.lookupBasicOp v vtable =
@@ -303,6 +282,15 @@ ruleBasicOp vtable pat aux (Rearrange v1 perm)
               letSubExp "rearrange_replicate" . BasicOp $
                 Rearrange v2 (map (subtract num_dims) rest_perm)
             letBind pat $ BasicOp $ Replicate dims v
+
+-- Rearranging a replicate of primitives is the same as just reshaping it.
+ruleBasicOp vtable pat aux (Rearrange v1 perm)
+  | Just (BasicOp (Replicate _ se), v1_cs) <- ST.lookupExp v1 vtable,
+    Just old_shape <- arrayShape <$> ST.lookupType v1 vtable,
+    Just (Prim _) <- ST.lookupSubExpType se vtable =
+      Simplify . certifying v1_cs . auxing aux $ do
+        let new_shape = Shape $ rearrangeShape perm $ shapeDims old_shape
+        letBind pat $ BasicOp $ Reshape v1 $ reshapeAll old_shape new_shape
 
 -- Simplify away 0<=i when 'i' is from a loop of form 'for i < n'.
 ruleBasicOp vtable pat aux (CmpOp CmpSle {} x y)
@@ -343,7 +331,7 @@ ruleBasicOp vtable pat aux (SubExp (Var v))
 -- always a no-op.
 ruleBasicOp vtable pat aux (UpdateAcc _ acc _ vs)
   | Pat [pe] <- pat,
-    Acc token _ _ _ <- patElemType pe,
+    Acc token _ _ <- patElemType pe,
     Just (_, _, Just (_, ne)) <- ST.entryAccInput =<< ST.lookup token vtable,
     vs == ne =
       Simplify . auxing aux $ letBind pat $ BasicOp $ SubExp $ Var acc

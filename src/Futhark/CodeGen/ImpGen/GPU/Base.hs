@@ -61,7 +61,7 @@ import Futhark.IR.GPUMem
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Transform.Rename
 import Futhark.Util (dropLast, nubOrd, splitFromEnd)
-import Futhark.Util.IntegralExp (divUp, quot, rem)
+import Futhark.Util.IntegralExp (ceilDiv, quot, rem)
 import Prelude hiding (quot, rem)
 
 -- | Which target are we ultimately generating code for?  While most
@@ -219,7 +219,7 @@ kernelLoop tid num_threads n f =
     if n == num_threads
       then f tid
       else do
-        num_chunks <- dPrimVE "num_chunks" $ n `divUp` num_threads
+        num_chunks <- dPrimVE "num_chunks" $ n `ceilDiv` num_threads
         sFor "chunk_i" num_chunks $ \chunk_i -> do
           i <- dPrimVE "i" $ chunk_i * num_threads + tid
           sWhen (i .<. n) $ f i
@@ -380,20 +380,16 @@ inChunkScan constants seg_flag arrs_full_size lockstep_width block_size active a
     in_block_id = ltid32 - block_id * block_size
     ltid32 = kernelLocalThreadId constants
     ltid = sExt64 ltid32
-    gtid = sExt64 $ kernelGlobalThreadId constants
     array_scan = not $ all primType $ lambdaReturnType scan_lam
 
-    readInitial p arr
-      | isPrimParam p =
-          copyDWIMFix (paramName p) [] (Var arr) [ltid]
-      | otherwise =
-          copyDWIMFix (paramName p) [] (Var arr) [gtid]
+    readInitial p arr =
+      copyDWIMFix (paramName p) [] (Var arr) [ltid]
 
     readParam behind p arr
       | isPrimParam p =
           copyDWIMFix (paramName p) [] (Var arr) [ltid - behind]
       | otherwise =
-          copyDWIMFix (paramName p) [] (Var arr) [gtid - behind + arrs_full_size]
+          copyDWIMFix (paramName p) [] (Var arr) [ltid - behind + arrs_full_size]
 
     writeResult x y arr = do
       when (isPrimParam x) $
@@ -457,19 +453,11 @@ blockScan seg_flag arrs_full_size w lam arrs = do
         | otherwise =
             sOp $ Imp.ErrorSync Imp.FenceLocal
 
-      block_offset = sExt64 (kernelBlockId constants) * kernelBlockSize constants
+      writeBlockResult p arr =
+        copyDWIMFix arr [sExt64 chunk_id] (Var $ paramName p) []
 
-      writeBlockResult p arr
-        | isPrimParam p =
-            copyDWIMFix arr [sExt64 chunk_id] (Var $ paramName p) []
-        | otherwise =
-            copyDWIMFix arr [block_offset + sExt64 chunk_id] (Var $ paramName p) []
-
-      readPrevBlockResult p arr
-        | isPrimParam p =
-            copyDWIMFix (paramName p) [] (Var arr) [sExt64 chunk_id - 1]
-        | otherwise =
-            copyDWIMFix (paramName p) [] (Var arr) [block_offset + sExt64 chunk_id - 1]
+      readPrevBlockResult p arr =
+        copyDWIMFix (paramName p) [] (Var arr) [sExt64 chunk_id - 1]
 
   doInChunkScan seg_flag ltid_in_bounds lam
   barrier
@@ -480,7 +468,7 @@ blockScan seg_flag arrs_full_size w lam arrs = do
       sWhen is_first_block $
         forM_ (zip x_params arrs) $ \(x, arr) ->
           unless (isPrimParam x) $
-            copyDWIMFix arr [arrs_full_size + block_offset + sExt64 chunk_size + ltid] (Var $ paramName x) []
+            copyDWIMFix arr [arrs_full_size + sExt64 chunk_size + ltid] (Var $ paramName x) []
 
     barrier
 
@@ -509,9 +497,9 @@ blockScan seg_flag arrs_full_size w lam arrs = do
           unless (isPrimParam x) $
             copyDWIMFix
               arr
-              [arrs_full_size + block_offset + ltid]
+              [arrs_full_size + ltid]
               (Var arr)
-              [arrs_full_size + block_offset + sExt64 chunk_size + ltid]
+              [arrs_full_size + sExt64 chunk_size + ltid]
 
     barrier
 
@@ -553,7 +541,7 @@ blockScan seg_flag arrs_full_size w lam arrs = do
       forM_ (zip3 x_params y_params arrs) $ \(x, y, arr) ->
         if isPrimParam y
           then copyDWIMFix arr [ltid] (Var $ paramName y) []
-          else copyDWIMFix (paramName x) [] (Var arr) [arrs_full_size + block_offset + ltid]
+          else copyDWIMFix (paramName x) [] (Var arr) [arrs_full_size + ltid]
 
   barrier
 
@@ -840,10 +828,24 @@ atomicUpdateLocking _ op = AtomicLocking $ \locking space arrs bucket -> do
             zipWithM_ (writeArray bucket) arrs $
               map (Var . paramName) acc_params
 
+  -- Entering and leaving the critical section is done with an atomic
+  -- compare-and-exchange, but that orders only the lock word itself.
+  -- The writes are ordered by the fence that 'writeAtomic' emits, but
+  -- the reads need one here: without it the memory model permits them
+  -- to be served from a stale cache, so the value we combine with is
+  -- the one from before the previous lock holder ran, and that
+  -- holder's update is lost.
+  let acquire_fence =
+        sOp . Imp.MemFence $
+          case space of
+            Space "shared" -> Imp.FenceLocal
+            _ -> Imp.FenceGlobal
+
   -- While-loop: Try to insert your value
   sWhile (tvExp continue) $ do
     try_acquire_lock
     sWhen lock_acquired $ do
+      acquire_fence
       dLParams acc_params
       bind_acc_params
       op_body
@@ -1038,7 +1040,7 @@ simpleKernelBlocks max_num_tblocks kernel_size = do
   let tblock_size_key = keyWithEntryPoint fname $ nameFromText $ prettyText $ tvVar tblock_size
   addTuningParam tblock_size_key $ Just Imp.SizeThreadBlock
   sOp $ Imp.GetSize (tvVar tblock_size) tblock_size_key Imp.SizeThreadBlock
-  virt_num_tblocks <- dPrimVE "virt_num_tblocks" $ kernel_size `divUp` tvExp tblock_size
+  virt_num_tblocks <- dPrimVE "virt_num_tblocks" $ kernel_size `ceilDiv` tvExp tblock_size
   num_tblocks <- dPrimV "num_tblocks" $ virt_num_tblocks `sMin64` max_num_tblocks
   pure (sExt32 virt_num_tblocks, Count $ tvSize num_tblocks, Count $ tvSize tblock_size)
 
@@ -1115,7 +1117,7 @@ virtualiseBlocks SegVirt required_blocks m = do
   sOp $ Imp.GetBlockId (tvVar phys_tblock_id) 0
   iterations <-
     dPrimVE "iterations" $
-      (required_blocks - tvExp phys_tblock_id) `divUp` sExt32 (kernelNumBlocks constants)
+      (required_blocks - tvExp phys_tblock_id) `ceilDiv` sExt32 (kernelNumBlocks constants)
 
   sFor "i" iterations $ \i -> do
     m . tvExp

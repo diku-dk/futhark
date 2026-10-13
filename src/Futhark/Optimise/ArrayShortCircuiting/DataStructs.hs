@@ -25,7 +25,7 @@ module Futhark.Optimise.ArrayShortCircuiting.DataStructs
     getScopeMemInfo,
     createsNewArrOK,
     getArrMemAssoc,
-    getUniqueMemFParam,
+    getConsumingMemFParam,
     markFailedCoal,
     accessSubtract,
     markSuccessCoal,
@@ -131,6 +131,10 @@ data Coalesced
 data CoalsEntry = CoalsEntry
   { -- | destination memory block
     dstmem :: VName,
+    -- | the space of the destination, and hence of every array we put there.
+    --   Usually also the space of the source, but not always; see Note
+    --   [Short-circuiting across memory spaces].
+    dstspace :: Space,
     -- | index function of the destination (used for rebasing)
     dstind :: LMAD,
     -- | aliased destination memory blocks can appear
@@ -248,16 +252,16 @@ instance Pretty CoalsEntry where
 -- the same destination memory and use the same index function, the first
 -- 'CoalsEntry' is returned.
 unionCoalsEntry :: CoalsEntry -> CoalsEntry -> CoalsEntry
-unionCoalsEntry etry1 (CoalsEntry dstmem2 dstind2 alsmem2 vartab2 optdeps2 memrefs2 certs2) =
-  if dstmem etry1 /= dstmem2 || dstind etry1 /= dstind2
+unionCoalsEntry etry1 etry2 =
+  if dstmem etry1 /= dstmem etry2 || dstind etry1 /= dstind etry2
     then etry1
     else
       etry1
-        { alsmem = alsmem etry1 <> alsmem2,
-          optdeps = optdeps etry1 <> optdeps2,
-          vartab = vartab etry1 <> vartab2,
-          memrefs = memrefs etry1 <> memrefs2,
-          certs = certs etry1 <> certs2
+        { alsmem = alsmem etry1 <> alsmem etry2,
+          optdeps = optdeps etry1 <> optdeps etry2,
+          vartab = vartab etry1 <> vartab etry2,
+          memrefs = memrefs etry1 <> memrefs etry2,
+          certs = certs etry1 <> certs etry2
         }
 
 -- | Get the names of array 'PatElem's in a 'Pat' and the corresponding
@@ -276,28 +280,28 @@ getArrMemAssoc pat =
 
 -- | Get the names of arrays in a list of 'FParam' and the corresponding
 -- 'ArrayMemBound' information for each array.
-getArrMemAssocFParam :: [Param FParamMem] -> [(VName, Uniqueness, ArrayMemBound)]
+getArrMemAssocFParam :: [Param FParamMem] -> [(VName, Diet, ArrayMemBound)]
 getArrMemAssocFParam =
   mapMaybe
     ( \param -> case paramDec param of
-        (MemArray tp shp u (ArrayIn mem_nm indfun)) ->
-          Just (paramName param, u, MemBlock tp shp mem_nm indfun)
+        (MemArray tp shp o (ArrayIn mem_nm indfun)) ->
+          Just (paramName param, o, MemBlock tp shp mem_nm indfun)
         MemMem _ -> Nothing
         MemPrim _ -> Nothing
         MemAcc {} -> Nothing
     )
 
--- | Get memory blocks in a list of 'FParam' that are used for unique arrays in
--- the same list of 'FParam'.
-getUniqueMemFParam :: [Param FParamMem] -> M.Map VName Space
-getUniqueMemFParam params =
+-- | Get memory blocks in a list of 'FParam' that are used for consumed arrays
+-- in the same list of 'FParam'.
+getConsumingMemFParam :: [Param FParamMem] -> M.Map VName Space
+getConsumingMemFParam params =
   let mems = M.fromList $ mapMaybe justMem params
       arrayMems = S.fromList $ mapMaybe (justArrayMem . paramDec) params
    in mems `M.restrictKeys` arrayMems
   where
     justMem (Param _ nm (MemMem sp)) = Just (nm, sp)
     justMem _ = Nothing
-    justArrayMem (MemArray _ _ Unique (ArrayIn mem_nm _)) = Just mem_nm
+    justArrayMem (MemArray _ _ Consume (ArrayIn mem_nm _)) = Just mem_nm
     justArrayMem _ = Nothing
 
 class HasMemBlock rep where
@@ -398,6 +402,6 @@ vnameToPrimExp scopetab scaltab v =
         )
 
 -- | Attempt to extract the 'PrimType' from a 'TypeBase'.
-toPrimType :: TypeBase shp u -> Maybe PrimType
+toPrimType :: TypeBase shp o -> Maybe PrimType
 toPrimType (Prim pt) = Just pt
 toPrimType _ = Nothing

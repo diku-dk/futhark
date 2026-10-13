@@ -596,6 +596,14 @@ tryFuseNodeInGraph node_to_fuse dg@DepGraph {dgGraph = g} =
     relevant (_, e) = isDep e
     fuses_with = map fst $ filter relevant $ G.lpre g node_to_fuse_id
 
+doSoacThroughTransFusion :: DepGraphAug FusionM
+doSoacThroughTransFusion dg =
+  applyAugs
+    [ SF.trySoacThroughTransIntoWithAcc doFusionInLambda fusedSomething wacc_id
+    | (wacc_id, StmNode (Let _ _ (WithAcc {}))) <- G.labNodes (dgGraph dg)
+    ]
+    dg
+
 doVerticalFusion :: DepGraphAug FusionM
 doVerticalFusion dg = applyAugs (map tryFuseNodeInGraph $ reverse $ filter relevant $ G.labNodes (dgGraph dg)) dg
   where
@@ -651,7 +659,8 @@ keepTrying f g = do
 doAllFusion :: DepGraphAug FusionM
 doAllFusion =
   keepTrying . applyAugs $
-    [ doVerticalFusion,
+    [ doSoacThroughTransFusion,
+      doVerticalFusion,
       doHorizontalFusion,
       doInnerFusion,
       removeUnusedOutputs
@@ -667,12 +676,12 @@ runInnerFusionOnContext c@(incoming, node, nodeT, outgoing) = case nodeT of
     cases' <- mapM (traverse $ renameBody <=< (`doFusionWithDelayed` to_fuse)) cases
     defbody' <- doFusionWithDelayed defbody to_fuse
     pure (incoming, node, MatchNode (Let pat aux (Match cond cases' defbody' dec)) [], outgoing)
-  StmNode (Let pat aux (Op (Futhark.VJP args vec lam))) -> doFuseScans $ do
+  StmNode (Let pat aux (Op (Futhark.VJP shape args vec lam))) -> doFuseScans $ do
     lam' <- fst <$> doFusionInLambda lam
-    pure (incoming, node, StmNode (Let pat aux (Op (Futhark.VJP args vec lam'))), outgoing)
-  StmNode (Let pat aux (Op (Futhark.JVP args vec lam))) -> doFuseScans $ do
+    pure (incoming, node, StmNode (Let pat aux (Op (Futhark.VJP shape args vec lam'))), outgoing)
+  StmNode (Let pat aux (Op (Futhark.JVP shape args vec lam))) -> doFuseScans $ do
     lam' <- fst <$> doFusionInLambda lam
-    pure (incoming, node, StmNode (Let pat aux (Op (Futhark.JVP args vec lam'))), outgoing)
+    pure (incoming, node, StmNode (Let pat aux (Op (Futhark.JVP shape args vec lam'))), outgoing)
   StmNode (Let pat aux (WithAcc inputs lam)) -> doFuseScans $ do
     lam' <- fst <$> doFusionInLambda lam
     pure (incoming, node, StmNode (Let pat aux (WithAcc inputs lam')), outgoing)

@@ -11,7 +11,6 @@ module Futhark.IR.Syntax.Core
 
     -- * Types
     Commutativity (..),
-    Uniqueness (..),
     ShapeBase (..),
     Shape,
     stripDims,
@@ -38,6 +37,8 @@ module Futhark.IR.Syntax.Core
     ValueType (..),
     OpaqueType (..),
     OpaqueTypes (..),
+    lookupOpaqueType,
+    opaquePayload,
     Signedness (..),
     EntryPointType (..),
 
@@ -82,12 +83,10 @@ where
 
 import Control.Category
 import Control.Monad
-import Control.Monad.State
 import Data.Bifoldable
 import Data.Bifunctor
 import Data.Bitraversable
 import Data.Loc (locEnd, locStart)
-import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
 import Data.String
@@ -178,43 +177,12 @@ newtype Rank = Rank Int
   deriving (Show, Eq, Ord)
 
 -- | A class encompassing types containing array shape information.
-class (Monoid a, Eq a, Ord a) => ArrayShape a where
+class (Monoid a) => ArrayShape a where
   -- | Return the rank of an array with the given size.
   shapeRank :: a -> Int
 
-  -- | Check whether one shape if a subset of another shape.
-  subShapeOf :: a -> a -> Bool
-
-  -- | Prepend the dimensions of a 'Shape'.
-  prependShape :: Shape -> a -> a
-
-instance ArrayShape (ShapeBase SubExp) where
+instance ArrayShape (ShapeBase a) where
   shapeRank (Shape l) = length l
-  subShapeOf = (==)
-  prependShape = (<>)
-
-instance ArrayShape (ShapeBase ExtSize) where
-  shapeRank (Shape l) = length l
-  subShapeOf (Shape ds1) (Shape ds2) =
-    -- Must agree on Free dimensions, and ds1 may not be existential
-    -- where ds2 is Free.  Existentials must also be congruent.
-    length ds1 == length ds2
-      && evalState (and <$> zipWithM subDimOf ds1 ds2) M.empty
-    where
-      subDimOf (Free se1) (Free se2) = pure $ se1 == se2
-      subDimOf (Ext _) (Free _) = pure False
-      subDimOf (Free _) (Ext _) = pure True
-      subDimOf (Ext x) (Ext y) = do
-        extmap <- get
-        case M.lookup y extmap of
-          Just ywas
-            | ywas == x -> pure True
-            | otherwise -> pure False
-          Nothing -> do
-            put $ M.insert y x extmap
-            pure True
-
-  prependShape shape = (fmap Free shape <>)
 
 instance Semigroup Rank where
   Rank x <> Rank y = Rank $ x + y
@@ -224,8 +192,6 @@ instance Monoid Rank where
 
 instance ArrayShape Rank where
   shapeRank (Rank x) = x
-  subShapeOf = (==)
-  prependShape shape (Rank x) = Rank $ shapeRank shape + x
 
 -- | The memory space of a block.  If 'DefaultSpace', this is the "default"
 -- space, whatever that is.  The exact meaning of the 'SpaceId'
@@ -245,20 +211,24 @@ data Space
 -- | A string representing a specific non-default memory space.
 type SpaceId = String
 
--- | The type of a value.  When comparing types for equality with
--- '==', shapes must match.
-data TypeBase shape u
+-- | The type of a value. When comparing types for equality with '==', shapes
+-- must match. The @o@ parameter is the /mode/; denoting based on context how
+-- the values of the type may be used. In the IR it is 'Diet' or 'NoMode',
+-- although we still use the term "fresh" to denote a value with no aliases.
+data TypeBase shape o
   = Prim PrimType
-  | -- | Token, index space, element type, and uniqueness.
-    Acc VName Shape [Type] u
-  | Array PrimType shape u
+  | -- | Token, index space, and element type. Accumulators carry no mode: every
+    -- use of an accumulator consumes it ('diet' is unconditionally 'Consume'),
+    -- so there is no way for a function to merely observe one.
+    Acc VName Shape [Type]
+  | Array PrimType shape o
   | Mem Space
   deriving (Show, Eq, Ord)
 
 instance Bitraversable TypeBase where
-  bitraverse f g (Array t shape u) = Array t <$> f shape <*> g u
+  bitraverse f g (Array t shape o) = Array t <$> f shape <*> g o
   bitraverse _ _ (Prim pt) = pure $ Prim pt
-  bitraverse _ g (Acc arrs ispace ts u) = Acc arrs ispace ts <$> g u
+  bitraverse _ _ (Acc arrs ispace ts) = pure $ Acc arrs ispace ts
   bitraverse _ _ (Mem s) = pure $ Mem s
 
 instance Functor (TypeBase shape) where
@@ -278,36 +248,38 @@ instance Bifoldable TypeBase where
 
 -- | A type with shape information, used for describing the type of
 -- variables.
-type Type = TypeBase Shape NoUniqueness
+type Type = TypeBase Shape NoMode
 
 -- | A type with existentially quantified shapes - used as part of
 -- function (and function-like) return types.  Generally only makes
 -- sense when used in a list.
-type ExtType = TypeBase ExtShape NoUniqueness
+type ExtType = TypeBase ExtShape NoMode
 
--- | A type with shape and uniqueness information, used declaring
--- return- and parameters types.
-type DeclType = TypeBase Shape Uniqueness
+-- | A type with shape and 'Diet' information, used for declaring
+-- function and loop parameters.
+type DeclType = TypeBase Shape Diet
 
--- | An 'ExtType' with uniqueness information, used for function
--- return types.
-type DeclExtType = TypeBase ExtShape Uniqueness
+-- | An 'ExtType' with 'Diet' information, used as the input to alias
+-- inference during internalisation.  It is not an IR return type;
+-- those carry no mode.
+type DeclExtType = TypeBase ExtShape Diet
 
 -- | Information about which parts of a value/type are consumed.  For
 -- example, we might say that a function taking three arguments of
 -- types @([int], *[int], [int])@ has diet @[Observe, Consume,
 -- Observe]@.
 data Diet
-  = -- | Consumes this value.
-    Consume
-  | -- | Only observes value in this position, does
-    -- not consume.  A result may alias this.
+  = -- | Only observes the value in this position, does not consume it.
     Observe
-  | -- | As 'Observe', but the result will not
-    -- alias, because the parameter does not carry
-    -- aliases.
-    ObservePrim
-  deriving (Eq, Ord, Show)
+  | -- | Consumes the value in this position.
+    Consume
+  deriving (Eq, Ord, Show, Bounded)
+
+instance Semigroup Diet where
+  (<>) = max
+
+instance Monoid Diet where
+  mempty = Observe
 
 -- | An identifier consists of its name and the type of the value
 -- bound to the identifier.
@@ -625,8 +597,7 @@ data EntryPointType
 
 -- | The representation of an opaque type.
 data OpaqueType
-  = OpaqueType [ValueType]
-  | -- | Note that the field ordering here denote the actual
+  = -- | Note that the field ordering here denote the actual
     -- representation - make sure it is preserved.
     OpaqueRecord [(Name, EntryPointType)]
   | -- | Constructor ordering also denotes representation, in that the
@@ -646,7 +617,7 @@ data OpaqueType
   deriving (Eq, Ord, Show)
 
 -- | Names of opaque types and their representation.
-newtype OpaqueTypes = OpaqueTypes [(Name, OpaqueType)]
+newtype OpaqueTypes = OpaqueTypes [(Name, (OpaqueType, Maybe T.Text))]
   deriving (Eq, Ord, Show)
 
 instance Monoid OpaqueTypes where
@@ -655,6 +626,27 @@ instance Monoid OpaqueTypes where
 instance Semigroup OpaqueTypes where
   OpaqueTypes x <> OpaqueTypes y =
     OpaqueTypes $ x <> filter ((`notElem` map fst x) . fst) y
+
+-- | Look up the representation of a named opaque type.
+lookupOpaqueType :: Name -> OpaqueTypes -> OpaqueType
+lookupOpaqueType v (OpaqueTypes types) =
+  case lookup v types of
+    Just (t, _) -> t
+    Nothing -> error $ "Unknown opaque type: " ++ show v
+
+-- | The values used to represent an opaque type.
+opaquePayload :: OpaqueTypes -> OpaqueType -> [ValueType]
+opaquePayload _ (OpaqueSum ts _) = ts
+opaquePayload _ (OpaqueArray _ _ ts) = ts
+opaquePayload _ (OpaqueRecord []) = [ValueType Signed (Rank 0) Unit]
+opaquePayload types (OpaqueRecord fs) = concatMap f fs
+  where
+    f (_, TypeOpaque s) = opaquePayload types $ lookupOpaqueType s types
+    f (_, TypeTransparent v) = [v]
+opaquePayload types (OpaqueRecordArray _ _ fs) = concatMap f fs
+  where
+    f (_, TypeOpaque s) = opaquePayload types $ lookupOpaqueType s types
+    f (_, TypeTransparent v) = [v]
 
 -- | Information about what in the original program a given IR statement
 -- corresponds to. See Note [Tracking Source Locations].
