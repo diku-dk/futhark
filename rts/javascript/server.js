@@ -746,8 +746,8 @@ class Server {
         this._output.forEach((l) => console.log(l));
         console.log('%%% OK');
       } catch (err) {
-        this._output.forEach((l) => console.log(l));
         console.log('%%% FAILURE');
+        this._output.forEach((l) => console.log(l));
         console.log(err);
         console.log('%%% OK');
       }
