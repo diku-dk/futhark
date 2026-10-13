@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Incorrect constant folding of `x %% x`.
 
+* Signed division by -1 is now properly defined.
+
 ## [0.28.1]
 
 ### Added
