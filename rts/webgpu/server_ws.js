@@ -14,8 +14,7 @@
 //   as base64 in the response, for it to write to the file.
 //
 // The commands are implemented by the Server class from
-// rts/javascript/server.js.  The difference is that every call into C is
-// asynchronous, as WebGPU operations may suspend the module (via Asyncify).
+// rts/javascript/server.js.
 
 // https://stackoverflow.com/a/66046176/3112547
 async function bufferToBase64(buffer) {
@@ -27,21 +26,9 @@ async function bufferToBase64(buffer) {
   return base64url.slice(base64url.indexOf(',') + 1);
 }
 
-class WebGPUServer extends Server {
+class BrowserServer extends Server {
   constructor(fut) {
     super({ wasm: fut.m, ctx: fut.ctx }, fut.manifest);
-  }
-
-  async _c(fname, ...args) {
-    return await this.wasm.ccall(fname, 'number',
-      Array(1 + args.length).fill('number'),
-      [this.ctx.ctx, ...args], {async: true});
-  }
-}
-
-class BrowserServer extends WebGPUServer {
-  constructor(fut) {
-    super(fut);
     this._stored = [];
 
     this.socket = new WebSocket("ws://" + window.location.host + "/ws");
@@ -85,7 +72,7 @@ async function runServer() {
   await fut.init(await Module());
 
   if (typeof window === 'undefined') {
-    await new WebGPUServer(fut).run();
+    await new Server({ wasm: fut.m, ctx: fut.ctx }, fut.manifest).run();
   } else {
     // Setting these in the global scope makes debugging a bit easier, and this
     // is not intended to be embedded into anything other than the internal

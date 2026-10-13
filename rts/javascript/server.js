@@ -4,9 +4,12 @@
 // WebAssembly module, much like the C server.  The manifest describes the
 // types and entry points, and names the C functions that operate on them.
 //
-// Calls into C are awaited, as a subclass may make them asynchronous (the
-// WebGPU backend does, in rts/webgpu/server_ws.js), and so is file access.
-// Command output is collected by '_print' and written out by the caller.
+// Calls into C go through 'ccall' with the async option, because in the
+// WebGPU backend a C function may suspend while it waits for the GPU (via
+// Asyncify), and 'ccall' then returns a promise of the result.  In modules
+// without Asyncify, the option has no effect.  Command output is collected by
+// '_print' and written out by the caller.  File access is also asynchronous,
+// as a subclass may override it (see rts/webgpu/server_ws.js).
 //
 // A variable is a pair of a type name and a value.  A value of primitive type
 // is a JavaScript number, or a BigInt for 64-bit integers.  Booleans are 0 or
@@ -108,8 +111,10 @@ class Server {
 
   // Calling into the C API.
 
-  _c(fname, ...args) {
-    return this.wasm['_' + fname](this.ctx.ctx, ...args);
+  async _c(fname, ...args) {
+    return await this.wasm.ccall(fname, 'number',
+      Array(1 + args.length).fill('number'),
+      [this.ctx.ctx, ...args], {async: true});
   }
 
   // Read a NUL-terminated string allocated by C, and free it.

@@ -648,7 +648,7 @@ wasmFlags classpath expfuns lib =
            else []
        )
     ++ ["-s", "WASM_BIGINT"]
-    ++ ["-s", "EXPORTED_RUNTIME_METHODS=[" ++ intercalate "," heapExports ++ "]"]
+    ++ ["-s", "EXPORTED_RUNTIME_METHODS=[" ++ intercalate "," ("'ccall'" : heapExports) ++ "]"]
     ++ [ "-s",
          "EXPORTED_FUNCTIONS=["
            ++ intercalate "," ("'_malloc'" : "'_free'" : expfuns)
