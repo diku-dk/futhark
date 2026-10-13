@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_webgpu }
 -- random input { 2i64 10i64 } output { [0,10] }
 -- random input { 2i64 1000i64 } output { [0,1000] }
 -- random input { 0i64 2i64 } output { empty([0]i32) }

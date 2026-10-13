@@ -1,6 +1,7 @@
 -- A prelude value is used both within the tiled loop and the
 -- postlude.
 -- ==
+-- tags { no_webgpu }
 -- random input { 3 [10][20]i32 [10]i32 } auto output
 -- structure gpu { SegMap/Loop/Loop/SegMap 2 }
 

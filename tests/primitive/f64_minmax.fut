@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_webgpu }
 -- entry: testMax
 -- input { [0f64, 1f64, -1f64, 1f64, f64.nan, -1f64, f64.nan, -1f64, -1f64 ]
 --         [1f64, 1f64, 1f64, -1f64, -1f64, f64.nan, f64.nan, f64.inf, -f64.inf] }

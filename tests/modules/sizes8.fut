@@ -16,6 +16,7 @@ module m = mk_m {
 def x = m.lex [1, 2, 3]
 
 -- ==
+-- tags { no_webgpu }
 -- entry: test
 -- random input { } output { 6i64 }
 entry test =

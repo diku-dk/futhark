@@ -504,6 +504,37 @@ jobs:
           tools/webgpu/run_webgpu_test.sh
         slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:a100:1 --job-name=fut-webgpu-test
 
+  # Runs the WebGPU backend in Node, with WebGPU provided by Dawn and Vulkan
+  # by lavapipe, which runs on the CPU.
+  test-webgpu-node:
+    runs-on: ubuntu-24.04
+    needs: [build-linux-nix]
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Install Nix
+      uses: cachix/install-nix-action@v27
+
+    - uses: rrbutani/use-nix-shell-action@v1
+      with:
+        devShell: .#test-webgpu
+
+    - uses: actions/download-artifact@v8
+      with:
+        name: futhark-nightly-linux-x86_64.tar.xz
+
+    - name: Install from nightly tarball
+      run: |
+        tar xvf futhark-nightly-linux-x86_64.tar.xz
+        make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - name: Run tests
+      run: |
+        export VK_DRIVER_FILES=$LAVAPIPE_ICD
+        futhark test -c --backend=webgpu --runner=tools/webgpu/node-runner.sh tests
+
   test-cuda:
     runs-on: cuda
     needs: [build-linux-nix]

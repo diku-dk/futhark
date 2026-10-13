@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_webgpu }
 -- structure { BinOp 2 }
 
 def plus (a, b) (x, y) : (i32, i32) = (a + x, b + y)

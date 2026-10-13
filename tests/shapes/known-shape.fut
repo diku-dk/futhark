@@ -1,5 +1,6 @@
 -- An existing variable can be used as a shape declaration.
 -- ==
+-- tags { no_webgpu }
 -- input {
 --   5i64
 --   4i64

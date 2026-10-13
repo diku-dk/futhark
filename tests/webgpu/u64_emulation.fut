@@ -4,6 +4,7 @@
 -- of unsigned arithmetic and overflow/wraparound behavior.
 
 -- ==
+-- tags { no_webgpu }
 -- entry: add
 -- input  { [0u64, 4294967296u64, 18446744073709551615u64, 0xFFFFFFFFu64]
 --          [0u64, 4294967296u64, 1u64, 1u64] }

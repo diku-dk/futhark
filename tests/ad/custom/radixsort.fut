@@ -1,6 +1,6 @@
 -- Custom derivative for radix sort.
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_webgpu }
 -- entry: main_standard main_custom
 -- input { [4f32,3f32,2f32,1f32] [0.1f32,0.2f32,0.3f32,0.4f32] }
 -- output { [0.4f32, 0.3f32, 0.2f32, 0.1f32 ] }

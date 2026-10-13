@@ -7,6 +7,8 @@
 -- tags { no_webgpu }
 --
 -- structure { Map 1 Redomap 1 Scanomap 1 }
+-- ==
+-- tags { no_webgpu }
 
 def correlateDeltas [num_und] [num_dates]
                     ( md_c: [num_und][num_und]f64

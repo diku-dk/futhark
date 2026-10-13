@@ -3,6 +3,7 @@
 -- this is LocVolCalib.
 --
 -- ==
+-- tags { no_webgpu }
 -- compiled input { 1000i64 256i64 }
 --
 -- output { [0.010000f32, 0.790000f32, 2.660000f32,

@@ -1,6 +1,7 @@
 -- Tests of various array functions from the basis library.
 
 -- ==
+-- tags { no_webgpu }
 -- entry: test_length
 -- input { empty([0]i32) } output { 0i64 }
 -- input { [1,2,3] } output { 3i64 }

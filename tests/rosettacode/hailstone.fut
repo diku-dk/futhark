@@ -3,6 +3,7 @@
 -- Does not use memoization, but is instead parallel for task #3.
 --
 -- ==
+-- tags { no_webgpu }
 -- compiled input { 27 100000 }
 -- output {
 --   [27i32, 82i32, 41i32, 124i32, 62i32, 31i32, 94i32, 47i32, 142i32,

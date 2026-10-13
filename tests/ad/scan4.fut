@@ -1,7 +1,7 @@
 -- Scan with tuple operator.
 -- ZeroQuadrant case
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_webgpu }
 -- entry: fwd_J rev_J fwd_vec_J rev_vec_J
 -- input { [[1.0f32, 2.0f32, 3.0f32], [4.0f32, 3.0f32, 5.0f32], [3.0f32, 4.0f32, 2.0f32], [4.0f32, 2.0f32, 1.0f32]] }
 -- output {

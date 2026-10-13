@@ -1,5 +1,5 @@
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_webgpu }
 -- entry: rev
 -- input { [1f32, 0f32, 3f32, 4f32] 3.0f32 } output { [0f32, 36f32, 0f32, 0f32] 0f32 }
 

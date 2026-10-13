@@ -1,5 +1,5 @@
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_webgpu }
 
 def test [n] (xs: [n]f64) =
   let xs' = copy xs

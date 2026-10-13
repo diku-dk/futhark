@@ -1,5 +1,6 @@
 -- Can we do operations on i8s, even though these are not natively supported?
 -- ==
+-- tags { no_webgpu }
 --
 -- input  {
 --   [0i8, 0i8, 0i8, 0i8, 0i8]

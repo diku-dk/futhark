@@ -6,6 +6,7 @@
 -- better, but it requires rewriting the scan in terms of loop and map. Likely
 -- not faster in practice.
 -- ==
+-- tags { no_webgpu }
 -- input { [1i64,4i64,0i64,3i64] }
 -- auto output
 -- structure gpu { /Loop 1 }

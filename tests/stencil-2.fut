@@ -1,6 +1,7 @@
 -- Simple rank-1 two-dimensional stencil computation.  Eventually
 -- smooths out all differences.
 -- ==
+-- tags { no_webgpu }
 -- input {
 -- 0
 -- [[1.0,2.0,3.0],

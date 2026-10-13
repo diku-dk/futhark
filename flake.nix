@@ -266,6 +266,21 @@
             nativeBuildInputs = import ./nix/pkgs-test.nix { inherit pkgs python; };
           };
 
+          # A shell for running WebGPU tests in CI, in Node and without a GPU
+          # (see tools/webgpu/node-runner.sh).  This is separate from the
+          # 'test' shell because Emscripten is large.
+          test-webgpu = pkgs.mkShell {
+            nativeBuildInputs = with pkgs; [
+              emscripten
+              nodejs
+              (callPackage ./nix/node-webgpu.nix { })
+            ];
+
+            # The Vulkan driver file for lavapipe, Mesa's software
+            # implementation of Vulkan.
+            LAVAPIPE_ICD = "${pkgs.mesa}/share/vulkan/icd.d/lvp_icd.${pkgs.stdenv.hostPlatform.uname.processor}.json";
+          };
+
           # The main development shell that contains all development tools.
           default = pkgs.mkShell {
             nativeBuildInputs =

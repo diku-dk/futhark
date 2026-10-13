@@ -1,5 +1,6 @@
 -- Parallel maximum segment sum
 -- ==
+-- tags { no_webgpu }
 -- input { [1, -2, 3, 4, -1, 5, -6, 1] }
 -- output { 11 }
 

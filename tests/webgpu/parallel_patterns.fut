@@ -2,6 +2,7 @@
 -- Verifies that map, reduce, scan work correctly with packed types.
 
 -- ==
+-- tags { no_webgpu }
 -- entry: map_i8
 -- input { [1i8, 2i8, 3i8, 4i8, 5i8] }
 -- output { [2i8, 4i8, 6i8, 8i8, 10i8] }

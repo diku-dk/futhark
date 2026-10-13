@@ -22,10 +22,11 @@ meant to be run in a web browser with WebGPU support.
 When compiling with ``--library``, the generated files provide the
 JavaScript API described in :ref:`js-api`.  When compiling with
 ``--server``, the generated program implements the Futhark server
-protocol (see :ref:`server-protocol`), but must be run in a browser
-that communicates with a proxy.  The Futhark source repository contains
-such a proxy in ``tools/browser_test.py``, which can be used as a
-runner for :ref:`futhark-test(1)`.
+protocol (see :ref:`server-protocol`).  It can be run in Node, with
+WebGPU provided by the ``webgpu`` npm package, or in a browser that
+communicates with a proxy.  The Futhark source repository contains
+runners for both, which can be used with :ref:`futhark-test(1)`:
+``tools/webgpu/node-runner.sh`` and ``tools/browser_test.py``.
 
 OPTIONS
 =======

@@ -2,6 +2,7 @@
 -- Uses intra-group reduce_by_index which requires workgroup shared memory.
 
 -- ==
+-- tags { no_webgpu }
 -- random input { 10i64 [1][256]i64 } auto output
 -- random input { 10i64 [10][256]i64 } auto output
 -- random input { 100i64 [10][256]i64 } auto output

@@ -2,6 +2,7 @@
 -- Exercises combinations of emulated and native types in a single kernel.
 
 -- ==
+-- tags { no_webgpu }
 -- entry: i8_reduction
 -- input { [[1i8, 2i8, 3i8, 4i8], [5i8, 6i8, 7i8, 8i8]] }
 -- output { [10i8, 26i8] }

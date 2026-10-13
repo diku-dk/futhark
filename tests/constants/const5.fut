@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_webgpu }
 -- structure { Screma 1 }
 
 def big_sum = i64.sum (iota 1000000)

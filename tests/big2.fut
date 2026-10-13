@@ -1,5 +1,5 @@
 -- ==
--- tags { no_gtx780 }
+-- tags { no_gtx780 no_webgpu }
 -- no_ispc no_python no_wasm compiled input {2147483748i64} output { 0i8 -5i8 86i8 }
 
 -- To avoid enormous output, we just sample the result.

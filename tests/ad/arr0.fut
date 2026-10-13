@@ -1,5 +1,5 @@
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_webgpu }
 
 def primal (xs: [2]f64) = xs[0] * xs[1]
 

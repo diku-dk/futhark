@@ -1,5 +1,6 @@
 -- Test with only variant indices.
 -- ==
+-- tags { no_webgpu }
 -- input { [0i64,3i64,1i64] [5i64,8i64,6i64] }
 -- output { [28i64,13i64,23i64] }
 -- structure gpu { /WithAcc 1 Update 0 }

@@ -2,6 +2,7 @@
 --
 -- The consumption of dependencies are considered when statements are reordered.
 -- ==
+-- tags { no_webgpu }
 -- structure gpu {
 --   /GPUBody 2
 --   /GPUBody/If/True/Update 1

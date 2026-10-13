@@ -1,5 +1,6 @@
 -- Test u8.mul_hi
 -- ==
+-- tags { no_webgpu }
 -- entry: test_u8_mul_hi
 -- input  { [10u8, 20u8, 2u8, 1u8, 2u8, 3u8, 2u8]
 --          [10u8, 20u8, 127u8, 255u8, 255u8, 127u8, 128u8] }

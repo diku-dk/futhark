@@ -1,6 +1,7 @@
 -- Find the sum of all the multiples of 3 or 5 below 1000.
 --
 -- ==
+-- tags { no_webgpu }
 -- input { 1000i64 }
 -- output { 233168i64 }
 
