@@ -4,7 +4,6 @@
 module Futhark.CodeGen.RTS.WebGPU
   ( serverWsJs,
     utilJs,
-    valuesJs,
     wrappersJs,
   )
 where
@@ -21,11 +20,6 @@ serverWsJs = $(embedStringFile "rts/webgpu/server_ws.js")
 utilJs :: T.Text
 utilJs = $(embedStringFile "rts/webgpu/util.js")
 {-# NOINLINE utilJs #-}
-
--- | @rts/webgpu/values.js@
-valuesJs :: T.Text
-valuesJs = $(embedStringFile "rts/webgpu/values.js")
-{-# NOINLINE valuesJs #-}
 
 -- | @rts/webgpu/wrappers.js@
 wrappersJs :: T.Text

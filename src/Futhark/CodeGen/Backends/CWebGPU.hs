@@ -19,15 +19,17 @@ import Futhark.CodeGen.Backends.GPU
 import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.GenericC.Pretty (idText)
+import Futhark.CodeGen.Backends.GenericWASM (manifestFunctions)
 import Futhark.CodeGen.ImpCode.WebGPU
 import Futhark.CodeGen.ImpGen.WebGPU qualified as ImpGen
 import Futhark.CodeGen.RTS.C (backendsWebGPUH)
+import Futhark.CodeGen.RTS.JavaScript qualified as JS
 import Futhark.CodeGen.RTS.WGSL qualified as RTS
-import Futhark.CodeGen.RTS.WebGPU (serverWsJs, utilJs, valuesJs, wrappersJs)
+import Futhark.CodeGen.RTS.WebGPU (serverWsJs, utilJs, wrappersJs)
 import Futhark.IR.GPUMem (GPUMem, Prog)
 import Futhark.Manifest qualified as Manifest
 import Futhark.MonadFreshNames
-import Futhark.Util (chunk)
+import Futhark.Util (chunk, nubOrd)
 import Language.C.Quote.C qualified as C
 import NeatInterpolation (text, untrimming)
 
@@ -246,11 +248,14 @@ webgpuMemoryType :: GC.MemoryType HostOp ()
 webgpuMemoryType "device" = pure [C.cty|typename WGPUBuffer|]
 webgpuMemoryType space = error $ "WebGPU backend does not support '" ++ space ++ "' memory space."
 
-jsBoilerplate :: Definitions a -> T.Text -> (T.Text, [T.Text])
+-- | The JavaScript wrapper, and the names of the C functions that must be
+-- exported from the WebAssembly module. We export every function named in the
+-- manifest, as the server calls these directly.
+jsBoilerplate :: Definitions a -> Manifest.Manifest -> (T.Text, [T.Text])
 jsBoilerplate prog manifest =
-  let (context, exports) = mkJsContext prog manifest
-      prelude = T.intercalate "\n" [utilJs, valuesJs, wrappersJs]
-   in (prelude <> "\n" <> context, exports ++ builtinExports)
+  let context = mkJsContext prog $ Manifest.manifestToJSON manifest
+      prelude = T.intercalate "\n" [utilJs, wrappersJs]
+   in (prelude <> "\n" <> context, nubOrd (manifestFunctions manifest) ++ builtinExports)
   where
     builtinExports =
       [ "malloc",
@@ -259,6 +264,7 @@ jsBoilerplate prog manifest =
         "futhark_context_new",
         "futhark_context_config_free",
         "futhark_context_free",
+        "futhark_context_get_error",
         "futhark_context_sync",
         "futhark_context_clear_caches",
         "futhark_context_report",
@@ -280,16 +286,14 @@ asyncCall func hasReturn args =
     argList =
       "[" <> T.intercalate ", " args <> "]"
 
-mkJsContext :: Definitions a -> T.Text -> (T.Text, [T.Text])
+mkJsContext :: Definitions a -> T.Text -> T.Text
 mkJsContext (Definitions _ _ _ (Functions funs)) manifest =
-  ( [text|
+  [text|
    class FutharkModule {
      ${constructor}
      ${free}
      ${builtins}
-   }|],
-    entryExports ++ valueExports
-  )
+   }|]
   where
     constructor =
       [text|
@@ -314,8 +318,8 @@ mkJsContext (Definitions _ _ _ (Functions funs)) manifest =
         this.m._futhark_context_config_free(this.cfg);
       }|]
     entryPoints = mapMaybe (functionEntry . snd) funs
-    (entryPointFuns, entryExports) = mkJsEntryPoints entryPoints
-    (valueClasses, valueExports) = mkJsValueClasses entryPoints
+    entryPointFuns = mkJsEntryPoints entryPoints
+    valueClasses = mkJsValueClasses entryPoints
     builtins =
       [text|
       malloc(nbytes) {
@@ -348,17 +352,13 @@ mkJsContext (Definitions _ _ _ (Functions funs)) manifest =
     unpauseProfilingCall =
       asyncCall "futhark_context_unpause_profiling" False ["this.ctx"]
 
-mkJsEntryPoints :: [EntryPoint] -> (T.Text, [T.Text])
-mkJsEntryPoints entries = (T.intercalate "\n" entryFuns, entryExports)
+mkJsEntryPoints :: [EntryPoint] -> T.Text
+mkJsEntryPoints = T.intercalate "\n" . map (entryFun . nameToText . entryPointName)
   where
-    entryNames = map (nameToText . entryPointName) entries
-    entryFuns = map entryFun entryNames
-    entryExports = map entryExport entryNames
     entryFun name =
       [text|this.entry['${name}'] = make_entry_function(this, '${name}').bind(this);|]
-    entryExport name = "futhark_entry_" <> name
 
-mkJsValueClasses :: [EntryPoint] -> (T.Text, [T.Text])
+mkJsValueClasses :: [EntryPoint] -> T.Text
 mkJsValueClasses entries =
   -- TODO: Only supports transparent arrays right now.
   let extVals =
@@ -369,28 +369,19 @@ mkJsValueClasses entries =
         S.toList $
           S.fromList
             [(typ, sgn, shp) | ArrayValue _ _ typ sgn shp <- transpVals]
-      (cls, exports) = unzip $ map mkJsArrayClass arrVals
-   in (T.intercalate "\n" cls, concat exports)
+   in T.intercalate "\n" $ map mkJsArrayClass arrVals
 
-mkJsArrayClass :: (PrimType, Signedness, [DimSize]) -> (T.Text, [T.Text])
+mkJsArrayClass :: (PrimType, Signedness, [DimSize]) -> T.Text
 mkJsArrayClass (typ, sign, shp) =
-  ( [text|
+  [text|
     this.${name} = make_array_class(this, '${prettyName}');
     this.types['${prettyName}'] = this.${name};
-  |],
-    exports
-  )
+  |]
   where
     rank = length shp
     elemName = prettySigned (sign == Unsigned) typ
     prettyName = mconcat (replicate rank "[]") <> elemName
     name = elemName <> "_" <> prettyText rank <> "d"
-    exports =
-      [ "futhark_new_" <> name,
-        "futhark_free_" <> name,
-        "futhark_values_" <> name,
-        "futhark_shape_" <> name
-      ]
 
 -- | Compile the program to C with calls to WebGPU, along with a JS wrapper
 -- library.
@@ -414,7 +405,7 @@ compileProg version prog = do
       (Space "device", [Space "device", DefaultSpace])
       cliOptions
       prog'
-  let (js, exports) = jsBoilerplate prog' (Manifest.manifestToJSON (GC.cManifest c))
+  let (js, exports) = jsBoilerplate prog' (GC.cManifest c)
   pure (ws, (c, js, exports))
   where
     operations :: GC.Operations HostOp ()
@@ -437,4 +428,4 @@ compileProg version prog = do
 asJSServer :: GC.CParts -> (T.Text, T.Text)
 asJSServer parts =
   let (_, c, _) = GC.asLibrary parts
-   in (c, serverWsJs)
+   in (c, T.unlines [JS.valuesJs, JS.serverJs, serverWsJs])

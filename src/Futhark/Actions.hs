@@ -580,7 +580,9 @@ compileWebGPUAction fcfg mode tgtpath =
               "-sWASM_BIGINT",
               "-sASSERTIONS",
               "-sALLOW_MEMORY_GROWTH",
-              "-sEXPORTED_RUNTIME_METHODS=['Asyncify']",
+              "-sEXPORTED_RUNTIME_METHODS=["
+                ++ intercalate "," ("'ccall'" : "'Asyncify'" : heapExports)
+                ++ "]",
               "--extern-post-js",
               jslibpath
             ]
@@ -616,6 +618,22 @@ compileWebGPUAction fcfg mode tgtpath =
             ["-lm"]
             (export_option : extra_options ++ serverArgs)
 
+-- | The typed views of the WASM heap, which the generated JavaScript
+-- uses to move array data in and out of the module.
+heapExports :: [String]
+heapExports =
+  [ "'HEAP8'",
+    "'HEAP16'",
+    "'HEAP32'",
+    "'HEAP64'",
+    "'HEAPU8'",
+    "'HEAPU16'",
+    "'HEAPU32'",
+    "'HEAPU64'",
+    "'HEAPF32'",
+    "'HEAPF64'"
+  ]
+
 cmdEMCFLAGS :: [String] -> [String]
 cmdEMCFLAGS def = maybe def words $ lookup "EMCFLAGS" unixEnvironment
 
@@ -628,6 +646,7 @@ wasmFlags classpath expfuns lib =
            else []
        )
     ++ ["-s", "WASM_BIGINT"]
+    ++ ["-s", "EXPORTED_RUNTIME_METHODS=[" ++ intercalate "," heapExports ++ "]"]
     ++ [ "-s",
          "EXPORTED_FUNCTIONS=["
            ++ intercalate "," ("'_malloc'" : "'_free'" : expfuns)
@@ -642,9 +661,6 @@ runEMCC cpath outpath cflags_def ldflags extra_flags = do
         "emcc"
         ( [cpath, "-o", outpath]
             ++ extra_flags
-            ++ [ "-s",
-                 "EXPORTED_RUNTIME_METHODS=['HEAP8','HEAP16','HEAP32','HEAP64','HEAPU8','HEAPU16','HEAPU32','HEAPU64','HEAPF32','HEAPF64']"
-               ]
             ++ cmdCFLAGS cflags_def
             ++ cmdEMCFLAGS [""]
             -- The default LDFLAGS are always added.

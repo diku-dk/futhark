@@ -4,6 +4,10 @@
 // WebAssembly module, much like the C server.  The manifest describes the
 // types and entry points, and names the C functions that operate on them.
 //
+// Calls into C are awaited, as a subclass may make them asynchronous (the
+// WebGPU backend does, in rts/webgpu/server_ws.js), and so is file access.
+// Command output is collected by '_print' and written out by the caller.
+//
 // A variable is a pair of a type name and a value.  A value of primitive type
 // is a JavaScript number, or a BigInt for 64-bit integers.  Booleans are 0 or
 // 1, and f16 values are their bit patterns.  A value of any other type is a
@@ -38,6 +42,11 @@ class Server {
     this.wasm = ctx.wasm;
     this.manifest = manifest;
     this._vars = {};
+    this._output = [];
+  }
+
+  _print(line) {
+    this._output.push(line);
   }
 
   _get_arg(args, i) {
@@ -103,14 +112,26 @@ class Server {
     return this.wasm['_' + fname](this.ctx.ctx, ...args);
   }
 
+  // Read a NUL-terminated string allocated by C, and free it.
+  _c_string(p) {
+    var heap = this.wasm.HEAPU8;
+    var str = new TextDecoder().decode(heap.subarray(p, heap.indexOf(0, p)));
+    this.wasm._free(p);
+    return str;
+  }
+
+  _get_error() {
+    return this._c_string(this.wasm._futhark_context_get_error(this.ctx.ctx));
+  }
+
   _check(err) {
     if (err != 0) {
-      throw this.ctx.get_error();
+      throw this._get_error();
     }
   }
 
-  _sync() {
-    this._check(this.wasm._futhark_context_sync(this.ctx.ctx));
+  async _sync() {
+    this._check(await this._c('futhark_context_sync'));
   }
 
   _malloc(n) {
@@ -141,10 +162,10 @@ class Server {
 
   // Call 'f' with a pointer to space for one value of the given type, and
   // return the value that it stores there.
-  _with_out(tname, f) {
+  async _with_out(tname, f) {
     var p = this._malloc(this._sizeof(tname));
     try {
-      f(p);
+      await f(p);
       return this._load(tname, p);
     } finally {
       this.wasm._free(p);
@@ -152,7 +173,15 @@ class Server {
   }
 
   _bytes(p, n) {
-    return Buffer.from(this.wasm.HEAPU8.slice(p, p + n));
+    return this.wasm.HEAPU8.slice(p, p + n);
+  }
+
+  async _read_file(fname) {
+    return new Uint8Array(require('fs').readFileSync(fname));
+  }
+
+  async _write_file(fname, bytes) {
+    require('fs').writeFileSync(fname, bytes);
   }
 
   // Types.
@@ -210,16 +239,16 @@ class Server {
     return this._type(tname).sum;
   }
 
-  _free_value(tname, value) {
+  async _free_value(tname, value) {
     var t = this._type(tname);
     if (t !== null) {
-      this._check(this._c(t.ops.free, value));
+      this._check(await this._c(t.ops.free, value));
     }
   }
 
-  _shape(a, arr) {
+  async _shape(a, arr) {
     var fshape = a.ops ? a.ops.shape : a.shape;
-    var p = this._c(fshape, arr);
+    var p = await this._c(fshape, arr);
     var shape = [];
     for (var i = 0; i < a.rank; i++) {
       shape.push(this._load('i64', p + i * 8));
@@ -237,7 +266,7 @@ class Server {
 
   // Values.
 
-  _restore_value(reader, tname) {
+  async _restore_value(reader, tname) {
     var t = this._type(tname);
     if (t === null) {
       return read_value(tname, reader);
@@ -247,11 +276,11 @@ class Server {
       var p = this._malloc(bytes.length);
       try {
         this.wasm.HEAPU8.set(bytes, p);
-        var arr = this._c(t.ops.new, p, ...shape);
+        var arr = await this._c(t.ops.new, p, ...shape);
         if (arr == 0) {
-          throw this.ctx.get_error();
+          throw this._get_error();
         }
-        this._sync();
+        await this._sync();
         return arr;
       } finally {
         this.wasm._free(p);
@@ -263,22 +292,22 @@ class Server {
       var p = this._malloc(buff.length);
       try {
         this.wasm.HEAPU8.set(buff, p);
-        var obj = this._c(t.ops.restore, p);
+        var obj = await this._c(t.ops.restore, p);
         if (obj == 0) {
-          throw this.ctx.get_error();
+          throw this._get_error();
         }
       } finally {
         this.wasm._free(p);
       }
-      var n = this._with_out('size', (np) => {
-        this._check(this._c(t.ops.store, obj, 0, np));
+      var n = await this._with_out('size', async (np) => {
+        this._check(await this._c(t.ops.store, obj, 0, np));
       });
       reader.buff = buff.slice(n);
       return obj;
     }
   }
 
-  _store_value(tname, value) {
+  async _store_value(tname, value) {
     var t = this._type(tname);
     if (t === null) {
       var p = this._malloc(this._sizeof(tname));
@@ -289,12 +318,12 @@ class Server {
         this.wasm._free(p);
       }
     } else if (t.kind == "array") {
-      var shape = this._shape(this._array_type(tname), value);
+      var shape = await this._shape(this._array_type(tname), value);
       var n = shape.reduce((x, y) => x * y, 1n) * BigInt(this._sizeof(t.elemtype));
       var p = this._malloc(Number(n));
       try {
-        this._check(this._c(t.ops.values, value, p));
-        this._sync();
+        this._check(await this._c(t.ops.values, value, p));
+        await this._sync();
         return binary_value(t.elemtype, shape, this._bytes(p, Number(n)));
       } finally {
         this.wasm._free(p);
@@ -304,8 +333,8 @@ class Server {
       var np = pp + serverPointer.size;
       try {
         this._poke('ptr', pp, 0);
-        this._check(this._c(t.ops.store, value, pp, np));
-        this._sync();
+        this._check(await this._c(t.ops.store, value, pp, np));
+        await this._sync();
         var p = this._load('ptr', pp);
         var bytes = this._bytes(p, this._load('size', np));
         this.wasm._free(p);
@@ -321,23 +350,35 @@ class Server {
   _cmd_inputs(args) {
     var entry = this._get_entry_point(this._get_arg(args, 0));
     for (var input of entry.inputs) {
-      console.log((input.consumed ? "*" : "") + input.type);
+      this._print((input.consumed ? "*" : "") + input.type);
     }
   }
 
   _cmd_output(args) {
     var entry = this._get_entry_point(this._get_arg(args, 0));
-    console.log((entry.output.fresh ? "*" : "") + entry.output.type);
+    this._print((entry.output.fresh ? "*" : "") + entry.output.type);
   }
 
-  _cmd_dummy(args) {
-    // pass
+  async _cmd_clear(args) {
+    this._check(await this._c('futhark_context_clear_caches'));
   }
 
-  _cmd_free(args) {
+  async _cmd_pause_profiling(args) {
+    await this._c('futhark_context_pause_profiling');
+  }
+
+  async _cmd_unpause_profiling(args) {
+    await this._c('futhark_context_unpause_profiling');
+  }
+
+  async _cmd_report(args) {
+    this._print(this._c_string(await this._c('futhark_context_report')));
+  }
+
+  async _cmd_free(args) {
     for (var vname of args) {
       var v = this._get_var(vname);
-      this._free_value(v.type, v.value);
+      await this._free_value(v.type, v.value);
       delete this._vars[vname];
     }
   }
@@ -353,27 +394,27 @@ class Server {
 
   _cmd_types(args) {
     for (var t in serverPrimtypes) {
-      console.log(t);
+      this._print(t);
     }
     for (var t in this.manifest.types) {
-      console.log(t);
+      this._print(t);
     }
   }
 
   _cmd_entry_points(args) {
     for (var e in this.manifest.entry_points) {
-      console.log(e);
+      this._print(e);
     }
   }
 
   _cmd_attributes(args) {
     var entry = this._get_entry_point(this._get_arg(args, 0));
     for (var attr of entry.attributes) {
-      console.log(attr);
+      this._print(attr);
     }
   }
 
-  _cmd_call(args) {
+  async _cmd_call(args) {
     var entry = this._get_entry_point(this._get_arg(args, 0));
     var out_vname = this._get_arg(args, 1);
     var in_vnames = args.slice(2);
@@ -384,39 +425,39 @@ class Server {
     this._check_new_var(out_vname);
 
     var bef = performance.now() * 1000;
-    var out = this._with_out(entry.output.type, (p) => {
-      this._check(this._c(entry.cfun, p, ...ins));
-      this._sync();
+    var out = await this._with_out(entry.output.type, async (p) => {
+      this._check(await this._c(entry.cfun, p, ...ins));
+      await this._sync();
     });
     var aft = performance.now() * 1000;
-    console.log("runtime: " + Math.round(aft - bef));
+    this._print("runtime: " + Math.round(aft - bef));
     this._set_var(out_vname, entry.output.type, out);
   }
 
-  _cmd_store(args) {
+  async _cmd_store(args) {
     var fname = this._get_arg(args, 0);
     var bufs = [];
     for (var vname of args.slice(1)) {
       var v = this._get_var(vname);
-      bufs.push(this._store_value(v.type, v.value));
+      bufs.push(await this._store_value(v.type, v.value));
     }
-    require("fs").writeFileSync(fname, Buffer.concat(bufs));
+    await this._write_file(fname, concat_bytes(bufs));
   }
 
-  _cmd_restore(args) {
+  async _cmd_restore(args) {
     var fname = this._get_arg(args, 0);
     if (args.length % 2 == 0) {
       throw "Invalid argument count";
     }
 
-    var reader = new Reader(fname);
+    var reader = new Reader(await this._read_file(fname));
     for (var i = 1; i < args.length; i += 2) {
       var vname = args[i];
       var tname = args[i + 1];
       this._check_new_var(vname);
       this._type(tname);
       try {
-        this._set_var(vname, tname, this._restore_value(reader, tname));
+        this._set_var(vname, tname, await this._restore_value(reader, tname));
       } catch (err) {
         throw "Failed to restore variable " + vname + ".\nPossibly malformed data in " + fname + ".\n" + err.toString();
       }
@@ -428,29 +469,29 @@ class Server {
   }
 
   _cmd_kind(args) {
-    console.log(this._kind(this._get_arg(args, 0)));
+    this._print(this._kind(this._get_arg(args, 0)));
   }
 
   _cmd_type(args) {
-    console.log(this._get_var(this._get_arg(args, 0)).type);
+    this._print(this._get_var(this._get_arg(args, 0)).type);
   }
 
   _cmd_rank(args) {
-    console.log(this._array_type(this._get_arg(args, 0)).rank);
+    this._print(this._array_type(this._get_arg(args, 0)).rank);
   }
 
   _cmd_elemtype(args) {
-    console.log(this._array_type(this._get_arg(args, 0)).elemtype);
+    this._print(this._array_type(this._get_arg(args, 0)).elemtype);
   }
 
-  _cmd_shape(args) {
+  async _cmd_shape(args) {
     var v = this._get_var(this._get_arg(args, 0));
-    for (var d of this._shape(this._array_type(v.type), v.value)) {
-      console.log(d.toString());
+    for (var d of await this._shape(this._array_type(v.type), v.value)) {
+      this._print(d.toString());
     }
   }
 
-  _cmd_new_array(args) {
+  async _cmd_new_array(args) {
     var dst = this._get_arg(args, 0);
     var tname = this._get_arg(args, 1);
     this._check_new_var(dst);
@@ -469,49 +510,49 @@ class Server {
       vs.forEach((v, i) => this._poke(a.elemtype, p + i * size, v));
       var arr;
       if (a.ops) {
-        arr = this._c(a.ops.new, p, ...dims);
+        arr = await this._c(a.ops.new, p, ...dims);
         if (arr == 0) {
-          throw this.ctx.get_error();
+          throw this._get_error();
         }
       } else {
-        arr = this._with_out(tname, (out) => {
-          this._check(this._c(a.new, out, p, ...dims));
+        arr = await this._with_out(tname, async (out) => {
+          this._check(await this._c(a.new, out, p, ...dims));
         });
       }
-      this._sync();
+      await this._sync();
       this._set_var(dst, tname, arr);
     } finally {
       this.wasm._free(p);
     }
   }
 
-  _cmd_set(args) {
+  async _cmd_set(args) {
     var arr = this._get_var(this._get_arg(args, 0));
     var a = this._array_type(arr.type);
     var val = this._get_typed_var(this._get_arg(args, 1), a.elemtype);
     var is = this._parse_ints(args.slice(2), a.rank);
-    this._check_bounds(this._shape(a, arr.value), is);
+    this._check_bounds(await this._shape(a, arr.value), is);
     var fset = a.ops ? a.ops.set : a.set;
-    this._check(this._c(fset, arr.value, val, ...is));
-    this._sync();
+    this._check(await this._c(fset, arr.value, val, ...is));
+    await this._sync();
   }
 
-  _cmd_index(args) {
+  async _cmd_index(args) {
     var dst = this._get_arg(args, 0);
     var arr = this._get_var(this._get_arg(args, 1));
     this._check_new_var(dst);
     var a = this._array_type(arr.type);
     var is = this._parse_ints(args.slice(2), a.rank);
-    this._check_bounds(this._shape(a, arr.value), is);
+    this._check_bounds(await this._shape(a, arr.value), is);
     var findex = a.ops ? a.ops.index : a.index;
-    var v = this._with_out(a.elemtype, (p) => {
-      this._check(this._c(findex, p, arr.value, ...is));
-      this._sync();
+    var v = await this._with_out(a.elemtype, async (p) => {
+      this._check(await this._c(findex, p, arr.value, ...is));
+      await this._sync();
     });
     this._set_var(dst, a.elemtype, v);
   }
 
-  _cmd_zip(args) {
+  async _cmd_zip(args) {
     var dst = this._get_arg(args, 0);
     var tname = this._get_arg(args, 1);
     this._check_new_var(dst);
@@ -524,14 +565,14 @@ class Server {
       throw a.fields.length + " arrays expected but " + vnames.length + " values provided.";
     }
     var vs = vnames.map((v, i) => this._get_typed_var(v, a.fields[i].type));
-    var arr = this._with_out(tname, (p) => {
-      this._check(this._c(a.zip, p, ...vs));
-      this._sync();
+    var arr = await this._with_out(tname, async (p) => {
+      this._check(await this._c(a.zip, p, ...vs));
+      await this._sync();
     });
     this._set_var(dst, tname, arr);
   }
 
-  _cmd_unzip(args) {
+  async _cmd_unzip(args) {
     var arr = this._get_var(this._get_arg(args, 0));
     var a = this._array_type(arr.type);
     if (!a.fields) {
@@ -542,22 +583,23 @@ class Server {
       throw a.fields.length + " arrays expected but " + dsts.length + " values provided.";
     }
     dsts.forEach((dst) => this._check_new_var(dst));
-    a.fields.forEach((f, i) => {
-      var v = this._with_out(f.type, (p) => {
-        this._check(this._c(f.project, p, arr.value));
+    for (var i = 0; i < a.fields.length; i++) {
+      var f = a.fields[i];
+      var v = await this._with_out(f.type, async (p) => {
+        this._check(await this._c(f.project, p, arr.value));
       });
       this._set_var(dsts[i], f.type, v);
-    });
-    this._sync();
+    }
+    await this._sync();
   }
 
   _cmd_fields(args) {
     for (var f of this._record_type(this._get_arg(args, 0)).fields) {
-      console.log(f.name + " " + f.type);
+      this._print(f.name + " " + f.type);
     }
   }
 
-  _cmd_new(args) {
+  async _cmd_new(args) {
     var dst = this._get_arg(args, 0);
     var tname = this._get_arg(args, 1);
     this._check_new_var(dst);
@@ -567,13 +609,13 @@ class Server {
       throw r.fields.length + " fields expected but " + vnames.length + " values provided.";
     }
     var vs = vnames.map((v, i) => this._get_typed_var(v, r.fields[i].type));
-    var obj = this._with_out(tname, (p) => {
-      this._check(this._c(r.new, p, ...vs));
+    var obj = await this._with_out(tname, async (p) => {
+      this._check(await this._c(r.new, p, ...vs));
     });
     this._set_var(dst, tname, obj);
   }
 
-  _cmd_project(args) {
+  async _cmd_project(args) {
     var dst = this._get_arg(args, 0);
     var from = this._get_var(this._get_arg(args, 1));
     var field = this._get_arg(args, 2);
@@ -582,31 +624,31 @@ class Server {
     if (f === undefined) {
       throw "No such field: " + field;
     }
-    var v = this._with_out(f.type, (p) => {
-      this._check(this._c(f.project, p, from.value));
+    var v = await this._with_out(f.type, async (p) => {
+      this._check(await this._c(f.project, p, from.value));
     });
     this._set_var(dst, f.type, v);
   }
 
   _cmd_variants(args) {
     for (var v of this._sum_type(this._get_arg(args, 0)).variants) {
-      console.log(v.name);
+      this._print(v.name);
       for (var t of v.payload) {
-        console.log("- " + t);
+        this._print("- " + t);
       }
     }
   }
 
-  _variant_of(v) {
+  async _variant_of(v) {
     var s = this._sum_type(v.type);
-    return s.variants[this._c(s.variant, v.value)];
+    return s.variants[await this._c(s.variant, v.value)];
   }
 
-  _cmd_variant(args) {
-    console.log(this._variant_of(this._get_var(this._get_arg(args, 0))).name);
+  async _cmd_variant(args) {
+    this._print((await this._variant_of(this._get_var(this._get_arg(args, 0)))).name);
   }
 
-  _cmd_construct(args) {
+  async _cmd_construct(args) {
     var dst = this._get_arg(args, 0);
     var tname = this._get_arg(args, 1);
     var vname = this._get_arg(args, 2);
@@ -620,15 +662,15 @@ class Server {
       throw variant.payload.length + " values expected but " + vnames.length + " provided.";
     }
     var vs = vnames.map((v, i) => this._get_typed_var(v, variant.payload[i]));
-    var obj = this._with_out(tname, (p) => {
-      this._check(this._c(variant.construct, p, ...vs));
+    var obj = await this._with_out(tname, async (p) => {
+      this._check(await this._c(variant.construct, p, ...vs));
     });
     this._set_var(dst, tname, obj);
   }
 
-  _cmd_destruct(args) {
+  async _cmd_destruct(args) {
     var v = this._get_var(this._get_arg(args, 0));
-    var variant = this._variant_of(v);
+    var variant = await this._variant_of(v);
     var dsts = args.slice(1);
     if (dsts.length != variant.payload.length) {
       throw variant.payload.length + " variables expected but " + dsts.length + " provided.";
@@ -636,75 +678,81 @@ class Server {
     dsts.forEach((dst) => this._check_new_var(dst));
     var ps = variant.payload.map((t) => this._malloc(this._sizeof(t)));
     try {
-      this._check(this._c(variant.destruct, ...ps, v.value));
+      this._check(await this._c(variant.destruct, ...ps, v.value));
       variant.payload.forEach((t, i) => this._set_var(dsts[i], t, this._load(t, ps[i])));
     } finally {
       ps.forEach((p) => this.wasm._free(p));
     }
   }
 
-  _process_line(line) {
-    var words = split_words(line);
-    if (words.length == 0) {
-      throw "Empty line";
-    } else {
-      var cmd = words[0];
-      var args = words.slice(1);
-      switch (cmd) {
-      case 'inputs': this._cmd_inputs(args); break;
-      case 'output': this._cmd_output(args); break;
-      case 'call': this._cmd_call(args); break;
-      case 'restore': this._cmd_restore(args); break;
-      case 'store': this._cmd_store(args); break;
-      case 'free': this._cmd_free(args); break;
-      case 'clear': this._cmd_dummy(args); break;
-      case 'pause_profiling': this._cmd_dummy(args); break;
-      case 'unpause_profiling': this._cmd_dummy(args); break;
-      case 'report': this._cmd_dummy(args); break;
-      case 'rename': this._cmd_rename(args); break;
-      case 'types': this._cmd_types(args); break;
-      case 'entry_points': this._cmd_entry_points(args); break;
-      case 'attributes': this._cmd_attributes(args); break;
-      case 'kind': this._cmd_kind(args); break;
-      case 'type': this._cmd_type(args); break;
-      case 'rank': this._cmd_rank(args); break;
-      case 'elemtype': this._cmd_elemtype(args); break;
-      case 'shape': this._cmd_shape(args); break;
-      case 'new_array': this._cmd_new_array(args); break;
-      case 'set': this._cmd_set(args); break;
-      case 'index': this._cmd_index(args); break;
-      case 'zip': this._cmd_zip(args); break;
-      case 'unzip': this._cmd_unzip(args); break;
-      case 'fields': this._cmd_fields(args); break;
-      case 'new': this._cmd_new(args); break;
-      case 'project': this._cmd_project(args); break;
-      case 'variants': this._cmd_variants(args); break;
-      case 'construct': this._cmd_construct(args); break;
-      case 'destruct': this._cmd_destruct(args); break;
-      case 'variant': this._cmd_variant(args); break;
-      default: throw "Unknown command: " + cmd;
-      }
+  async _process_command(cmd, args) {
+    switch (cmd) {
+    case 'inputs': return this._cmd_inputs(args);
+    case 'output': return this._cmd_output(args);
+    case 'call': return this._cmd_call(args);
+    case 'restore': return this._cmd_restore(args);
+    case 'store': return this._cmd_store(args);
+    case 'free': return this._cmd_free(args);
+    case 'clear': return this._cmd_clear(args);
+    case 'pause_profiling': return this._cmd_pause_profiling(args);
+    case 'unpause_profiling': return this._cmd_unpause_profiling(args);
+    case 'report': return this._cmd_report(args);
+    case 'rename': return this._cmd_rename(args);
+    case 'types': return this._cmd_types(args);
+    case 'entry_points': return this._cmd_entry_points(args);
+    case 'attributes': return this._cmd_attributes(args);
+    case 'kind': return this._cmd_kind(args);
+    case 'type': return this._cmd_type(args);
+    case 'rank': return this._cmd_rank(args);
+    case 'elemtype': return this._cmd_elemtype(args);
+    case 'shape': return this._cmd_shape(args);
+    case 'new_array': return this._cmd_new_array(args);
+    case 'set': return this._cmd_set(args);
+    case 'index': return this._cmd_index(args);
+    case 'zip': return this._cmd_zip(args);
+    case 'unzip': return this._cmd_unzip(args);
+    case 'fields': return this._cmd_fields(args);
+    case 'new': return this._cmd_new(args);
+    case 'project': return this._cmd_project(args);
+    case 'variants': return this._cmd_variants(args);
+    case 'construct': return this._cmd_construct(args);
+    case 'destruct': return this._cmd_destruct(args);
+    case 'variant': return this._cmd_variant(args);
+    default: throw "Unknown command: " + cmd;
     }
   }
 
-  run() {
+  async _process_line(line) {
+    var words = split_words(line);
+    if (words.length == 0) {
+      throw "Empty line";
+    }
+    await this._process_command(words[0], words.slice(1));
+  }
+
+  async run() {
     console.log('%%% OK'); // TODO figure out if flushing is neccesary for JS
     const readline = require('readline');
     const rl = readline.createInterface(process.stdin);
-    rl.on('line', (line) => {
+    // Commands are asynchronous, so we must finish one before reading the
+    // next.
+    for await (const line of rl) {
       if (line == "") {
-        rl.close();
-        return;
+        break;
       }
+      this._output = [];
       try {
-        this._process_line(line);
+        await this._process_line(line);
+        this._output.forEach((l) => console.log(l));
         console.log('%%% OK');
       } catch (err) {
+        this._output.forEach((l) => console.log(l));
         console.log('%%% FAILURE');
         console.log(err);
         console.log('%%% OK');
       }
-    }).on('close', () => { process.exit(0); });
+    }
+    process.exit(0);
   }
 }
 

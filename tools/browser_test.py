@@ -155,11 +155,10 @@ async def handle_file(request):
     )
 
 
-def wrap_store_resp(fname, resp):
+def write_store_data(fname, resp):
     data = base64.b64decode(resp["data"].encode("utf-8"))
     with open(fname, "wb") as f:
         f.write(data)
-    return ""
 
 
 async def handle_ws(request):
@@ -178,10 +177,6 @@ async def handle_ws(request):
         if cmd == "close":
             break
 
-        orig_args = args
-        if cmd == "store":
-            args = args[1:]
-
         await ws.send_json({"cmd": cmd, "args": args})
         msg = await ws.receive()
 
@@ -192,11 +187,9 @@ async def handle_ws(request):
         resp = json.loads(msg.data)
         eprint("Got response:", resp)
 
-        text = ""
-        if cmd == "store" and resp["status"] == "ok":
-            text = wrap_store_resp(orig_args[0], resp)
-        else:
-            text = resp["text"]
+        if "data" in resp:
+            write_store_data(args[0], resp)
+        text = resp["text"]
 
         toStdIO.put_nowait((resp["status"], text))
 
@@ -274,7 +267,9 @@ app.add_routes(
         web.get("/", handle_index),
         web.get("/index.html", handle_index),
         web.get("/ws", handle_ws),
-        web.get("/{file:.*}", handle_file)      # Catch-all for serving input files from /tmp/ or data/ directories
+        web.get(
+            "/{file:.*}", handle_file
+        ),  # Catch-all for serving input files from /tmp/ or data/ directories
     ]
 )
 
@@ -305,7 +300,8 @@ async def handle_stdio(toWS, toStdIO):
         status, text = await toStdIO.get()
 
         if status == "ok":
-            print(text, flush=True)
+            if text:
+                print(text, flush=True)
             print("%%% OK", flush=True)
         else:
             print("%%% FAILURE", flush=True)
