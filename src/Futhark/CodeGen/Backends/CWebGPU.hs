@@ -12,8 +12,6 @@ module Futhark.CodeGen.Backends.CWebGPU
 where
 
 import Data.Map qualified as M
-import Data.Maybe (mapMaybe)
-import Data.Set qualified as S
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GPU
 import Futhark.CodeGen.Backends.GenericC qualified as GC
@@ -251,9 +249,9 @@ webgpuMemoryType space = error $ "WebGPU backend does not support '" ++ space ++
 -- | The JavaScript wrapper, and the names of the C functions that must be
 -- exported from the WebAssembly module. We export every function named in the
 -- manifest, as the server calls these directly.
-jsBoilerplate :: Definitions a -> Manifest.Manifest -> (T.Text, [T.Text])
-jsBoilerplate prog manifest =
-  let context = mkJsContext prog $ Manifest.manifestToJSON manifest
+jsBoilerplate :: Manifest.Manifest -> (T.Text, [T.Text])
+jsBoilerplate manifest =
+  let context = mkJsContext $ Manifest.manifestToJSON manifest
       prelude = T.intercalate "\n" [utilJs, wrappersJs]
    in (prelude <> "\n" <> context, nubOrd (manifestFunctions manifest) ++ builtinExports)
   where
@@ -286,8 +284,8 @@ asyncCall func hasReturn args =
     argList =
       "[" <> T.intercalate ", " args <> "]"
 
-mkJsContext :: Definitions a -> T.Text -> T.Text
-mkJsContext (Definitions _ _ _ (Functions funs)) manifest =
+mkJsContext :: T.Text -> T.Text
+mkJsContext manifest =
   [text|
    class FutharkModule {
      ${constructor}
@@ -307,8 +305,7 @@ mkJsContext (Definitions _ _ _ (Functions funs)) manifest =
         this.ctx = await ${newContext};
         this.entry = {};
         this.types = {};
-        ${valueClasses}
-        ${entryPointFuns}
+        init_wrappers(this);
       }|]
     newContext = asyncCall "futhark_context_new" True ["this.cfg"]
     free =
@@ -317,17 +314,8 @@ mkJsContext (Definitions _ _ _ (Functions funs)) manifest =
         this.m._futhark_context_free(this.ctx);
         this.m._futhark_context_config_free(this.cfg);
       }|]
-    entryPoints = mapMaybe (functionEntry . snd) funs
-    entryPointFuns = mkJsEntryPoints entryPoints
-    valueClasses = mkJsValueClasses entryPoints
     builtins =
       [text|
-      malloc(nbytes) {
-        return this.m._malloc(nbytes);
-      }
-      free(ptr) {
-        return this.m._free(ptr);
-      }
       async context_sync() {
         return await ${syncCall};
       }
@@ -352,37 +340,6 @@ mkJsContext (Definitions _ _ _ (Functions funs)) manifest =
     unpauseProfilingCall =
       asyncCall "futhark_context_unpause_profiling" False ["this.ctx"]
 
-mkJsEntryPoints :: [EntryPoint] -> T.Text
-mkJsEntryPoints = T.intercalate "\n" . map (entryFun . nameToText . entryPointName)
-  where
-    entryFun name =
-      [text|this.entry['${name}'] = make_entry_function(this, '${name}').bind(this);|]
-
-mkJsValueClasses :: [EntryPoint] -> T.Text
-mkJsValueClasses entries =
-  -- TODO: Only supports transparent arrays right now.
-  let extVals =
-        map (snd . entryPointResults) entries
-          ++ concatMap (map snd . entryPointArgs) entries
-      transpVals = [v | TransparentValue v <- extVals]
-      arrVals =
-        S.toList $
-          S.fromList
-            [(typ, sgn, shp) | ArrayValue _ _ typ sgn shp <- transpVals]
-   in T.intercalate "\n" $ map mkJsArrayClass arrVals
-
-mkJsArrayClass :: (PrimType, Signedness, [DimSize]) -> T.Text
-mkJsArrayClass (typ, sign, shp) =
-  [text|
-    this.${name} = make_array_class(this, '${prettyName}');
-    this.types['${prettyName}'] = this.${name};
-  |]
-  where
-    rank = length shp
-    elemName = prettySigned (sign == Unsigned) typ
-    prettyName = mconcat (replicate rank "[]") <> elemName
-    name = elemName <> "_" <> prettyText rank <> "d"
-
 -- | Compile the program to C with calls to WebGPU, along with a JS wrapper
 -- library.
 compileProg ::
@@ -405,7 +362,7 @@ compileProg version prog = do
       (Space "device", [Space "device", DefaultSpace])
       cliOptions
       prog'
-  let (js, exports) = jsBoilerplate prog' (GC.cManifest c)
+  let (js, exports) = jsBoilerplate (GC.cManifest c)
   pure (ws, (c, js, exports))
   where
     operations :: GC.Operations HostOp ()

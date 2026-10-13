@@ -575,6 +575,8 @@ compileWebGPUAction fcfg mode tgtpath =
           jsonpath = tgtpath `addExtension` "json"
           extra_options =
             [ "--use-port=emdawnwebgpu",
+              -- The emdawnwebgpu port is written in C++.
+              "-sDEFAULT_TO_CXX",
               "-sASYNCIFY",
               "-sMODULARIZE",
               "-sWASM_BIGINT",

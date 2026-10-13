@@ -66,14 +66,14 @@ function make_array_class(fut, name) {
       futhark_assert(data instanceof prim_info.array_type,
         "expected Array or correct TypedArray");
 
-      const wasm_data = fut.malloc(data.byteLength);
+      const wasm_data = fut.m._malloc(data.byteLength);
       const wasm_view = fut.m.HEAPU8.subarray(wasm_data, wasm_data + data.byteLength);
       wasm_view.set(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
 
       const new_fun = wasm_fun(type_info.ops.new);
       const arr = new_fun(fut.ctx, wasm_data, ...shape);
 
-      fut.free(wasm_data);
+      fut.m._free(wasm_data);
 
       return new FutharkArrayImpl(arr, shape);
     }
@@ -106,7 +106,7 @@ function make_array_class(fut, name) {
       const shape = this.shape();
       const flat_len = Number(shape.reduce((a, b) => a * b));
       const flat_size = flat_len * prim_info.size;
-      const wasm_data = fut.malloc(flat_size);
+      const wasm_data = fut.m._malloc(flat_size);
 
       await fut.m.ccall(type_info.ops.values,
         'number', ['number', 'number', 'number'],
@@ -119,7 +119,7 @@ function make_array_class(fut, name) {
                     wasm_data / prim_info.size + flat_len)
       );
 
-      fut.free(wasm_data);
+      fut.m._free(wasm_data);
 
       return data;
     };
@@ -134,43 +134,76 @@ function make_array_class(fut, name) {
   };
 }
 
+// Like FutharkArray, this is a marker class for the classes generated for
+// the individual opaque types.
 class FutharkOpaque {
   constructor(name, ptr) {
+    // Name is only for debugging, as for FutharkArray.
+    this.type_name = name;
     this.ptr = ptr;
-    this.valid = true;
+  }
+
+  validCheck() {
+    if (this.ptr === undefined) {
+      throw new Error("Using freed memory");
+    }
+  }
+
+  futharkType() {
+    return this.type_name;
   }
 }
 
 function make_opaque_class(fut, name) {
   const type_info = fut.manifest.types[name];
 
-  function wasm_fun(full_name) {
-    const name = "_" + full_name;
-    return fut.m[name];
-  }
-
   return class FutharkOpaqueImpl extends FutharkOpaque {
-    constructor(name, ptr) {
+    constructor(ptr) {
       super(name, ptr);
     }
 
     static from_native(ptr) {
-      return new FutharkOpaqueImpl(name, ptr);
+      return new FutharkOpaqueImpl(ptr);
     }
 
     free() {
-      const free_fun = wasm_fun(type_info.ops.free);
-      free_fun(fut.ctx, this.arr);
+      this.validCheck();
+      fut.m["_" + type_info.ops.free](fut.ctx, this.ptr);
+      this.ptr = undefined;
     }
   };
 }
 
+// Read the value of the given type that a C function has stored at the
+// pointer 'p'.
+function read_output(fut, type, p) {
+  if (type in primInfos) {
+    const prim_info = primInfos[type];
+    return prim_info.get_heap(fut.m)[p / prim_info.size];
+  }
+  if (!(type in fut.types)) {
+    throw new Error("Unknown output type");
+  }
+  return fut.types[type].from_native(fut.m.HEAP32[p / 4]);
+}
+
+// Call a C function that stores a value of the given type through its first
+// argument (after the context), and return that value.
+async function call_with_output(fut, cfun, type, args) {
+  // Large enough for any primitive value or pointer.
+  const out = fut.m._malloc(8);
+  try {
+    await fut.m.ccall(cfun, 'number',
+      Array(2 + args.length).fill('number'),
+      [fut.ctx, out].concat(args), {async: true});
+    return read_output(fut, type, out);
+  } finally {
+    fut.m._free(out);
+  }
+}
+
 function make_entry_function(fut, name) {
   const entry_info = fut.manifest.entry_points[name];
-  const output_infos =
-    entry_info.outputs !== undefined
-      ? entry_info.outputs
-      : [entry_info.output];
 
   return async function(...inputs) {
     futhark_assert(inputs.length == entry_info.inputs.length,
@@ -192,7 +225,9 @@ function make_entry_function(fut, name) {
           real_inputs.push(inputs[i].arr);
         }
         else {
-          // Assume opaque.
+          if (!(inputs[i] instanceof FutharkOpaque)) {
+            throw new Error("Entry point opaque arguments must be FutharkOpaques");
+          }
           real_inputs.push(inputs[i].ptr);
         }
       }
@@ -201,46 +236,44 @@ function make_entry_function(fut, name) {
       }
     }
 
-    let out_ptrs = [];
-    for (let i = 0; i < output_infos.length; i++) {
-      out_ptrs.push(fut.malloc(4));
+    return await call_with_output(fut, entry_info.cfun, entry_info.output.type, real_inputs);
+  };
+}
+
+// A function that projects a field of a record, given as a FutharkOpaque.
+function make_project_function(fut, field) {
+  return async function(obj) {
+    if (!(obj instanceof FutharkOpaque)) {
+      throw new Error("Projection argument must be a FutharkOpaque");
     }
+    obj.validCheck();
+    return await call_with_output(fut, field.project, field.type, [obj.ptr]);
+  };
+}
 
-    await fut.m.ccall(entry_info.cfun, 'number',
-      Array(1 + out_ptrs.length + real_inputs.length).fill('number'),
-      [fut.ctx].concat(out_ptrs).concat(real_inputs), {async: true});
-
-    let results = [];
-    for (let i = 0; i < out_ptrs.length; i++) {
-      const out_info = output_infos[i];
-      if (out_info.type in primInfos) {
-        const prim_info = primInfos[out_info.type];
-        const val = prim_info.get_heap(fut.m)[out_ptrs[i] / prim_info.size];
-        results.push(val);
-      }
-      else if (out_info.type in fut.manifest.types) {
-        const type_info = fut.manifest.types[out_info.type];
-        if (type_info.kind == "array") {
-          const array_type = fut.types[out_info.type];
-          const val = array_type.from_native(fut.m.HEAP32[out_ptrs[i] / 4]);
-          results.push(val);
-        } else {
-          const opaque_type = fut.types[out_info.type];
-          const val = opaque_type.from_native(fut.m.HEAP32[out_ptrs[i] / 4]);
-          results.push(val);
+// Populate the types, entry points, and record projections of a FutharkModule
+// from its manifest.  As in the WASM backend, each array type is also
+// available as e.g. 'fut.i32_1d', and the projection function for a record
+// field as e.g. 'fut.project_opaque_foo_x'.
+function init_wrappers(fut) {
+  for (const [name, type_info] of Object.entries(fut.manifest.types)) {
+    if (type_info.kind == "array") {
+      const cls = make_array_class(fut, name);
+      fut.types[name] = cls;
+      fut[type_info.elemtype + "_" + type_info.rank + "d"] = cls;
+    } else {
+      fut.types[name] = make_opaque_class(fut, name);
+      if (type_info.record) {
+        for (const field of type_info.record.fields) {
+          fut[field.project.replace(/^futhark_/, "")] = make_project_function(fut, field);
         }
       }
-      else {
-        throw new Error("Unknown output type");
-      }
     }
+  }
 
-    for (const ptr of out_ptrs) {
-      fut.free(ptr);
-    }
-
-    return results.length === 1 ? results[0] : results;
-  };
+  for (const name of Object.keys(fut.manifest.entry_points)) {
+    fut.entry[name] = make_entry_function(fut, name);
+  }
 }
 
 // End of wrappers.js

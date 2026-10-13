@@ -30,8 +30,8 @@ if [ ! -d "${HOME}/opt/emsdk" ]; then
 fi
 
 pushd "${HOME}/opt/emsdk" >/dev/null
-./emsdk install 5.0.0
-./emsdk activate 5.0.0
+./emsdk install 6.0.9
+./emsdk activate 6.0.9
 export EMSDK_QUIET=1
 source "${HOME}/opt/emsdk/emsdk_env.sh"
 popd >/dev/null

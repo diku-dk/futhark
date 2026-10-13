@@ -201,8 +201,9 @@ The WASM backend also provides a few older convenience methods.
 Array construction
 ~~~~~~~~~~~~~~~~~~
 
-Each array type used by an entry point is exposed through a generated
-constructor object.  For example, for the type ``[]i32``:
+Each array type used by an entry point, including as the field of a
+record, is exposed through a generated constructor object.  For
+example, for the type ``[]i32``:
 
 .. js:function:: fut.i32_1d.from_data(data, dim0)
 
@@ -223,15 +224,35 @@ FutharkOpaque
 -------------
 
 Complex types (records, nested tuples, etc) are represented by
-``FutharkOpaque``.  It has no use outside of being accepted and
-returned by entry point functions. For this reason the method only has
-one function for freeing the memory when ``FutharkOpaque`` is no
-longer used.
+``FutharkOpaque``.  They can be passed to and returned by entry point
+functions, and the fields of records (including tuples) can be read
+by projection, as described below.
 
 .. js:function:: FutharkOpaque.free()
 
    Frees  memory used by FutharkOpaque. Should be called when Futhark
    Opaque is no longer used.
+
+Records
+~~~~~~~
+
+Records, including tuples, are ``FutharkOpaque`` objects whose fields
+can be *projected*.  For each field of a record type, the top-level
+wrapper object has a method named after the corresponding projection
+function in the C API (see :ref:`records`), without the ``futhark_``
+prefix.  For example, the field ``x`` of a record with C type ``struct
+futhark_opaque_foo`` is projected as follows:
+
+.. js:function:: fut.project_opaque_foo_x(obj)
+
+   Returns the value of field ``x`` of the record ``obj``.  An array or
+   opaque field is returned as a new ``FutharkArray`` or
+   ``FutharkOpaque``, which must be freed independently of ``obj``.
+
+   For the WebGPU backend, the method is asynchronous.
+
+The names of the projection functions are also listed in the manifest
+(see :ref:`manifest`).
 
 Entry Points
 ------------
@@ -249,5 +270,6 @@ point named ``main`` can be called as:
    The entry point function takes the JavaScript representations of the
    Futhark entry point arguments and returns the result.
 
-   If the entry point has multiple outputs, the return value is an array
-   containing the outputs in order.
+   An entry point that returns a tuple returns a single
+   ``FutharkOpaque``, whose elements can be obtained by projection (see
+   `Records`_).

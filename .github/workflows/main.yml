@@ -563,9 +563,9 @@ jobs:
 
     - uses: mymindstorm/setup-emsdk@v14
       with:
-        version: 4.0.23
+        version: 6.0.9
         actions-cache-folder: 'emsdk-cache'
-        cache-key: emsdk-wasm
+        cache-key: emsdk-wasm-6.0.9
 
     - uses: actions/setup-node@v6
       with:
@@ -600,9 +600,9 @@ jobs:
 
     - uses: mymindstorm/setup-emsdk@v14
       with:
-        version: 4.0.23
+        version: 6.0.9
         actions-cache-folder: 'emsdk-mc-cache'
-        cache-key: emsdk-wasm-multicore
+        cache-key: emsdk-wasm-multicore-6.0.9
 
     - uses: actions/setup-node@v6
       with:
@@ -633,9 +633,9 @@ jobs:
 
     - uses: mymindstorm/setup-emsdk@v14
       with:
-        version: 4.0.23
+        version: 6.0.9
         actions-cache-folder: 'emsdk-cache'
-        cache-key: emsdk-wasm-lib
+        cache-key: emsdk-wasm-lib-6.0.9
 
     - uses: actions/setup-node@v6
       with:
