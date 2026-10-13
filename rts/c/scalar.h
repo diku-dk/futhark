@@ -312,7 +312,7 @@ SCALAR_FUN_ATTR int32_t srem32(int32_t x, int32_t y) {
 }
 
 SCALAR_FUN_ATTR int64_t srem64(int64_t x, int64_t y) {
-  int8_t ys = 1;
+  int64_t ys = 1;
   foreach_active(i) { ys = y; }
   return x % ys;
 }
