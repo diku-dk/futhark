@@ -214,6 +214,20 @@ jobs:
           make configure
           make docs
 
+    - name: Install SSH key
+      if: github.ref == 'refs/heads/master'
+      uses: shimataro/ssh-key-action@v2
+      with:
+        key: ${{ secrets.SSHKEY }}
+        known_hosts: ${{ secrets.KNOWN_HOSTS }}
+
+    - name: copy haddock to server
+      if: github.ref == 'refs/heads/master'
+      run: |
+          rsync -rv --delete -e 'ssh -o "StrictHostKeyChecking no"' \
+            "$(dirname "$(find dist-newstyle -path '*/doc/html/futhark/index.html' | head -n1)")"/ \
+            futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/haddock/
+
   test-interpreter:
     runs-on: ubuntu-24.04
     needs: [build-linux-nix]
