@@ -69,28 +69,31 @@ SCALAR_FUN_ATTR uint64_t udiv64(uint64_t x, uint64_t y) {
   return x / ys;
 }
 
+// Unsigned ceiling division rounds the quotient up when the remainder
+// is nonzero.  Unlike (x + y - 1) / y, this cannot overflow.
+
 SCALAR_FUN_ATTR uint8_t uceil_div8(uint8_t x, uint8_t y) {
   uint8_t ys = 1;
   foreach_active(i) { ys = y; }
-  return (x + y - 1) / ys;
+  return x / ys + (x % ys != 0 ? 1 : 0);
 }
 
 SCALAR_FUN_ATTR uint16_t uceil_div16(uint16_t x, uint16_t y) {
   uint16_t ys = 1;
   foreach_active(i) { ys = y; }
-  return (x + y - 1) / ys;
+  return x / ys + (x % ys != 0 ? 1 : 0);
 }
 
 SCALAR_FUN_ATTR uint32_t uceil_div32(uint32_t x, uint32_t y) {
   uint32_t ys = 1;
   foreach_active(i) { ys = y; }
-  return (x + y - 1) / ys;
+  return x / ys + (x % ys != 0 ? 1 : 0);
 }
 
 SCALAR_FUN_ATTR uint64_t uceil_div64(uint64_t x, uint64_t y) {
   uint64_t ys = 1;
   foreach_active(i) { ys = y; }
-  return (x + y - 1) / ys;
+  return x / ys + (x % ys != 0 ? 1 : 0);
 }
 
 SCALAR_FUN_ATTR uint8_t umod8(uint8_t x, uint8_t y) {
@@ -142,27 +145,19 @@ SCALAR_FUN_ATTR uint64_t udiv_safe64(uint64_t x, uint64_t y) {
 }
 
 SCALAR_FUN_ATTR uint8_t uceil_div_safe8(uint8_t x, uint8_t y) {
-  uint8_t ys = 1;
-  foreach_active(i) { ys = y; }
-  return y == 0 ? 0 : (x + y - 1) / ys;
+  return y == 0 ? 0 : uceil_div8(x, y);
 }
 
 SCALAR_FUN_ATTR uint16_t uceil_div_safe16(uint16_t x, uint16_t y) {
-  uint16_t ys = 1;
-  foreach_active(i) { ys = y; }
-  return y == 0 ? 0 : (x + y - 1) / ys;
+  return y == 0 ? 0 : uceil_div16(x, y);
 }
 
 SCALAR_FUN_ATTR uint32_t uceil_div_safe32(uint32_t x, uint32_t y) {
-  uint32_t ys = 1;
-  foreach_active(i) { ys = y; }
-  return y == 0 ? 0 : (x + y - 1) / ys;
+  return y == 0 ? 0 : uceil_div32(x, y);
 }
 
 SCALAR_FUN_ATTR uint64_t uceil_div_safe64(uint64_t x, uint64_t y) {
-  uint64_t ys = 1;
-  foreach_active(i) { ys = y; }
-  return y == 0 ? 0 : (x + y - 1) / ys;
+  return y == 0 ? 0 : uceil_div64(x, y);
 }
 
 SCALAR_FUN_ATTR uint8_t umod_safe8(uint8_t x, uint8_t y) {
@@ -189,46 +184,100 @@ SCALAR_FUN_ATTR uint64_t umod_safe64(uint64_t x, uint64_t y) {
   return y == 0 ? 0 : x % ys;
 }
 
+// Signed division of the most negative value by -1 overflows, which
+// traps on x86.  Futhark defines the result to wrap (x / -1 == -x and
+// x % -1 == 0), so we divide by 1 instead and negate the quotient
+// where necessary.
+
 SCALAR_FUN_ATTR int8_t sdiv8(int8_t x, int8_t y) {
   int8_t ys = 1;
   foreach_active(i) { ys = y; }
+  ys = ys == -1 ? 1 : ys;
   int8_t q = x / ys;
   int8_t r = x % ys;
-  return q - ((r != 0 && r < 0 != y < 0) ? 1 : 0);
+  int8_t d = q - ((r != 0 && r < 0 != y < 0) ? 1 : 0);
+  return y == -1 ? (int8_t)(0 - (uint8_t)x) : d;
 }
 
 SCALAR_FUN_ATTR int16_t sdiv16(int16_t x, int16_t y) {
   int16_t ys = 1;
   foreach_active(i) { ys = y; }
+  ys = ys == -1 ? 1 : ys;
   int16_t q = x / ys;
   int16_t r = x % ys;
-  return q - ((r != 0 && r < 0 != y < 0) ? 1 : 0);
+  int16_t d = q - ((r != 0 && r < 0 != y < 0) ? 1 : 0);
+  return y == -1 ? (int16_t)(0 - (uint16_t)x) : d;
 }
 
 SCALAR_FUN_ATTR int32_t sdiv32(int32_t x, int32_t y) {
   int32_t ys = 1;
   foreach_active(i) { ys = y; }
+  ys = ys == -1 ? 1 : ys;
   int32_t q = x / ys;
   int32_t r = x % ys;
-  return q - ((r != 0 && r < 0 != y < 0) ? 1 : 0);
+  int32_t d = q - ((r != 0 && r < 0 != y < 0) ? 1 : 0);
+  return y == -1 ? (int32_t)(0 - (uint32_t)x) : d;
 }
 
 SCALAR_FUN_ATTR int64_t sdiv64(int64_t x, int64_t y) {
   int64_t ys = 1;
   foreach_active(i) { ys = y; }
+  ys = ys == -1 ? 1 : ys;
   int64_t q = x / ys;
   int64_t r = x % ys;
-  return q - ((r != 0 && r < 0 != y < 0) ? 1 : 0);
+  int64_t d = q - ((r != 0 && r < 0 != y < 0) ? 1 : 0);
+  return y == -1 ? (int64_t)(0 - (uint64_t)x) : d;
 }
 
-SCALAR_FUN_ATTR int8_t sceil_div8(int8_t x, int8_t y) { return sdiv8(x + y - 1, y); }
-SCALAR_FUN_ATTR int16_t sceil_div16(int16_t x, int16_t y) { return sdiv16(x + y - 1, y); }
-SCALAR_FUN_ATTR int32_t sceil_div32(int32_t x, int32_t y) { return sdiv32(x + y - 1, y); }
-SCALAR_FUN_ATTR int64_t sceil_div64(int64_t x, int64_t y) { return sdiv64(x + y - 1, y); }
+// Ceiling division rounds the truncated quotient up when it is inexact
+// and positive, i.e. when the remainder is nonzero and has the same
+// sign as the divisor.  Unlike (x + y - 1) / y, this cannot overflow
+// and is also correct for negative divisors.
+
+SCALAR_FUN_ATTR int8_t sceil_div8(int8_t x, int8_t y) {
+  int8_t ys = 1;
+  foreach_active(i) { ys = y; }
+  ys = ys == -1 ? 1 : ys;
+  int8_t q = x / ys;
+  int8_t r = x % ys;
+  int8_t d = q + ((r != 0 && (r > 0) == (y > 0)) ? 1 : 0);
+  return y == -1 ? (int8_t)(0 - (uint8_t)x) : d;
+}
+
+SCALAR_FUN_ATTR int16_t sceil_div16(int16_t x, int16_t y) {
+  int16_t ys = 1;
+  foreach_active(i) { ys = y; }
+  ys = ys == -1 ? 1 : ys;
+  int16_t q = x / ys;
+  int16_t r = x % ys;
+  int16_t d = q + ((r != 0 && (r > 0) == (y > 0)) ? 1 : 0);
+  return y == -1 ? (int16_t)(0 - (uint16_t)x) : d;
+}
+
+SCALAR_FUN_ATTR int32_t sceil_div32(int32_t x, int32_t y) {
+  int32_t ys = 1;
+  foreach_active(i) { ys = y; }
+  ys = ys == -1 ? 1 : ys;
+  int32_t q = x / ys;
+  int32_t r = x % ys;
+  int32_t d = q + ((r != 0 && (r > 0) == (y > 0)) ? 1 : 0);
+  return y == -1 ? (int32_t)(0 - (uint32_t)x) : d;
+}
+
+SCALAR_FUN_ATTR int64_t sceil_div64(int64_t x, int64_t y) {
+  int64_t ys = 1;
+  foreach_active(i) { ys = y; }
+  ys = ys == -1 ? 1 : ys;
+  int64_t q = x / ys;
+  int64_t r = x % ys;
+  int64_t d = q + ((r != 0 && (r > 0) == (y > 0)) ? 1 : 0);
+  return y == -1 ? (int64_t)(0 - (uint64_t)x) : d;
+}
 
 SCALAR_FUN_ATTR int8_t smod8(int8_t x, int8_t y) {
   int8_t ys = 1;
   foreach_active(i) { ys = y; }
+  ys = ys == -1 ? 1 : ys;
   int8_t r = x % ys;
   return r + (r == 0 || (x > 0 && y > 0) || (x < 0 && y < 0) ? 0 : y);
 }
@@ -236,6 +285,7 @@ SCALAR_FUN_ATTR int8_t smod8(int8_t x, int8_t y) {
 SCALAR_FUN_ATTR int16_t smod16(int16_t x, int16_t y) {
   int16_t ys = 1;
   foreach_active(i) { ys = y; }
+  ys = ys == -1 ? 1 : ys;
   int16_t r = x % ys;
   return r + (r == 0 || (x > 0 && y > 0) || (x < 0 && y < 0) ? 0 : y);
 }
@@ -243,6 +293,7 @@ SCALAR_FUN_ATTR int16_t smod16(int16_t x, int16_t y) {
 SCALAR_FUN_ATTR int32_t smod32(int32_t x, int32_t y) {
   int32_t ys = 1;
   foreach_active(i) { ys = y; }
+  ys = ys == -1 ? 1 : ys;
   int32_t r = x % ys;
   return r + (r == 0 || (x > 0 && y > 0) || (x < 0 && y < 0) ? 0 : y);
 }
@@ -250,6 +301,7 @@ SCALAR_FUN_ATTR int32_t smod32(int32_t x, int32_t y) {
 SCALAR_FUN_ATTR int64_t smod64(int64_t x, int64_t y) {
   int64_t ys = 1;
   foreach_active(i) { ys = y; }
+  ys = ys == -1 ? 1 : ys;
   int64_t r = x % ys;
   return r + (r == 0 || (x > 0 && y > 0) || (x < 0 && y < 0) ? 0 : y);
 }
@@ -259,10 +311,10 @@ SCALAR_FUN_ATTR int16_t sdiv_safe16(int16_t x, int16_t y) { return y == 0 ? 0 : 
 SCALAR_FUN_ATTR int32_t sdiv_safe32(int32_t x, int32_t y) { return y == 0 ? 0 : sdiv32(x, y); }
 SCALAR_FUN_ATTR int64_t sdiv_safe64(int64_t x, int64_t y) { return y == 0 ? 0 : sdiv64(x, y); }
 
-SCALAR_FUN_ATTR int8_t sceil_div_safe8(int8_t x, int8_t y)     { return sdiv_safe8(x + y - 1, y); }
-SCALAR_FUN_ATTR int16_t sceil_div_safe16(int16_t x, int16_t y) { return sdiv_safe16(x + y - 1, y); }
-SCALAR_FUN_ATTR int32_t sceil_div_safe32(int32_t x, int32_t y) { return sdiv_safe32(x + y - 1, y); }
-SCALAR_FUN_ATTR int64_t sceil_div_safe64(int64_t x, int64_t y) { return sdiv_safe64(x + y - 1, y); }
+SCALAR_FUN_ATTR int8_t sceil_div_safe8(int8_t x, int8_t y)     { return y == 0 ? 0 : sceil_div8(x, y); }
+SCALAR_FUN_ATTR int16_t sceil_div_safe16(int16_t x, int16_t y) { return y == 0 ? 0 : sceil_div16(x, y); }
+SCALAR_FUN_ATTR int32_t sceil_div_safe32(int32_t x, int32_t y) { return y == 0 ? 0 : sceil_div32(x, y); }
+SCALAR_FUN_ATTR int64_t sceil_div_safe64(int64_t x, int64_t y) { return y == 0 ? 0 : sceil_div64(x, y); }
 
 SCALAR_FUN_ATTR int8_t   smod_safe8(int8_t x, int8_t y)   { return y == 0 ? 0 : smod8(x, y); }
 SCALAR_FUN_ATTR int16_t smod_safe16(int16_t x, int16_t y) { return y == 0 ? 0 : smod16(x, y); }
@@ -272,96 +324,112 @@ SCALAR_FUN_ATTR int64_t smod_safe64(int64_t x, int64_t y) { return y == 0 ? 0 : 
 SCALAR_FUN_ATTR int8_t squot8(int8_t x, int8_t y) {
   int8_t ys = 1;
   foreach_active(i) { ys = y; }
-  return x / ys;
+  ys = ys == -1 ? 1 : ys;
+  return y == -1 ? (int8_t)(0 - (uint8_t)x) : x / ys;
 }
 
 SCALAR_FUN_ATTR int16_t squot16(int16_t x, int16_t y) {
   int16_t ys = 1;
   foreach_active(i) { ys = y; }
-  return x / ys;
+  ys = ys == -1 ? 1 : ys;
+  return y == -1 ? (int16_t)(0 - (uint16_t)x) : x / ys;
 }
 
 SCALAR_FUN_ATTR int32_t squot32(int32_t x, int32_t y) {
   int32_t ys = 1;
   foreach_active(i) { ys = y; }
-  return x / ys;
+  ys = ys == -1 ? 1 : ys;
+  return y == -1 ? (int32_t)(0 - (uint32_t)x) : x / ys;
 }
 
 SCALAR_FUN_ATTR int64_t squot64(int64_t x, int64_t y) {
   int64_t ys = 1;
   foreach_active(i) { ys = y; }
-  return x / ys;
+  ys = ys == -1 ? 1 : ys;
+  return y == -1 ? (int64_t)(0 - (uint64_t)x) : x / ys;
 }
 
 SCALAR_FUN_ATTR int8_t srem8(int8_t x, int8_t y) {
   int8_t ys = 1;
   foreach_active(i) { ys = y; }
+  ys = ys == -1 ? 1 : ys;
   return x % ys;
 }
 
 SCALAR_FUN_ATTR int16_t srem16(int16_t x, int16_t y) {
   int16_t ys = 1;
   foreach_active(i) { ys = y; }
+  ys = ys == -1 ? 1 : ys;
   return x % ys;
 }
 
 SCALAR_FUN_ATTR int32_t srem32(int32_t x, int32_t y) {
   int32_t ys = 1;
   foreach_active(i) { ys = y; }
+  ys = ys == -1 ? 1 : ys;
   return x % ys;
 }
 
 SCALAR_FUN_ATTR int64_t srem64(int64_t x, int64_t y) {
   int64_t ys = 1;
   foreach_active(i) { ys = y; }
+  ys = ys == -1 ? 1 : ys;
   return x % ys;
 }
 
 SCALAR_FUN_ATTR int8_t squot_safe8(int8_t x, int8_t y) {
   int8_t ys = 1;
   foreach_active(i) { ys = y; }
-  return y == 0 ? 0 : x / ys;
+  ys = ys == -1 ? 1 : ys;
+  return y == 0 ? 0 : y == -1 ? (int8_t)(0 - (uint8_t)x) : x / ys;
 }
 
 SCALAR_FUN_ATTR int16_t squot_safe16(int16_t x, int16_t y) {
   int16_t ys = 1;
   foreach_active(i) { ys = y; }
-  return y == 0 ? 0 : x / ys;
+  ys = ys == -1 ? 1 : ys;
+  return y == 0 ? 0 : y == -1 ? (int16_t)(0 - (uint16_t)x) : x / ys;
 }
 
 SCALAR_FUN_ATTR int32_t squot_safe32(int32_t x, int32_t y) {
   int32_t ys = 1;
   foreach_active(i) { ys = y; }
-  return y == 0 ? 0 : x / ys;
+  ys = ys == -1 ? 1 : ys;
+  return y == 0 ? 0 : y == -1 ? (int32_t)(0 - (uint32_t)x) : x / ys;
 }
 
 SCALAR_FUN_ATTR int64_t squot_safe64(int64_t x, int64_t y) {
   int64_t ys = 1;
   foreach_active(i) { ys = y; }
-  return y == 0 ? 0 : x / ys;
+  ys = ys == -1 ? 1 : ys;
+  return y == 0 ? 0 : y == -1 ? (int64_t)(0 - (uint64_t)x) : x / ys;
 }
 
 SCALAR_FUN_ATTR int8_t srem_safe8(int8_t x, int8_t y) {
   int8_t ys = 1;
   foreach_active(i) { ys = y; }
+  ys = ys == -1 ? 1 : ys;
   return y == 0 ? 0 : x % ys;
 }
 
 SCALAR_FUN_ATTR int16_t srem_safe16(int16_t x, int16_t y) {
   int16_t ys = 1;
   foreach_active(i) { ys = y; }
+  ys = ys == -1 ? 1 : ys;
   return y == 0 ? 0 : x % ys;
 }
 
 SCALAR_FUN_ATTR int32_t srem_safe32(int32_t x, int32_t y) {
   int32_t ys = 1;
   foreach_active(i) { ys = y; }
+  ys = ys == -1 ? 1 : ys;
   return y == 0 ? 0 : x % ys;
 }
 
 SCALAR_FUN_ATTR int64_t srem_safe64(int64_t x, int64_t y) {
   int64_t ys = 1;
   foreach_active(i) { ys = y; }
+  ys = ys == -1 ? 1 : ys;
   return y == 0 ? 0 : x % ys;
 }
 
@@ -372,10 +440,13 @@ SCALAR_FUN_ATTR uint16_t udiv16(uint16_t x, uint16_t y) { return x / y; }
 SCALAR_FUN_ATTR uint32_t udiv32(uint32_t x, uint32_t y) { return x / y; }
 SCALAR_FUN_ATTR uint64_t udiv64(uint64_t x, uint64_t y) { return x / y; }
 
-SCALAR_FUN_ATTR uint8_t   uceil_div8(uint8_t x, uint8_t y)   { return (x + y - 1) / y; }
-SCALAR_FUN_ATTR uint16_t uceil_div16(uint16_t x, uint16_t y) { return (x + y - 1) / y; }
-SCALAR_FUN_ATTR uint32_t uceil_div32(uint32_t x, uint32_t y) { return (x + y - 1) / y; }
-SCALAR_FUN_ATTR uint64_t uceil_div64(uint64_t x, uint64_t y) { return (x + y - 1) / y; }
+// Unsigned ceiling division rounds the quotient up when the remainder
+// is nonzero.  Unlike (x + y - 1) / y, this cannot overflow.
+
+SCALAR_FUN_ATTR uint8_t   uceil_div8(uint8_t x, uint8_t y)   { return x / y + (x % y != 0 ? 1 : 0); }
+SCALAR_FUN_ATTR uint16_t uceil_div16(uint16_t x, uint16_t y) { return x / y + (x % y != 0 ? 1 : 0); }
+SCALAR_FUN_ATTR uint32_t uceil_div32(uint32_t x, uint32_t y) { return x / y + (x % y != 0 ? 1 : 0); }
+SCALAR_FUN_ATTR uint64_t uceil_div64(uint64_t x, uint64_t y) { return x / y + (x % y != 0 ? 1 : 0); }
 
 SCALAR_FUN_ATTR uint8_t   umod8(uint8_t x, uint8_t y)   { return x % y; }
 SCALAR_FUN_ATTR uint16_t umod16(uint16_t x, uint16_t y) { return x % y; }
@@ -387,15 +458,21 @@ SCALAR_FUN_ATTR uint16_t udiv_safe16(uint16_t x, uint16_t y) { return y == 0 ? 0
 SCALAR_FUN_ATTR uint32_t udiv_safe32(uint32_t x, uint32_t y) { return y == 0 ? 0 : x / y; }
 SCALAR_FUN_ATTR uint64_t udiv_safe64(uint64_t x, uint64_t y) { return y == 0 ? 0 : x / y; }
 
-SCALAR_FUN_ATTR uint8_t   uceil_div_safe8(uint8_t x, uint8_t y)   { return y == 0 ? 0 : (x + y - 1) / y; }
-SCALAR_FUN_ATTR uint16_t uceil_div_safe16(uint16_t x, uint16_t y) { return y == 0 ? 0 : (x + y - 1) / y; }
-SCALAR_FUN_ATTR uint32_t uceil_div_safe32(uint32_t x, uint32_t y) { return y == 0 ? 0 : (x + y - 1) / y; }
-SCALAR_FUN_ATTR uint64_t uceil_div_safe64(uint64_t x, uint64_t y) { return y == 0 ? 0 : (x + y - 1) / y; }
+SCALAR_FUN_ATTR uint8_t   uceil_div_safe8(uint8_t x, uint8_t y)   { return y == 0 ? 0 : uceil_div8(x, y); }
+SCALAR_FUN_ATTR uint16_t uceil_div_safe16(uint16_t x, uint16_t y) { return y == 0 ? 0 : uceil_div16(x, y); }
+SCALAR_FUN_ATTR uint32_t uceil_div_safe32(uint32_t x, uint32_t y) { return y == 0 ? 0 : uceil_div32(x, y); }
+SCALAR_FUN_ATTR uint64_t uceil_div_safe64(uint64_t x, uint64_t y) { return y == 0 ? 0 : uceil_div64(x, y); }
 
 SCALAR_FUN_ATTR uint8_t   umod_safe8(uint8_t x, uint8_t y)   { return y == 0 ? 0 : x % y; }
 SCALAR_FUN_ATTR uint16_t umod_safe16(uint16_t x, uint16_t y) { return y == 0 ? 0 : x % y; }
 SCALAR_FUN_ATTR uint32_t umod_safe32(uint32_t x, uint32_t y) { return y == 0 ? 0 : x % y; }
 SCALAR_FUN_ATTR uint64_t umod_safe64(uint64_t x, uint64_t y) { return y == 0 ? 0 : x % y; }
+
+// Signed division of the most negative value by -1 overflows, which
+// is undefined behaviour in C and traps on x86.  Futhark defines the
+// result to wrap (x / -1 == -x and x % -1 == 0).  The 8- and 16-bit
+// operands are promoted to int before dividing, so only the 32- and
+// 64-bit operations need to check for this.
 
 SCALAR_FUN_ATTR int8_t sdiv8(int8_t x, int8_t y) {
   int8_t q = x / y;
@@ -410,21 +487,57 @@ SCALAR_FUN_ATTR int16_t sdiv16(int16_t x, int16_t y) {
 }
 
 SCALAR_FUN_ATTR int32_t sdiv32(int32_t x, int32_t y) {
+  if (y == -1) {
+    return (int32_t)(0 - (uint32_t)x);
+  }
   int32_t q = x / y;
   int32_t r = x % y;
   return q - ((r != 0 && r < 0 != y < 0) ? 1 : 0);
 }
 
 SCALAR_FUN_ATTR int64_t sdiv64(int64_t x, int64_t y) {
+  if (y == -1) {
+    return (int64_t)(0 - (uint64_t)x);
+  }
   int64_t q = x / y;
   int64_t r = x % y;
   return q - ((r != 0 && r < 0 != y < 0) ? 1 : 0);
 }
 
-SCALAR_FUN_ATTR int8_t   sceil_div8(int8_t x, int8_t y)   { return sdiv8(x + y - 1, y); }
-SCALAR_FUN_ATTR int16_t sceil_div16(int16_t x, int16_t y) { return sdiv16(x + y - 1, y); }
-SCALAR_FUN_ATTR int32_t sceil_div32(int32_t x, int32_t y) { return sdiv32(x + y - 1, y); }
-SCALAR_FUN_ATTR int64_t sceil_div64(int64_t x, int64_t y) { return sdiv64(x + y - 1, y); }
+// Ceiling division rounds the truncated quotient up when it is inexact
+// and positive, i.e. when the remainder is nonzero and has the same
+// sign as the divisor.  Unlike (x + y - 1) / y, this cannot overflow
+// and is also correct for negative divisors.
+
+SCALAR_FUN_ATTR int8_t sceil_div8(int8_t x, int8_t y) {
+  int8_t q = x / y;
+  int8_t r = x % y;
+  return q + ((r != 0 && (r > 0) == (y > 0)) ? 1 : 0);
+}
+
+SCALAR_FUN_ATTR int16_t sceil_div16(int16_t x, int16_t y) {
+  int16_t q = x / y;
+  int16_t r = x % y;
+  return q + ((r != 0 && (r > 0) == (y > 0)) ? 1 : 0);
+}
+
+SCALAR_FUN_ATTR int32_t sceil_div32(int32_t x, int32_t y) {
+  if (y == -1) {
+    return (int32_t)(0 - (uint32_t)x);
+  }
+  int32_t q = x / y;
+  int32_t r = x % y;
+  return q + ((r != 0 && (r > 0) == (y > 0)) ? 1 : 0);
+}
+
+SCALAR_FUN_ATTR int64_t sceil_div64(int64_t x, int64_t y) {
+  if (y == -1) {
+    return (int64_t)(0 - (uint64_t)x);
+  }
+  int64_t q = x / y;
+  int64_t r = x % y;
+  return q + ((r != 0 && (r > 0) == (y > 0)) ? 1 : 0);
+}
 
 SCALAR_FUN_ATTR int8_t smod8(int8_t x, int8_t y) {
   int8_t r = x % y;
@@ -437,11 +550,17 @@ SCALAR_FUN_ATTR int16_t smod16(int16_t x, int16_t y) {
 }
 
 SCALAR_FUN_ATTR int32_t smod32(int32_t x, int32_t y) {
+  if (y == -1) {
+    return 0;
+  }
   int32_t r = x % y;
   return r + (r == 0 || (x > 0 && y > 0) || (x < 0 && y < 0) ? 0 : y);
 }
 
 SCALAR_FUN_ATTR int64_t smod64(int64_t x, int64_t y) {
+  if (y == -1) {
+    return 0;
+  }
   int64_t r = x % y;
   return r + (r == 0 || (x > 0 && y > 0) || (x < 0 && y < 0) ? 0 : y);
 }
@@ -451,10 +570,10 @@ SCALAR_FUN_ATTR int16_t sdiv_safe16(int16_t x, int16_t y) { return y == 0 ? 0 : 
 SCALAR_FUN_ATTR int32_t sdiv_safe32(int32_t x, int32_t y) { return y == 0 ? 0 : sdiv32(x, y); }
 SCALAR_FUN_ATTR int64_t sdiv_safe64(int64_t x, int64_t y) { return y == 0 ? 0 : sdiv64(x, y); }
 
-SCALAR_FUN_ATTR int8_t   sceil_div_safe8(int8_t x, int8_t y)   { return sdiv_safe8(x + y - 1, y);}
-SCALAR_FUN_ATTR int16_t sceil_div_safe16(int16_t x, int16_t y) { return sdiv_safe16(x + y - 1, y); }
-SCALAR_FUN_ATTR int32_t sceil_div_safe32(int32_t x, int32_t y) { return sdiv_safe32(x + y - 1, y); }
-SCALAR_FUN_ATTR int64_t sceil_div_safe64(int64_t x, int64_t y) { return sdiv_safe64(x + y - 1, y); }
+SCALAR_FUN_ATTR int8_t   sceil_div_safe8(int8_t x, int8_t y)   { return y == 0 ? 0 : sceil_div8(x, y); }
+SCALAR_FUN_ATTR int16_t sceil_div_safe16(int16_t x, int16_t y) { return y == 0 ? 0 : sceil_div16(x, y); }
+SCALAR_FUN_ATTR int32_t sceil_div_safe32(int32_t x, int32_t y) { return y == 0 ? 0 : sceil_div32(x, y); }
+SCALAR_FUN_ATTR int64_t sceil_div_safe64(int64_t x, int64_t y) { return y == 0 ? 0 : sceil_div64(x, y); }
 
 SCALAR_FUN_ATTR int8_t   smod_safe8(int8_t x, int8_t y)   { return y == 0 ? 0 : smod8(x, y); }
 SCALAR_FUN_ATTR int16_t smod_safe16(int16_t x, int16_t y) { return y == 0 ? 0 : smod16(x, y); }
@@ -463,23 +582,27 @@ SCALAR_FUN_ATTR int64_t smod_safe64(int64_t x, int64_t y) { return y == 0 ? 0 : 
 
 SCALAR_FUN_ATTR int8_t   squot8(int8_t x, int8_t y)   { return x / y; }
 SCALAR_FUN_ATTR int16_t squot16(int16_t x, int16_t y) { return x / y; }
-SCALAR_FUN_ATTR int32_t squot32(int32_t x, int32_t y) { return x / y; }
-SCALAR_FUN_ATTR int64_t squot64(int64_t x, int64_t y) { return x / y; }
+SCALAR_FUN_ATTR int32_t squot32(int32_t x, int32_t y) {
+  return y == -1 ? (int32_t)(0 - (uint32_t)x) : x / y;
+}
+SCALAR_FUN_ATTR int64_t squot64(int64_t x, int64_t y) {
+  return y == -1 ? (int64_t)(0 - (uint64_t)x) : x / y;
+}
 
 SCALAR_FUN_ATTR int8_t   srem8(int8_t x, int8_t y)   { return x % y; }
 SCALAR_FUN_ATTR int16_t srem16(int16_t x, int16_t y) { return x % y; }
-SCALAR_FUN_ATTR int32_t srem32(int32_t x, int32_t y) { return x % y; }
-SCALAR_FUN_ATTR int64_t srem64(int64_t x, int64_t y) { return x % y; }
+SCALAR_FUN_ATTR int32_t srem32(int32_t x, int32_t y) { return y == -1 ? 0 : x % y; }
+SCALAR_FUN_ATTR int64_t srem64(int64_t x, int64_t y) { return y == -1 ? 0 : x % y; }
 
 SCALAR_FUN_ATTR int8_t   squot_safe8(int8_t x, int8_t y)   { return y == 0 ? 0 : x / y; }
 SCALAR_FUN_ATTR int16_t squot_safe16(int16_t x, int16_t y) { return y == 0 ? 0 : x / y; }
-SCALAR_FUN_ATTR int32_t squot_safe32(int32_t x, int32_t y) { return y == 0 ? 0 : x / y; }
-SCALAR_FUN_ATTR int64_t squot_safe64(int64_t x, int64_t y) { return y == 0 ? 0 : x / y; }
+SCALAR_FUN_ATTR int32_t squot_safe32(int32_t x, int32_t y) { return y == 0 ? 0 : squot32(x, y); }
+SCALAR_FUN_ATTR int64_t squot_safe64(int64_t x, int64_t y) { return y == 0 ? 0 : squot64(x, y); }
 
 SCALAR_FUN_ATTR int8_t   srem_safe8(int8_t x, int8_t y)   { return y == 0 ? 0 : x % y; }
 SCALAR_FUN_ATTR int16_t srem_safe16(int16_t x, int16_t y) { return y == 0 ? 0 : x % y; }
-SCALAR_FUN_ATTR int32_t srem_safe32(int32_t x, int32_t y) { return y == 0 ? 0 : x % y; }
-SCALAR_FUN_ATTR int64_t srem_safe64(int64_t x, int64_t y) { return y == 0 ? 0 : x % y; }
+SCALAR_FUN_ATTR int32_t srem_safe32(int32_t x, int32_t y) { return y == 0 ? 0 : srem32(x, y); }
+SCALAR_FUN_ATTR int64_t srem_safe64(int64_t x, int64_t y) { return y == 0 ? 0 : srem64(x, y); }
 
 #endif
 

@@ -69,20 +69,23 @@ static inline uniform uint64_t udiv64(uniform uint64_t x, uniform uint64_t y) {
   return x / y;
 }
 
+// Unsigned ceiling division rounds the quotient up when the remainder
+// is nonzero.  Unlike (x + y - 1) / y, this cannot overflow.
+
 static inline uniform uint8_t uceil_div8(uniform uint8_t x, uniform uint8_t y) {
-  return (x + y - 1) / y;
+  return x / y + (x % y != 0 ? 1 : 0);
 }
 
 static inline uniform uint16_t uceil_div16(uniform uint16_t x, uniform uint16_t y) {
-  return (x + y - 1) / y;
+  return x / y + (x % y != 0 ? 1 : 0);
 }
 
 static inline uniform uint32_t uceil_div32(uniform uint32_t x, uniform uint32_t y) {
-  return (x + y - 1) / y;
+  return x / y + (x % y != 0 ? 1 : 0);
 }
 
 static inline uniform uint64_t uceil_div64(uniform uint64_t x, uniform uint64_t y) {
-  return (x + y - 1) / y;
+  return x / y + (x % y != 0 ? 1 : 0);
 }
 
 static inline uniform uint8_t umod8(uniform uint8_t x, uniform uint8_t y) {
@@ -118,19 +121,19 @@ static inline uniform uint64_t udiv_safe64(uniform uint64_t x, uniform uint64_t 
 }
 
 static inline uniform uint8_t uceil_div_safe8(uniform uint8_t x, uniform uint8_t y) {
-  return y == 0 ? 0 : (x + y - 1) / y;
+  return y == 0 ? 0 : uceil_div8(x, y);
 }
 
 static inline uniform uint16_t uceil_div_safe16(uniform uint16_t x, uniform uint16_t y) {
-  return y == 0 ? 0 : (x + y - 1) / y;
+  return y == 0 ? 0 : uceil_div16(x, y);
 }
 
 static inline uniform uint32_t uceil_div_safe32(uniform uint32_t x, uniform uint32_t y) {
-  return y == 0 ? 0 : (x + y - 1) / y;
+  return y == 0 ? 0 : uceil_div32(x, y);
 }
 
 static inline uniform uint64_t uceil_div_safe64(uniform uint64_t x, uniform uint64_t y) {
-  return y == 0 ? 0 : (x + y - 1) / y;
+  return y == 0 ? 0 : uceil_div64(x, y);
 }
 
 static inline uniform uint8_t umod_safe8(uniform uint8_t x, uniform uint8_t y) {
@@ -149,7 +152,14 @@ static inline uniform uint64_t umod_safe64(uniform uint64_t x, uniform uint64_t 
   return y == 0 ? 0 : x % y;
 }
 
+// Signed division of the most negative value by -1 overflows, which
+// traps on x86.  Futhark defines the result to wrap (x / -1 == -x and
+// x % -1 == 0).
+
 static inline uniform int8_t sdiv8(uniform int8_t x, uniform int8_t y) {
+  if (y == -1) {
+    return (uniform int8_t)(0 - (uniform uint8_t)x);
+  }
   uniform int8_t q = x / y;
   uniform int8_t r = x % y;
 
@@ -157,6 +167,9 @@ static inline uniform int8_t sdiv8(uniform int8_t x, uniform int8_t y) {
 }
 
 static inline uniform int16_t sdiv16(uniform int16_t x, uniform int16_t y) {
+  if (y == -1) {
+    return (uniform int16_t)(0 - (uniform uint16_t)x);
+  }
   uniform int16_t q = x / y;
   uniform int16_t r = x % y;
 
@@ -164,6 +177,9 @@ static inline uniform int16_t sdiv16(uniform int16_t x, uniform int16_t y) {
 }
 
 static inline uniform int32_t sdiv32(uniform int32_t x, uniform int32_t y) {
+  if (y == -1) {
+    return (uniform int32_t)(0 - (uniform uint32_t)x);
+  }
   uniform int32_t q = x / y;
   uniform int32_t r = x % y;
 
@@ -171,47 +187,91 @@ static inline uniform int32_t sdiv32(uniform int32_t x, uniform int32_t y) {
 }
 
 static inline uniform int64_t sdiv64(uniform int64_t x, uniform int64_t y) {
+  if (y == -1) {
+    return (uniform int64_t)(0 - (uniform uint64_t)x);
+  }
   uniform int64_t q = x / y;
   uniform int64_t r = x % y;
 
   return q - ((r != 0 && r < 0 != y < 0) ? 1 : 0);
 }
 
+// Ceiling division rounds the truncated quotient up when it is inexact
+// and positive, i.e. when the remainder is nonzero and has the same
+// sign as the divisor.  Unlike (x + y - 1) / y, this cannot overflow
+// and is also correct for negative divisors.
+
 static inline uniform int8_t sceil_div8(uniform int8_t x, uniform int8_t y) {
-  return sdiv8(x + y - 1, y);
+  if (y == -1) {
+    return (uniform int8_t)(0 - (uniform uint8_t)x);
+  }
+  uniform int8_t q = x / y;
+  uniform int8_t r = x % y;
+
+  return q + ((r != 0 && (r > 0) == (y > 0)) ? 1 : 0);
 }
 
 static inline uniform int16_t sceil_div16(uniform int16_t x, uniform int16_t y) {
-  return sdiv16(x + y - 1, y);
+  if (y == -1) {
+    return (uniform int16_t)(0 - (uniform uint16_t)x);
+  }
+  uniform int16_t q = x / y;
+  uniform int16_t r = x % y;
+
+  return q + ((r != 0 && (r > 0) == (y > 0)) ? 1 : 0);
 }
 
 static inline uniform int32_t sceil_div32(uniform int32_t x, uniform int32_t y) {
-  return sdiv32(x + y - 1, y);
+  if (y == -1) {
+    return (uniform int32_t)(0 - (uniform uint32_t)x);
+  }
+  uniform int32_t q = x / y;
+  uniform int32_t r = x % y;
+
+  return q + ((r != 0 && (r > 0) == (y > 0)) ? 1 : 0);
 }
 
 static inline uniform int64_t sceil_div64(uniform int64_t x, uniform int64_t y) {
-  return sdiv64(x + y - 1, y);
+  if (y == -1) {
+    return (uniform int64_t)(0 - (uniform uint64_t)x);
+  }
+  uniform int64_t q = x / y;
+  uniform int64_t r = x % y;
+
+  return q + ((r != 0 && (r > 0) == (y > 0)) ? 1 : 0);
 }
 
 static inline uniform int8_t smod8(uniform int8_t x, uniform int8_t y) {
+  if (y == -1) {
+    return 0;
+  }
   uniform int8_t r = x % y;
 
   return r + (r == 0 || (x > 0 && y > 0) || (x < 0 && y < 0) ? 0 : y);
 }
 
 static inline uniform int16_t smod16(uniform int16_t x, uniform int16_t y) {
+  if (y == -1) {
+    return 0;
+  }
   uniform int16_t r = x % y;
 
   return r + (r == 0 || (x > 0 && y > 0) || (x < 0 && y < 0) ? 0 : y);
 }
 
 static inline uniform int32_t smod32(uniform int32_t x, uniform int32_t y) {
+  if (y == -1) {
+    return 0;
+  }
   uniform int32_t r = x % y;
 
   return r + (r == 0 || (x > 0 && y > 0) || (x < 0 && y < 0) ? 0 : y);
 }
 
 static inline uniform int64_t smod64(uniform int64_t x, uniform int64_t y) {
+  if (y == -1) {
+    return 0;
+  }
   uniform int64_t r = x % y;
 
   return r + (r == 0 || (x > 0 && y > 0) || (x < 0 && y < 0) ? 0 : y);
@@ -234,19 +294,19 @@ static inline uniform int64_t sdiv_safe64(uniform int64_t x, uniform int64_t y) 
 }
 
 static inline uniform int8_t sceil_div_safe8(uniform int8_t x, uniform int8_t y) {
-  return sdiv_safe8(x + y - 1, y);
+  return y == 0 ? 0 : sceil_div8(x, y);
 }
 
 static inline uniform int16_t sceil_div_safe16(uniform int16_t x, uniform int16_t y) {
-  return sdiv_safe16(x + y - 1, y);
+  return y == 0 ? 0 : sceil_div16(x, y);
 }
 
 static inline uniform int32_t sceil_div_safe32(uniform int32_t x, uniform int32_t y) {
-  return sdiv_safe32(x + y - 1, y);
+  return y == 0 ? 0 : sceil_div32(x, y);
 }
 
 static inline uniform int64_t sceil_div_safe64(uniform int64_t x, uniform int64_t y) {
-  return sdiv_safe64(x + y - 1, y);
+  return y == 0 ? 0 : sceil_div64(x, y);
 }
 
 static inline uniform int8_t smod_safe8(uniform int8_t x, uniform int8_t y) {
@@ -266,67 +326,67 @@ static inline uniform int64_t smod_safe64(uniform int64_t x, uniform int64_t y) 
 }
 
 static inline uniform int8_t squot8(uniform int8_t x, uniform int8_t y) {
-  return x / y;
+  return y == -1 ? (uniform int8_t)(0 - (uniform uint8_t)x) : x / y;
 }
 
 static inline uniform int16_t squot16(uniform int16_t x, uniform int16_t y) {
-  return x / y;
+  return y == -1 ? (uniform int16_t)(0 - (uniform uint16_t)x) : x / y;
 }
 
 static inline uniform int32_t squot32(uniform int32_t x, uniform int32_t y) {
-  return x / y;
+  return y == -1 ? (uniform int32_t)(0 - (uniform uint32_t)x) : x / y;
 }
 
 static inline uniform int64_t squot64(uniform int64_t x, uniform int64_t y) {
-  return x / y;
+  return y == -1 ? (uniform int64_t)(0 - (uniform uint64_t)x) : x / y;
 }
 
 static inline uniform int8_t srem8(uniform int8_t x, uniform int8_t y) {
-  return x % y;
+  return y == -1 ? 0 : x % y;
 }
 
 static inline uniform int16_t srem16(uniform int16_t x, uniform int16_t y) {
-  return x % y;
+  return y == -1 ? 0 : x % y;
 }
 
 static inline uniform int32_t srem32(uniform int32_t x, uniform int32_t y) {
-  return x % y;
+  return y == -1 ? 0 : x % y;
 }
 
 static inline uniform int64_t srem64(uniform int64_t x, uniform int64_t y) {
-  return x % y;
+  return y == -1 ? 0 : x % y;
 }
 
 static inline uniform int8_t squot_safe8(uniform int8_t x, uniform int8_t y) {
-  return y == 0 ? 0 : x / y;
+  return y == 0 ? 0 : squot8(x, y);
 }
 
 static inline uniform int16_t squot_safe16(uniform int16_t x, uniform int16_t y) {
-  return y == 0 ? 0 : x / y;
+  return y == 0 ? 0 : squot16(x, y);
 }
 
 static inline uniform int32_t squot_safe32(uniform int32_t x, uniform int32_t y) {
-  return y == 0 ? 0 : x / y;
+  return y == 0 ? 0 : squot32(x, y);
 }
 
 static inline uniform int64_t squot_safe64(uniform int64_t x, uniform int64_t y) {
-  return y == 0 ? 0 : x / y;
+  return y == 0 ? 0 : squot64(x, y);
 }
 
 static inline uniform int8_t srem_safe8(uniform int8_t x, uniform int8_t y) {
-  return y == 0 ? 0 : x % y;
+  return y == 0 ? 0 : srem8(x, y);
 }
 
 static inline uniform int16_t srem_safe16(uniform int16_t x, uniform int16_t y) {
-  return y == 0 ? 0 : x % y;
+  return y == 0 ? 0 : srem16(x, y);
 }
 
 static inline uniform int32_t srem_safe32(uniform int32_t x, uniform int32_t y) {
-  return y == 0 ? 0 : x % y;
+  return y == 0 ? 0 : srem32(x, y);
 }
 
 static inline uniform int64_t srem_safe64(uniform int64_t x, uniform int64_t y) {
-  return y == 0 ? 0 : x % y;
+  return y == 0 ? 0 : srem64(x, y);
 }
 
 static inline uniform int8_t smin8(uniform int8_t x, uniform int8_t y) {
