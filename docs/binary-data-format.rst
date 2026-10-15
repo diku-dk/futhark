@@ -48,12 +48,12 @@ Encoding a scalar value is done by treating it as a 0-dimensional array::
 
   b <version> 0 <type> <value>
 
-To encode an array, we encode the number of dimensions ``n`` as a
+To encode an array, we encode the number of dimensions ``k`` as a
 single byte, each dimension ``dim_i`` as an unsigned 64-bit little
 endian integer, and finally all the values in row-major order in their
 binary little endian representation::
 
-  b <version> <n> <type> <dim_1> <dim_2> ... <dim_n> <values...>
+  b <version> <k> <type> <dim_1> <dim_2> ... <dim_k> <values...>
 
 
 Type Values
