@@ -574,14 +574,12 @@ expandUsage usageInStm vtable utable stm@(Let pat aux e) =
     -- overwrite the previous value while it is still live.
     resultThroughMemory
       | any (`UT.isInResult` utable) (patNames pat) =
-          foldMap UT.inResultUsage . filter isMem . namesToList $
-            if any isMemType (patTypes pat)
+          foldMap UT.inResultUsage . filter isMem' . namesToList $
+            if any isMem (patTypes pat)
               then freeIn stm
               else freeIn pat
       | otherwise = mempty
-    isMem v = maybe False isMemType $ ST.lookupType v vtable
-    isMemType Mem {} = True
-    isMemType _ = False
+    isMem' v = maybe False isMem $ ST.lookupType v vtable
     usageThroughAliases =
       mconcat . mapMaybe usageThroughBindeeAliases $
         zip (patNames pat) (patAliases pat)
