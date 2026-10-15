@@ -217,7 +217,7 @@ restOfLine = takeWhileP Nothing (/= '\n') <* (void eol <|> eof)
 parseBlockComment :: Parser T.Text
 parseBlockComment = T.unlines <$> some line
   where
-    line = "--" *> optional " " *> restOfLine
+    line = try $ hspace *> "--" *> optional " " *> restOfLine
 
 parseTestBlock :: Parser T.Text
 parseTestBlock =
@@ -230,7 +230,7 @@ parseBlockCode :: Parser T.Text
 parseBlockCode = T.unlines . noblanks <$> some line
   where
     noblanks = reverse . dropWhile T.null . reverse . dropWhile T.null
-    line = try (notFollowedBy "--") *> notFollowedBy eof *> restOfLine
+    line = try (notFollowedBy (hspace *> "--")) *> notFollowedBy eof *> restOfLine
 
 parsePlotParams :: Parser (Maybe (Int, Int))
 parsePlotParams =

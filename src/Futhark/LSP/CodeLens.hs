@@ -236,13 +236,13 @@ executeEvalLens (EvalLensData docUri line) = do
             { _newText = insertText,
               _range =
                 Range
-                  { _end =
+                  { _start =
                       Position
                         { _character = 0,
                           -- insert below the evaluation comment
                           _line = line + 1
                         },
-                    _start =
+                    _end =
                       Position
                         { _line =
                             -- replace the entire comment range

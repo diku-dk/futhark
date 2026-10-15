@@ -29,7 +29,7 @@ tests =
               [Id "x_1" (Info "[2]i32") mempty]
               "[2]i32"
               ( second
-                  (const (S.singleton (AliasBound "x_1" [])))
+                  (const (S.singleton (AliasBound ("x_1", []))))
                   ("[2]i32" :: StructType)
               )
               @?= "[2]i32",
@@ -39,17 +39,20 @@ tests =
               [Id "x_1" (Info "[2]i32") mempty]
               "([2]i32, [2]i32)"
               ( second
-                  (const (S.singleton (AliasFree "y_2" [])))
+                  (const (S.singleton (AliasFree ("y_2", []))))
                   ("([2]i32,[2]i32)" :: StructType)
               )
               @?= "([2]i32, [2]i32)",
           --
+          -- An opaque value that may have internal aliasing cannot be given
+          -- a fresh type.  See Note [Parametric results] in
+          -- Language.Futhark.TypeChecker.Consumption.
           testCase "opaque" $
             let t = Scalar (TypeVar Nonfresh (qualName "t_2") [])
              in inferReturnFreshness
                   [Id "n_1" (Info "i64") mempty]
                   t
-                  (second (const (S.singleton (AliasFree "y_3" []))) t)
+                  (second (const (S.singleton AliasSelf)) t)
                   @?= (t `setMode` Nonfresh),
           --
           testCase "*opaque" $

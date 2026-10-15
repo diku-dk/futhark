@@ -62,7 +62,10 @@ tabSize = 8
 alexMove :: Pos -> Char -> Pos
 alexMove (Pos !f !l !c !a) '\t' = Pos f l (c + tabSize - ((c - 1) `mod` tabSize)) (a + 1)
 alexMove (Pos !f !l _ !a) '\n' = Pos f (l + 1) 1 (a + 1)
-alexMove (Pos !f !l !c !a) _ = Pos f l (c + 1) (a + 1)
+alexMove (Pos !f !l !c !a) b
+  -- Do not advance column for UTF-8 continuation bytes.
+  | b >= '\x80' && b < '\xC0' = Pos f l c (a + 1)
+  | otherwise = Pos f l (c + 1) (a + 1)
 
 initialLexerState :: Pos -> BS.ByteString -> AlexInput
 initialLexerState start_pos input =

@@ -21,8 +21,9 @@ import Futhark.Util.Loc (Loc (..))
 import Futhark.Util.Pretty (Doc, docText)
 import Language.LSP.Diagnostics (partitionBySource)
 import Language.LSP.Protocol.Lens (HasVersion (version))
+import Language.LSP.Protocol.Message (SMethod (SMethod_WindowShowMessage))
 import Language.LSP.Protocol.Types
-import Language.LSP.Server (LspT, getVersionedTextDoc, publishDiagnostics)
+import Language.LSP.Server (LspT, getVersionedTextDoc, publishDiagnostics, sendNotification)
 
 mkDiagnostic :: Range -> DiagnosticSeverity -> T.Text -> Diagnostic
 mkDiagnostic range severity msg =
@@ -49,44 +50,37 @@ publish uri_diags_map = for_ uri_diags_map $ \(uri, diags) -> do
     (Just $ doc ^. version)
     (partitionBySource diags)
 
+-- | A diagnostic for the file containing the given location, if it
+-- has one.
+diagnosticAt :: Loc -> DiagnosticSeverity -> Doc a -> M.Map Uri [Diagnostic]
+diagnosticAt NoLoc _ _ = mempty
+diagnosticAt loc@(Loc pos _) severity msg =
+  M.singleton (posToUri pos) [mkDiagnostic (rangeFromLoc loc) severity (docText msg)]
+
 -- | Send warning diagnostics to the client.
 publishWarningDiagnostics :: [(Loc, Doc a)] -> LspT () IO ()
-publishWarningDiagnostics warnings = do
+publishWarningDiagnostics warnings =
   publish $ M.assocs $ M.unionsWith (++) $ map onWarn warnings
   where
-    onWarn (NoLoc, _) = mempty
-    onWarn (loc@(Loc pos _), msg) =
-      M.singleton
-        (posToUri pos)
-        [ mkDiagnostic
-            (rangeFromLoc loc)
-            DiagnosticSeverity_Warning
-            (docText msg)
-        ]
+    onWarn (loc, msg) = diagnosticAt loc DiagnosticSeverity_Warning msg
 
--- | Send error diagnostics to the client.
+-- | Send error diagnostics to the client.  Errors without a location
+-- cannot be attached to a file, so they are shown as messages.
 publishErrorDiagnostics :: NE.NonEmpty ProgError -> LspT () IO ()
-publishErrorDiagnostics errors =
+publishErrorDiagnostics errors = do
   publish $ M.assocs $ M.unionsWith (++) $ map onDiag $ NE.toList errors
+  for_ errors showUnlocated
   where
-    onDiag (ProgError NoLoc _) = mempty
-    onDiag (ProgError loc@(Loc pos _) msg) =
-      M.singleton
-        (posToUri pos)
-        [ mkDiagnostic
-            (rangeFromLoc loc)
-            DiagnosticSeverity_Error
-            (docText msg)
-        ]
-    onDiag (ProgWarning NoLoc _) = mempty
-    onDiag (ProgWarning loc@(Loc pos _) msg) =
-      M.singleton
-        (posToUri pos)
-        [ mkDiagnostic
-            (rangeFromLoc loc)
-            DiagnosticSeverity_Error
-            (docText msg)
-        ]
+    onDiag (ProgError loc msg) = diagnosticAt loc DiagnosticSeverity_Error msg
+    onDiag (ProgWarning loc msg) = diagnosticAt loc DiagnosticSeverity_Warning msg
+
+    showUnlocated (ProgError NoLoc msg) = showMessage MessageType_Error msg
+    showUnlocated (ProgWarning NoLoc msg) = showMessage MessageType_Warning msg
+    showUnlocated _ = pure ()
+
+    showMessage message_type msg =
+      sendNotification SMethod_WindowShowMessage $
+        ShowMessageParams message_type (docText msg)
 
 -- | The maximum number of diagnostics to report.
 maxDiagnostic :: Int

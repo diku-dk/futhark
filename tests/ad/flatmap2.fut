@@ -2,6 +2,7 @@
 -- iteration must be summed. The total size of the data array is passed in
 -- explicitly, so that the cotangent can be given a known size.
 -- ==
+-- tags { autodiff }
 -- entry: fwd_map fwd_vec rev_map rev_vec
 -- input { [1i64,2i64,3i64] [4.0,5.0,6.0] }
 -- output {
@@ -47,8 +48,9 @@ def columns [n] [k] (cols: [1 + n][k]f64) : ([k]f64, [k][n]f64) =
 entry fwd_map [n] (ks: [n]i64) (xs: [n]f64) : ([]f64, [][]f64) =
   let m = i64.sum ks
   in columns
-     <| map (\t -> let (da, db) = jvp (primal_uncurried ks m) (2, xs) t
-                   in da ++ db)
+     <| map (\t ->
+               let (da, db) = jvp (primal_uncurried ks m) (2, xs) t
+               in da ++ db)
             (tangents n)
 
 entry fwd_vec [n] (ks: [n]i64) (xs: [n]f64) : ([]f64, [][]f64) =

@@ -5,7 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.28.0]
+## [0.29.0]
+
+### Added
+
+### Removed
+
+### Changed
+
+### Fixed
+
+* `futhark lsp` now handles `textDocument/semanticTokens/full` in a trivial way
+  to work around a bug in the `lsp` library.
+
+* `futhark lsp` had an off-by-one error when computing column offsets.
+
+* Incorrect constant folding of `x %% x`.
+
+* Signed division by -1 is now properly defined.
+
+## [0.28.1]
 
 ### Added
 
@@ -40,6 +59,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `futhark literate` no longer implicitly marks functions used in directives as
   entry points. Use ``entry`` when you actually want compiled entry points.
+
+* The consumption/aliasing system has been reimplemented. The main change is
+  that annotated freshness on functions now takes precedence even if a more
+  fresh type is inferred - some existing programs may need `*` added to their
+  return type. Beyond that, the system should generally just be more flexible.
 
 ### Fixed
 
@@ -87,6 +111,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Short-circuiting of function parameters failed to take layout into account.
   (#2568)
+
+* `futhark literate` now handles indented comments. (#2521)
+
+* Various holes in alias analysis (#1675, #2531).
 
 ## [0.27.1]
 

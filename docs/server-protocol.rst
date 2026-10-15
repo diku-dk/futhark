@@ -31,7 +31,7 @@ line by itself to indicate that a command has finished.  It will also print
 fails, the process will terminate.  If a command fails, the server will print
 ``%%% FAILURE`` followed by the error message, and then ``%%% OK`` when it is
 ready for more input. Some output may also precede ``%%% FAILURE``, e.g. logging
-statements that occured before failure was detected.  Fatal errors that lead to
+statements that occurred before failure was detected.  Fatal errors that lead to
 server shutdown may be printed to stderr.
 
 Variables

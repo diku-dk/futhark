@@ -141,7 +141,7 @@ simplifyBinOp _ _ (BinOp FDiv {} e1 e2)
   | isCt0 e2 = Nothing
 simplifyBinOp _ _ (BinOp (SRem t _) e1 e2)
   | isCt1 e2 = constRes $ IntValue $ intValue t (0 :: Int)
-  | e1 == e2 = constRes $ IntValue $ intValue t (1 :: Int)
+  | e1 == e2 = constRes $ IntValue $ intValue t (0 :: Int)
 simplifyBinOp _ _ (BinOp SQuot {} e1 e2)
   | isCt1 e2 = resIsSubExp e1
   | isCt0 e2 = Nothing

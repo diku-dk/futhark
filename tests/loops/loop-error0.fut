@@ -1,5 +1,5 @@
 -- ==
--- error: aliases previously returned value
+-- error: aliases another returned value
 def main () : ([]f64, [][]f64) =
   let e_rows = []
   let arr = copy (e_rows)

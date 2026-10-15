@@ -1,5 +1,7 @@
+-- A partial application that consumes an argument holds it, even when the
+-- argument is fresh, so it cannot be bound to a name.
 -- ==
--- input { 1 } output { [0,1,1] }
+-- error: contains consumption
 
 def zero (xs: *[]i32) (i: i32) =
   xs with [i] = 0
