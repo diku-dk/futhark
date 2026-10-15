@@ -451,14 +451,14 @@ data BinOp
   | -- | Floating-point multiplication.
     FMul FloatType
   | -- | Unsigned integer division.  Rounds towards
-    -- negativity infinity.  Note: this is different
+    -- negative infinity.  Note: this is different
     -- from LLVM.
     UDiv IntType Safety
   | -- | Unsigned integer division.  Rounds towards positive
     -- infinity.
     UCeilDiv IntType Safety
   | -- | Signed integer division.  Rounds towards
-    -- negativity infinity.  Note: this is different
+    -- negative infinity.  Note: this is different
     -- from LLVM.
     SDiv IntType Safety
   | -- | Signed integer division.  Rounds towards positive
@@ -821,7 +821,7 @@ doSub v1 v2 = intValue (intValueType v1) $ intToInt64 v1 - intToInt64 v2
 doMul :: IntValue -> IntValue -> IntValue
 doMul v1 v2 = intValue (intValueType v1) $ intToInt64 v1 * intToInt64 v2
 
--- | Unsigned integer division.  Rounds towards negativity infinity.
+-- | Unsigned integer division.  Rounds towards negative infinity.
 -- Note: this is different from LLVM.
 doUDiv :: IntValue -> IntValue -> Maybe IntValue
 doUDiv v1 v2
@@ -836,9 +836,12 @@ doUCeilDiv v1 v2
   | zeroIshInt v2 = Nothing
   | otherwise =
       Just . intValue (intValueType v1) $
-        (intToWord64 v1 + intToWord64 v2 - 1) `div` intToWord64 v2
+        (x + y - 1) `div` y
+  where
+    x = toInteger $ intToWord64 v1
+    y = toInteger $ intToWord64 v2
 
--- | Signed integer division.  Rounds towards negativity infinity.
+-- | Signed integer division.  Rounds towards negative infinity.
 -- Note: this is different from LLVM.
 doSDiv :: IntValue -> IntValue -> Maybe IntValue
 doSDiv v1 v2
@@ -846,7 +849,7 @@ doSDiv v1 v2
   | otherwise =
       Just $
         intValue (intValueType v1) $
-          intToInt64 v1 `div` intToInt64 v2
+          valueIntegral v1 `div` (valueIntegral v2 :: Integer)
 
 -- | Signed integer division.  Rounds towards positive infinity.
 doSCeilDiv :: IntValue -> IntValue -> Maybe IntValue
@@ -854,7 +857,8 @@ doSCeilDiv v1 v2
   | zeroIshInt v2 = Nothing
   | otherwise =
       Just . intValue (intValueType v1) $
-        (intToInt64 v1 + intToInt64 v2 - 1) `div` intToInt64 v2
+        negate $
+          negate (valueIntegral v1) `div` (valueIntegral v2 :: Integer)
 
 -- | Unsigned integer modulus; the countepart to 'UDiv'.
 doUMod :: IntValue -> IntValue -> Maybe IntValue
@@ -869,11 +873,15 @@ doSMod v1 v2
   | otherwise = Just $ intValue (intValueType v1) $ intToInt64 v1 `mod` intToInt64 v2
 
 -- | Signed integer division.  Rounds towards zero.
--- This corresponds to the @sdiv@ instruction in LLVM.
+-- This corresponds to the @sdiv@ instruction in LLVM, except that
+-- dividing the most negative value by -1 wraps around.
 doSQuot :: IntValue -> IntValue -> Maybe IntValue
 doSQuot v1 v2
   | zeroIshInt v2 = Nothing
-  | otherwise = Just $ intValue (intValueType v1) $ intToInt64 v1 `quot` intToInt64 v2
+  | otherwise =
+      Just $
+        intValue (intValueType v1) $
+          valueIntegral v1 `quot` (valueIntegral v2 :: Integer)
 
 -- | Signed integer division.  Rounds towards zero.
 -- This corresponds to the @srem@ instruction in LLVM.

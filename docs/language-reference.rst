@@ -818,12 +818,15 @@ write, without polluting the global scope with a declaration-level
 ``x`` *binop* ``y``
 ...................
 
-Apply an operator to ``x`` and ``y``.  Operators are functions like
-any other, and can be user-defined.  Futhark pre-defines certain
-"magical" *overloaded* operators that work on several types.
-Overloaded operators cannot be defined by the user.  Both operands
-must have the same type.  The predefined operators and their semantics
-are:
+Apply an operator to ``x`` and ``y``. Operators are functions like any other,
+and can be user-defined. Futhark pre-defines certain "magical" *overloaded*
+operators that work on several types. Overloaded operators cannot be defined by
+the user. Both operands must have the same type. Arithmetic is fully defined for
+all numeric types, except for integer division by zero, which is an error.
+Integer arithmetic uses conventional overflow/wraparound. Floating-point numbers
+use IEEE 754 semantics, or the closest that the platform can achieve.
+
+The predefined operators and their semantics are:
 
   ``**``
 

@@ -81,6 +81,14 @@ test-C:
 test-I:
 	cabal run -- futhark test tests -I
 
+# Run the tests with the SOACS IR interpreter.
+test-interpret-soacs:
+	cabal run -- futhark test --interpret-soacs tests --exclude=autodiff
+
+# Run the tests with the GPU IR interpreter.
+test-interpret-gpu:
+	cabal run -- futhark test --interpret-gpu tests --exclude=autodiff
+
 # Compile and run all programs with the 'cuda' backend.
 test-cuda:
 	cabal run -- futhark test tests -c --backend=cuda --tuning=tuning_gpu
