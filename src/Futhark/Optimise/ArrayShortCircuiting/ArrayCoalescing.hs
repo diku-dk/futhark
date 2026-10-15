@@ -321,8 +321,11 @@ keepHistDestsInSpace :: TopdownEnv GPUMem -> [HistOp (Aliases GPUMem)] -> BotUpE
 keepHistDestsInSpace td_env hist_ops bu_env =
   let (actv, inh) =
         foldl failMove (activeCoals bu_env, inhibit bu_env) $
-          mapMaybe (fmap memName . flip getScopeMemInfo (scope td_env)) $
-            concatMap histDest hist_ops
+          concatMap
+            ( mapMaybe (fmap memName . flip getScopeMemInfo (scope td_env))
+                . histDest
+            )
+            hist_ops
    in bu_env {activeCoals = actv, inhibit = inh}
   where
     failMove acc@(actv, _) m
