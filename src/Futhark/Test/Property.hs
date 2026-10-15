@@ -472,7 +472,7 @@ runOne s config srv entryNameRef program = runExceptT $ do
                 <> propName
                 <> " failed with candidate="
                 <> valuePPrint
-                <> " with error: "
+                <> " with error:\n"
                 <> err
         if ok
           then loop i
@@ -646,7 +646,7 @@ runOne s config srv entryNameRef program = runExceptT $ do
                     <> showText size
                     <> " and seed="
                     <> showText seed
-                    <> " with error: "
+                    <> " with error:\n"
                     <> err
 
             liftIO $ renameVar srv serverIn genOut
@@ -894,13 +894,15 @@ isRuntimeError failure = any ("runtime: " `T.isPrefixOf`) (failureLog failure)
 
 handleRuntimeError :: EntryName -> CmdFailure -> Maybe PBTFailure
 handleRuntimeError entry err
-  | isRuntimeError err = Just $ "Runtime error: " <> showText (failureMsg err)
+  | isRuntimeError err =
+      Just $
+        "Runtime error: " <> T.intercalate "\n" (failureMsg err)
   | otherwise =
       unexpectedFailure $
         "Fatal Error on "
           <> entry
           <> ": "
-          <> showText (failureMsg err)
+          <> T.intercalate "\n" (failureMsg err)
 
 callKeepIns :: Server -> EntryName -> VarName -> [VarName] -> IO (Maybe PBTFailure)
 callKeepIns s entry out ins = do
