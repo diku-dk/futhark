@@ -27,10 +27,6 @@ lookupSubst v substs = case M.lookup v substs of
 resolveSubsts :: Substitutions -> Substitutions -> Substitutions
 resolveSubsts through = M.map (`lookupSubst` through)
 
--- | Resolve the keys of a substitution through another.
-rekeySubsts :: Substitutions -> Substitutions -> Substitutions
-rekeySubsts through = M.mapKeys (`lookupSubst` through)
-
 data Mod
   = -- | A pairing of a lexical closure and a module function.
     ModFun TySet Scope ModParam ModExp
@@ -201,29 +197,24 @@ evalModExp (ModApply f arg (Info p_substs) (Info b_substs) loc) = do
         . generating
         $ do
           abs <- asks envAbs
-          -- 'p_substs' is keyed on the parameter module type as seen
-          -- here, which may have been freshened since the functor was
-          -- defined (#2581); re-key through the closure to the names
-          -- 'f_body' uses (#2209).
-          let p_substs' = rekeySubsts (scopeSubsts f_closure) p_substs
-              keep k _ = k `M.member` p_substs' || k `S.member` abs
+          let keep k _ = k `M.member` p_substs || k `S.member` abs
               abs_substs =
                 M.filterWithKey keep $
-                  resolveSubsts (scopeSubsts (modScope arg_mod)) p_substs'
+                  resolveSubsts (scopeSubsts (modScope arg_mod)) p_substs
                     <> scopeSubsts f_closure
                     <> scopeSubsts (modScope arg_mod)
           extendScope
             ( Scope
                 abs_substs
                 ( M.singleton (modParamName f_p) $
-                    substituteInMod p_substs' arg_mod
+                    substituteInMod p_substs arg_mod
                 )
             )
             $ do
               substs <- scopeSubsts <$> askScope
               x <- evalModExp f_body
               pure $
-                addSubsts abs abs_substs $
+                addSubsts abs (abs_substs `M.withoutKeys` M.keysSet b_substs) $
                   -- The next one is dubious, but is necessary to
                   -- propagate substitutions from the argument (see
                   -- modules/functor24.fut).

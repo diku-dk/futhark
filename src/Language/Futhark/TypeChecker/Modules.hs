@@ -15,6 +15,7 @@ import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Ord
 import Data.Set qualified as S
+import Data.Tuple (swap)
 import Futhark.Util.Pretty
 import Language.Futhark
 import Language.Futhark.Semantic
@@ -55,46 +56,54 @@ substituteTypesInBoundV substs (BoundV tps t) =
   let RetType dims t' = applySubst substs $ RetType [] t
    in (dims, BoundV (tps <> map (`TypeParamDim` mempty) dims) t')
 
--- | All names defined anywhere in the 'Env'.
-allNamesInEnv :: Env -> S.Set VName
+-- | All names defined anywhere in the 'Env', split into those in positive and
+-- those in negative position (i.e. in parameters of parametric modules).
+allNamesInEnv :: Env -> (S.Set VName, S.Set VName)
 allNamesInEnv (Env vtable ttable stable modtable _names) =
-  S.unions
-    [ M.keysSet vtable,
-      M.keysSet ttable,
-      M.keysSet stable,
-      M.keysSet modtable,
-      foldMap allNamesInVal (M.elems vtable),
-      foldMap allNamesInMTy (M.elems stable),
-      foldMap allNamesInMod (M.elems modtable),
-      foldMap allNamesInType (M.elems ttable)
-    ]
+  ( S.unions
+      [ M.keysSet vtable,
+        M.keysSet ttable,
+        M.keysSet stable,
+        M.keysSet modtable,
+        foldMap allNamesInVal (M.elems vtable),
+        foldMap allNamesInType (M.elems ttable)
+      ],
+    mempty
+  )
+    <> foldMap allNamesInMTy (M.elems stable)
+    <> foldMap allNamesInMod (M.elems modtable)
   where
     allNamesInType (TypeAbbr _ ps _) = S.fromList $ map typeParamName ps
     allNamesInVal (BoundV ps _) = S.fromList $ map typeParamName ps
 
-allNamesInMod :: Mod -> S.Set VName
+allNamesInMod :: Mod -> (S.Set VName, S.Set VName)
 allNamesInMod (ModEnv env) = allNamesInEnv env
 allNamesInMod (ModFun (FunModType abs mod mty)) =
-  S.fromList (map qualLeaf $ M.keys abs)
-    <> allNamesInMod mod
+  swap ((S.fromList (map qualLeaf $ M.keys abs), mempty) <> allNamesInMod mod)
     <> allNamesInMTy mty
 
-allNamesInMTy :: MTy -> S.Set VName
+allNamesInMTy :: MTy -> (S.Set VName, S.Set VName)
 allNamesInMTy (MTy abs mod) =
-  S.fromList (map qualLeaf $ M.keys abs) <> allNamesInMod mod
+  (S.fromList (map qualLeaf $ M.keys abs), mempty) <> allNamesInMod mod
 
 -- | Create unique renames for the module type.  This is used for
--- e.g. generative functor application.
+-- e.g. generative functor application.  The returned substitution maps
+-- references to what they resolve to: new names to old names, except in
+-- negative position, where it maps old names to new names.
 newNamesForMTy :: MTy -> TypeM (MTy, M.Map VName VName)
 newNamesForMTy orig_mty = do
-  pairs <- forM (S.toList $ allNamesInMTy orig_mty) $ \v -> do
+  let (pos, neg) = allNamesInMTy orig_mty
+  pairs <- forM (S.toList $ pos <> neg) $ \v -> do
     v' <- newName v
     pure (v, v')
   let substs = M.fromList pairs
-      rev_substs = M.fromList $ map (uncurry $ flip (,)) pairs
+      resolve (v, v')
+        | v `S.member` neg = (v, v')
+        | otherwise = (v', v)
+      resolve_substs = M.fromList $ map resolve pairs
       new_mty = substituteInMTy substs orig_mty
   addTySet $ mtyAbs new_mty
-  pure (new_mty, rev_substs)
+  pure (new_mty, resolve_substs)
   where
     substituteInMTy :: M.Map VName VName -> MTy -> MTy
     substituteInMTy substs (MTy mty_abs mty_mod) =

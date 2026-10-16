@@ -1306,9 +1306,10 @@ data ModExpBase f vn
   | -- | The contents of another file as a module.
     ModImport FilePath (f ImportName) SrcLoc
   | ModDecs [DecBase f vn] SrcLoc
-  | -- | Functor application.  The first mapping is from parameter
-    -- names to argument names, while the second maps names in the
-    -- constructed module to the names inside the functor.
+  | -- | Functor application. The first mapping is from parameter names to
+    -- argument names, while the second maps names in the constructed module to
+    -- the names inside the functor (and the other way around for names bound in
+    -- the parameters of a parametric module).
     ModApply
       (ModExpBase f vn)
       (ModExpBase f vn)
