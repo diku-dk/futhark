@@ -20,8 +20,8 @@ type Substitutions = M.Map VName VName
 
 lookupSubst :: VName -> Substitutions -> VName
 lookupSubst v substs = case M.lookup v substs of
-  Just v' | v' /= v -> lookupSubst v' substs
-  _ -> v
+  Just v' -> lookupSubst v' substs
+  Nothing -> v
 
 -- | Resolve the values of a substitution through another.
 resolveSubsts :: Substitutions -> Substitutions -> Substitutions
@@ -110,7 +110,7 @@ boundName v = do
 bindingNames :: [VName] -> TransformM Scope -> TransformM Scope
 bindingNames names m = do
   names' <- mapM boundName names
-  let substs = M.fromList (zip names names')
+  let substs = M.fromList $ filter (uncurry (/=)) $ zip names names'
   substituting substs $ mappend <$> m <*> pure (Scope substs mempty)
 
 generating :: TransformM a -> TransformM a
