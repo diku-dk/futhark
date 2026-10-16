@@ -1268,11 +1268,24 @@ reverseSubstitutions :: M.Map VName VName -> M.Map VName [VName]
 reverseSubstitutions =
   M.fromListWith (<>) . map (second pure . uncurry (flip (,))) . M.toList
 
+-- | Apply a substitution produced by module type matching.
 substituteInModule :: M.Map VName VName -> Module -> Module
-substituteInModule substs = onModule
+substituteInModule substs = renameModule rev_substs rev_substs
   where
     rev_substs = reverseSubstitutions substs
-    replace v = fromMaybe [v] $ M.lookup v rev_substs
+
+-- | Apply a substitution from fresh names to original names, inverting it for
+-- the arguments of parametric modules.
+substituteFreshInModule :: M.Map VName VName -> Module -> Module
+substituteFreshInModule substs =
+  renameModule (reverseSubstitutions substs) (M.map pure substs)
+
+-- | Rename with the first map, and the arguments of parametric modules with the
+-- second (alternating).
+renameModule :: M.Map VName [VName] -> M.Map VName [VName] -> Module -> Module
+renameModule renames arg_renames = onModule
+  where
+    replace v = fromMaybe [v] $ M.lookup v renames
     replaceM f m = M.fromList $ do
       (k, v) <- M.toList m
       k' <- replace k
@@ -1282,7 +1295,7 @@ substituteInModule substs = onModule
     onModule (Module env) =
       Module $ onEnv env
     onModule (ModuleFun f) =
-      ModuleFun $ \m -> onModule <$> f (substituteInModule substs m)
+      ModuleFun $ \m -> onModule <$> f (renameModule arg_renames renames m)
     onTerm (TermValue t v) = TermValue t v
     onTerm (TermPoly t v) = TermPoly t v
     onTerm (TermModule m) = TermModule $ onModule m
@@ -1337,7 +1350,7 @@ evalModExp env (ModApply f e (Info psubst) (Info rsubst) _) = do
   (e_env, e') <- evalModExp env e
   case f' of
     ModuleFun f'' -> do
-      res_mod <- substituteInModule rsubst <$> f'' (substituteInModule psubst e')
+      res_mod <- substituteFreshInModule rsubst <$> f'' (substituteInModule psubst e')
       let res_env = case res_mod of
             Module x -> x
             _ -> mempty
