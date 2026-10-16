@@ -74,7 +74,10 @@ allNamesInEnv (Env vtable ttable stable modtable _names) =
 
 allNamesInMod :: Mod -> S.Set VName
 allNamesInMod (ModEnv env) = allNamesInEnv env
-allNamesInMod ModFun {} = mempty
+allNamesInMod (ModFun (FunModType abs mod mty)) =
+  S.fromList (map qualLeaf $ M.keys abs)
+    <> allNamesInMod mod
+    <> allNamesInMTy mty
 
 allNamesInMTy :: MTy -> S.Set VName
 allNamesInMTy (MTy abs mod) =

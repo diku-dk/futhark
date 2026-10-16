@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Signed division by -1 is now properly defined.
 
+* A compiler crash when unifying parametric module types. (#2581)
+
 ## [0.28.1]
 
 ### Added
