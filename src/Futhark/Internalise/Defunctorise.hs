@@ -51,7 +51,8 @@ lookupSubstInScope qn@(QualName quals name) scope@(Scope substs mods) =
     q : qs ->
       let q' = lookupSubst q substs
        in case M.lookup q' mods of
-            Just (ModMod mod_scope) -> lookupSubstInScope (QualName qs name) mod_scope
+            Just (ModMod (Scope mod_substs mod_mods)) ->
+              lookupSubstInScope (QualName qs name) (Scope (mod_substs <> substs) mod_mods)
             _ -> (qn, scope)
 
 instance Semigroup Scope where
