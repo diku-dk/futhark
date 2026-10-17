@@ -26,6 +26,9 @@ data Symbol
       (SoP Symbol) -- upper bound
       Symbol
   | Apply Symbol [SoP Symbol] -- First argument is Var or Hole.
+  | Pow Integer (SoP Symbol)
+  | Ix (SoP Symbol) (SoP Symbol) (SoP Symbol)
+  | Recurrence
   | Bool Bool
   | Not Symbol
   | SoP Symbol :< SoP Symbol
@@ -36,9 +39,6 @@ data Symbol
   | SoP Symbol :/= SoP Symbol
   | Symbol :&& Symbol
   | Symbol :|| Symbol
-  | Pow Integer (SoP Symbol)
-  | Ix (SoP Symbol) (SoP Symbol) (SoP Symbol)
-  | Recurrence
   | -- Properties are used only in index functions for pre-/post-conditions.
     Prop (Property Symbol)
   | Assume Symbol

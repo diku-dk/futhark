@@ -47,8 +47,8 @@ rewrite_ fn@(IndexFn it xs) = simplifyIndexFn
       let (ps, vs) = unzip $ casesToList cs
       ps_simplified <- mapM rewrite ps
       cs' <-
-        eliminateFalsifiableCases (zip ps_simplified vs)
-          >>= mapM simplifyCase
+          mapM simplifyCase (zip ps_simplified vs)
+          >>= eliminateFalsifiableCases
           >>= mergeCases
       pure $ cases cs'
 
