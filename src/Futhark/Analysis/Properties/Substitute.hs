@@ -8,6 +8,7 @@ import Control.Monad (foldM, when, (<=<))
 import Control.Monad.RWS (lift)
 import Control.Monad.Trans.Maybe (hoistMaybe, runMaybeT)
 import Data.Functor ((<&>))
+import Data.Functor.Identity (runIdentity)
 import Data.Map qualified as M
 import Data.Maybe (fromJust, fromMaybe, isJust)
 import Data.Set qualified as S
@@ -36,6 +37,14 @@ legalArg k g f args =
   where
     hasSingleCase = isJust . justSingleCase
 
+-- Does the body of an index function still contain a literal Recurrence?
+-- Substituting such an index function elsewhere would capture an
+-- unresolved recurrence, so both @ and subst refuse to do so.
+hasRecurrence :: IndexFn -> Bool
+hasRecurrence =
+  runIdentity
+    . astFold (ASTFolder {foldOnSymbol = \acc s -> pure $ acc || s == Recurrence}) False
+
 -- Substitute applications of (f_name = f) into g.
 -- Unlike `subst` this errors if the substitution fails and
 -- will not check that indexing is within bounds.
@@ -59,6 +68,14 @@ dest_fn @ (f_name, f) = do
       printM 1337 $ warningString "\t@ " <> gray (prettyString (fst <$> app))
       printM 1337 . gray $ "\t  where " <> prettyString f_name <> " =\n" <> prettyIndent 16 f
       case app of
+        Just (apply_e, _)
+          | hasRecurrence f ->
+              error $
+                "(@): refusing to substitute "
+                  <> prettyString apply_e
+                  <> " because the index function of "
+                  <> prettyString f_name
+                  <> " contains an unresolved Recurrence"
         Just apply@(_, args)
           | argCheck args -> do
               h <- substituteOnce f g apply
@@ -128,6 +145,7 @@ subber argCheck g = do
         Just (e, vn, args)
           | Just [f] <- ixfns M.!? vn,
             not (trivialSub e f args),
+            not (hasRecurrence f),
             argCheck f args -> do
               g' <- substituteOnce f g (e, args)
               case g' of
