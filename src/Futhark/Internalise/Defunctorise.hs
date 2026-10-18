@@ -6,7 +6,6 @@ import Control.Monad.Identity
 import Control.Monad.RWS.Strict
 import Data.DList qualified as DL
 import Data.Map qualified as M
-import Data.Maybe
 import Data.Set qualified as S
 import Futhark.MonadFreshNames
 import Language.Futhark
@@ -15,13 +14,18 @@ import Language.Futhark.Traversals
 import Prelude hiding (abs, mod)
 
 -- | A substitution from names in the original program to names in the
--- generated/residual program.
+-- generated/residual program. Entries are accumulated rather than composed, so
+-- resolving a name may require following several, as we do in lookupSubst.
 type Substitutions = M.Map VName VName
 
 lookupSubst :: VName -> Substitutions -> VName
 lookupSubst v substs = case M.lookup v substs of
-  Just v' | v' /= v -> lookupSubst v' substs
-  _ -> v
+  Just v' -> lookupSubst v' substs
+  Nothing -> v
+
+-- | Resolve the values of a substitution through another.
+resolveSubsts :: Substitutions -> Substitutions -> Substitutions
+resolveSubsts through = M.map (`lookupSubst` through)
 
 data Mod
   = -- | A pairing of a lexical closure and a module function.
@@ -47,7 +51,8 @@ lookupSubstInScope qn@(QualName quals name) scope@(Scope substs mods) =
     q : qs ->
       let q' = lookupSubst q substs
        in case M.lookup q' mods of
-            Just (ModMod mod_scope) -> lookupSubstInScope (QualName qs name) mod_scope
+            Just (ModMod (Scope mod_substs mod_mods)) ->
+              lookupSubstInScope (QualName qs name) (Scope (mod_substs <> substs) mod_mods)
             _ -> (qn, scope)
 
 instance Semigroup Scope where
@@ -87,11 +92,9 @@ localScope f = local $ \env -> env {envScope = f $ envScope env}
 extendScope :: Scope -> TransformM a -> TransformM a
 extendScope (Scope substs mods) = localScope $ \scope ->
   scope
-    { scopeSubsts = M.map (forward (scopeSubsts scope)) substs <> scopeSubsts scope,
+    { scopeSubsts = resolveSubsts (scopeSubsts scope) substs <> scopeSubsts scope,
       scopeMods = mods <> scopeMods scope
     }
-  where
-    forward old_substs v = fromMaybe v $ M.lookup v old_substs
 
 substituting :: Substitutions -> TransformM a -> TransformM a
 substituting substs = extendScope mempty {scopeSubsts = substs}
@@ -104,7 +107,7 @@ boundName v = do
 bindingNames :: [VName] -> TransformM Scope -> TransformM Scope
 bindingNames names m = do
   names' <- mapM boundName names
-  let substs = M.fromList (zip names names')
+  let substs = M.fromList $ filter (uncurry (/=)) $ zip names names'
   substituting substs $ mappend <$> m <*> pure (Scope substs mempty)
 
 generating :: TransformM a -> TransformM a
@@ -157,15 +160,11 @@ maybeAscript _ Nothing me = me
 substituteInMod :: Substitutions -> Mod -> Mod
 substituteInMod substs (ModMod (Scope mod_substs mod_mods)) =
   -- Forward all substitutions.
-  ModMod $ Scope substs' $ M.map (substituteInMod substs) mod_mods
-  where
-    forward v = lookupSubst v $ mod_substs <> substs
-    substs' = M.map forward substs
+  ModMod
+    (Scope (resolveSubsts (mod_substs <> substs) substs) (M.map (substituteInMod substs) mod_mods))
 substituteInMod substs (ModFun abs (Scope mod_substs mod_mods) mparam mbody) =
-  ModFun abs (Scope (substs' <> mod_substs) mod_mods) mparam mbody
-  where
-    forward v = lookupSubst v mod_substs
-    substs' = M.map forward substs
+  -- Keep 'mod_substs': the body still refers to the names it binds.
+  ModFun abs (Scope (resolveSubsts mod_substs substs <> mod_substs) mod_mods) mparam mbody
 
 extendAbsTypes :: Substitutions -> TransformM a -> TransformM a
 extendAbsTypes ascript_substs m = do
@@ -202,7 +201,7 @@ evalModExp (ModApply f arg (Info p_substs) (Info b_substs) loc) = do
           let keep k _ = k `M.member` p_substs || k `S.member` abs
               abs_substs =
                 M.filterWithKey keep $
-                  M.map (`lookupSubst` scopeSubsts (modScope arg_mod)) p_substs
+                  resolveSubsts (scopeSubsts (modScope arg_mod)) p_substs
                     <> scopeSubsts f_closure
                     <> scopeSubsts (modScope arg_mod)
           extendScope
@@ -216,7 +215,7 @@ evalModExp (ModApply f arg (Info p_substs) (Info b_substs) loc) = do
               substs <- scopeSubsts <$> askScope
               x <- evalModExp f_body
               pure $
-                addSubsts abs abs_substs $
+                addSubsts abs (abs_substs `M.withoutKeys` M.keysSet b_substs) $
                   -- The next one is dubious, but is necessary to
                   -- propagate substitutions from the argument (see
                   -- modules/functor24.fut).
@@ -227,8 +226,8 @@ evalModExp (ModApply f arg (Info p_substs) (Info b_substs) loc) = do
       ModFun (abs <> mabs) (Scope (substs <> msubsts) mods) mp me
     addSubsts _ substs (ModMod (Scope msubsts mods)) =
       ModMod $ Scope (substs <> msubsts) mods
-    addSubstsModMod substs (ModMod (Scope msubsts mods)) =
-      ModMod $ Scope (substs <> msubsts) mods
+    -- As 'addSubsts', but leaves a parametric module alone.
+    addSubstsModMod substs m@ModMod {} = addSubsts mempty substs m
     addSubstsModMod _ m = m
 evalModExp (ModLambda p ascript e loc) = do
   scope <- askScope

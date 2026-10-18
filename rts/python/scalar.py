@@ -65,7 +65,7 @@ def sceil_divN(x, y):
     if y == 0:
         return intlit(type(x), 0)
     else:
-        return (x + y - intlit(type(x), 1)) // y
+        return x // y + intlit(type(x), 1 if x % y != 0 else 0)
 
 
 def smodN(x, y):
@@ -86,9 +86,9 @@ def uceil_divN(x, y):
     if y == 0:
         return intlit(type(x), 0)
     else:
+        ux, uy = unsigned(x), unsigned(y)
         return signed(
-            (unsigned(x) + unsigned(y) - unsigned(intlit(type(x), 1)))
-            // unsigned(y)
+            ux // uy + unsigned(intlit(type(x), 1 if ux % uy != 0 else 0))
         )
 
 
@@ -294,16 +294,16 @@ def zext_i64_i64(x):
 
 
 sdiv8 = sdiv16 = sdiv32 = sdiv64 = sdivN
-sceil_div8 = sdiv1_up6 = sceil_div32 = sceil_div64 = sceil_divN
-sdiv_safe8 = sdiv1_safe6 = sdiv_safe32 = sdiv_safe64 = sdivN
-sceil_div_safe8 = sceil_div1_safe6 = sceil_div_safe32 = sceil_div_safe64 = (
+sceil_div8 = sceil_div16 = sceil_div32 = sceil_div64 = sceil_divN
+sdiv_safe8 = sdiv_safe16 = sdiv_safe32 = sdiv_safe64 = sdivN
+sceil_div_safe8 = sceil_div_safe16 = sceil_div_safe32 = sceil_div_safe64 = (
     sceil_divN
 )
 smod8 = smod16 = smod32 = smod64 = smodN
 smod_safe8 = smod_safe16 = smod_safe32 = smod_safe64 = smodN
 udiv8 = udiv16 = udiv32 = udiv64 = udivN
-uceil_div8 = uceil_div16 = uceil_div32 = uceil_div64 = udivN
-udiv_safe8 = udiv_safe16 = udiv_safe32 = udiv_safe64 = uceil_divN
+uceil_div8 = uceil_div16 = uceil_div32 = uceil_div64 = uceil_divN
+udiv_safe8 = udiv_safe16 = udiv_safe32 = udiv_safe64 = udivN
 uceil_div_safe8 = uceil_div_safe16 = uceil_div_safe32 = uceil_div_safe64 = (
     uceil_divN
 )
