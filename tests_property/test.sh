@@ -20,6 +20,7 @@ run_test() {
 
     ($futhark_cmd test $seed_option "$test_file_full_path") 2>&1 | \
         grep -vE "Compiling with|Running compiled|Running .*/|^$TEST_DIR/|[0-9]+ failed|[0-9]+ passed|[0-9]+/[0-9]+ passed" | \
+        tac | awk 'NF {p=1} p' | tac | \
         sed -E -e 's/seed=-?[0-9]+/seed=REDACTED/g' \
                -e 's/after [0-9]+ tests/after N tests/g' \
                -e 's/candidate=-?[0-9]+/candidate=REDACTED/g' \

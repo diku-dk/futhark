@@ -393,18 +393,19 @@ runTestCase (TestCase mode program testcase progs pbtConfig) = do
                     let verifiedProps = selectRequestedPropSpecs properties propSpecs
                     pbt_resultE <- runPBT pbtConfig server verifiedProps phaseRef program
 
-                    let allResults = flip map pbt_resultE $ \case
+                    let pbt_results = flip map pbt_resultE $ \case
                           Left err -> Failure [err]
                           Right (Just e) -> Failure [e]
                           Right Nothing -> Success
 
-                    let hasFailures = any (\case Failure _ -> True; _ -> False) allResults
+                    let isFailure (Failure _) = True
+                        isFailure Success = False
 
-                    when hasFailures $
+                    when (any isFailure pbt_results) $
                       liftIO $
-                        propToFile program allResults
+                        propToFile program pbt_results
 
-                    pure $ normal_test_result ++ allResults
+                    pure $ normal_test_result ++ pbt_results
 
       when (mode == Interpreted) $
         context "Interpreting" $
@@ -663,7 +664,6 @@ runTests config paths = do
   all_tests <-
     map (makeTestCase config mode)
       <$> testSpecsFromPathsOrDie paths
-  -- putStrLn $ "Test cases are: " ++ show (map testCaseProgram all_tests)
   testmvar <- newEmptyMVar
   reportmvar <- newEmptyMVar
   concurrency <- maybe getNumCapabilities pure $ configConcurrency config

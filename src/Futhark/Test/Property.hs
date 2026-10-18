@@ -1044,7 +1044,13 @@ getSingleInputType srv ep = do
 
 -- | Run a list of property specifications, returning a list of results.
 -- Each result is either a failure with an error message or a success.
-runPBT :: PBTConfig -> Server -> [PropSpec] -> IORef PBTPhase -> FilePath -> IO [Either PBTFailure PBTOutput]
+runPBT ::
+  PBTConfig ->
+  Server ->
+  [PropSpec] ->
+  IORef PBTPhase ->
+  FilePath ->
+  IO [Either PBTFailure PBTOutput]
 runPBT config srv specs entryNameRef program =
   forM specs $ \spec ->
     runOne spec config srv entryNameRef program

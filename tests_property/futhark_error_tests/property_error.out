@@ -9,4 +9,3 @@ prop_head_is_zero has Runtime error: Error: Index [0] out of bounds for array of
 
 Backtrace:
 -> #0  ./futhark_error_tests/property_error.fut:23:3-8
-
