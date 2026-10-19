@@ -255,7 +255,7 @@ lInt = lexeme L.decimal
 pPos :: Parser L.Pos
 pPos =
   L.Pos
-    <$> manyTill L.charLiteral (char ':')
+    <$> (T.unpack <$> takeWhileP (Just "file name") (/= ':') <* char ':')
     <*> lInt
     <*> (char ':' *> lInt)
     <*> pure (-1) -- Cannot recover offset.
