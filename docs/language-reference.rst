@@ -1863,6 +1863,18 @@ When using incremental flattening, do not generate multiple versions
 for this SOAC, but do exploit inner parallelism (which may give rise
 to multiple versions at deeper levels).
 
+``intrablock_result(global)``
+.............................
+
+In the "intra-block parallelism" version of the attributed SOAC,
+construct the result of each block directly in its slice of the final
+result in global memory, rather than in shared memory followed by a
+copy.  This is useful when the result of a block is too large to fit
+in shared memory, such as when a block builds its result in a loop.
+Arrays that are not part of the result stay in shared memory.  This is
+done only when it is safe; otherwise the result is still put in shared
+memory.  Usually combined with ``flattening(only_intra)``.
+
 ``noinline``
 ............
 
