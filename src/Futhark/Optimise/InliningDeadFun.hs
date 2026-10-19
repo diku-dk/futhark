@@ -144,7 +144,7 @@ directlyCalledInSOACs = flip execState mempty . mapM_ (onStm Nothing) . progStms
     onExp (Just u) (Apply fname _ _ _) = modify $ M.insertWith max fname u
     onExp Nothing Apply {} = pure ()
     onExp u e = walkExpM (walker u) e
-    onSOAC u soac = void $ traverseSOACStms (const (traverse (onStm u'))) soac
+    onSOAC u soac = void $ traverseSOACBodies (\_ body -> body <$ traverse (onStm u') (bodyStms body)) soac
       where
         u' = max u $ Just $ usage soac
     usage JVP {} = InAD
@@ -294,7 +294,9 @@ inlineInBody fdmap = onBody
     inliner =
       (identityMapper @SOACS)
         { mapOnBody = const onBody,
-          mapOnOp = traverseOpStms $ \_ -> inline . stmsToList
+          mapOnOp = traverseOpBodies $ \_ body -> do
+            stms <- inline $ stmsToList $ bodyStms body
+            pure body {bodyStms = stms}
         }
 
 traceLocs :: Provenance -> StmAux () -> StmAux ()
@@ -357,7 +359,7 @@ addLocations attrs caller_safety p = fmap onStm
 
 -- | Remove functions not ultimately called from an entry point or a
 -- constant.
-removeDeadFunctionsF :: (TraverseOpStms rep) => Prog rep -> Prog rep
+removeDeadFunctionsF :: (TraverseOpBodies rep) => Prog rep -> Prog rep
 removeDeadFunctionsF prog =
   let cg = buildCallGraph prog
       live_funs = filter ((`isFunInCallGraph` cg) . funDefName) $ progFuns prog
@@ -385,7 +387,7 @@ inlineConservatively =
 
 -- | @removeDeadFunctions prog@ removes the functions that are unreachable from
 -- the main function from the program.
-removeDeadFunctions :: (TraverseOpStms rep) => Pass rep rep
+removeDeadFunctions :: (TraverseOpBodies rep) => Pass rep rep
 removeDeadFunctions =
   Pass
     { passName = "Remove dead functions",

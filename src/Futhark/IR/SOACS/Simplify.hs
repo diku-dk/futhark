@@ -165,8 +165,8 @@ simplifyReduce (Reduce comm lam nes) = do
 
 instance BuilderOps (Wise SOACS)
 
-instance TraverseOpStms (Wise SOACS) where
-  traverseOpStms = traverseSOACStms
+instance TraverseOpBodies (Wise SOACS) where
+  traverseOpBodies = traverseSOACBodies
 
 fixLambdaParams ::
   (MonadBuilder m, Buildable (Rep m), BuilderOps (Rep m)) =>

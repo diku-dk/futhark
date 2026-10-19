@@ -74,8 +74,8 @@ instance BuilderOps (Engine.Wise GPUMem) where
   mkBodyB stms res = pure $ Engine.mkWiseBody () stms res
   mkLetNamesB = mkLetNamesB'' (Space "device")
 
-instance TraverseOpStms (Engine.Wise GPUMem) where
-  traverseOpStms = traverseMemOpStms (traverseHostOpStms (const pure))
+instance TraverseOpBodies (Engine.Wise GPUMem) where
+  traverseOpBodies = traverseMemOpBodies (traverseHostOpBodies (\_ -> pure))
 
 simplifyProg :: Prog GPUMem -> PassM (Prog GPUMem)
 simplifyProg = simplifyProgGeneric memRuleBook simpleGPUMem

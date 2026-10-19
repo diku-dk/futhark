@@ -969,7 +969,7 @@ type SimplifiableRep rep =
     Simplifiable (LParamInfo rep),
     Simplifiable (RetType rep),
     Simplifiable (BranchType rep),
-    TraverseOpStms (Wise rep),
+    TraverseOpBodies (Wise rep),
     CanBeWise (OpC rep),
     ST.IndexOp (Op (Wise rep)),
     IsOp (OpC rep),

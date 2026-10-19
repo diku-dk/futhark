@@ -39,8 +39,8 @@ simplifyLambda ::
 simplifyLambda =
   Simplify.simplifyLambda simpleGPU kernelRules Engine.noExtraHoistBlockers
 
-instance TraverseOpStms (Wise GPU) where
-  traverseOpStms = traverseHostOpStms traverseSOACStms
+instance TraverseOpBodies (Wise GPU) where
+  traverseOpBodies = traverseHostOpBodies traverseSOACBodies
 
 instance BuilderOps (Wise GPU)
 

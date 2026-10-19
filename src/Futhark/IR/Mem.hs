@@ -57,7 +57,7 @@ module Futhark.IR.Mem
     RetTypeMem,
     BranchTypeMem,
     MemOp (..),
-    traverseMemOpStms,
+    traverseMemOpBodies,
     MemInfo (..),
     MemBound,
     MemBind (..),
@@ -193,14 +193,14 @@ data MemOp (inner :: Data.Kind.Type -> Data.Kind.Type) (rep :: Data.Kind.Type)
   | Inner (inner rep)
   deriving (Eq, Ord, Show)
 
--- | A helper for defining 'TraverseOpStms'.
-traverseMemOpStms ::
+-- | A helper for defining 'TraverseOpBodies'.
+traverseMemOpBodies ::
   (Monad m) =>
-  OpStmsTraverser m (inner rep) rep ->
-  OpStmsTraverser m (MemOp inner rep) rep
-traverseMemOpStms _ _ op@Alloc {} = pure op
-traverseMemOpStms _ _ op@EnsureDirect {} = pure op
-traverseMemOpStms onInner f (Inner inner) = Inner <$> onInner f inner
+  OpBodyTraverser m (inner rep) rep ->
+  OpBodyTraverser m (MemOp inner rep) rep
+traverseMemOpBodies _ _ op@Alloc {} = pure op
+traverseMemOpBodies _ _ op@EnsureDirect {} = pure op
+traverseMemOpBodies onInner f (Inner inner) = Inner <$> onInner f inner
 
 instance (RephraseOp inner) => RephraseOp (MemOp inner) where
   rephraseInOp _ (Alloc e space) = pure (Alloc e space)

@@ -40,6 +40,9 @@ module Futhark.IR.Prop
     IsOp (..),
     ASTRep (..),
     IsResult (..),
+    OpBodyTraverser,
+    TraverseOpBodies (..),
+    traverseLambdaBodies,
   )
 where
 
@@ -324,3 +327,24 @@ builtinName = nameFromText . ("builtin/" <>)
 -- | Is this a builtin name, and if so, what is the underlying name?
 isBuiltinName :: Name -> Maybe T.Text
 isBuiltinName v = "builtin/" `T.stripPrefix` nameToText v
+
+-- | A function for monadically traversing the immediate sub-bodies of the
+-- given op for some representation. The function is given the scope of the
+-- names bound by the op that are visible in the body. A function that modifies
+-- the body is responsible for constructing it properly, e.g. with 'mkBody',
+-- such that its decoration is up to date.
+type OpBodyTraverser m op rep =
+  (forall res. (IsResult res) => Scope rep -> GBody rep res -> m (GBody rep res)) ->
+  op ->
+  m op
+
+-- | This representation supports an 'OpBodyTraverser' for its t'Op'.
+-- This is used for some simplification rules.
+class TraverseOpBodies rep where
+  -- | Transform every sub-'Body' of this op.
+  traverseOpBodies :: (Monad m) => OpBodyTraverser m (Op rep) rep
+
+-- | A helper for defining 'traverseOpBodies'.
+traverseLambdaBodies :: (Monad m) => OpBodyTraverser m (GLambda rep t) rep
+traverseLambdaBodies f (Lambda ps ret body) =
+  Lambda ps ret <$> f (scopeOfLParams ps) body

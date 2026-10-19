@@ -32,7 +32,7 @@ module Futhark.IR.SegOp
     SegOpMapper (..),
     identitySegOpMapper,
     mapSegOpM,
-    traverseSegOpStms,
+    traverseSegOpBodies,
 
     -- * Simplification
     simplifySegOp,
@@ -726,19 +726,18 @@ instance RephraseOp (SegOp lvl) where
       onOp (HistOp w rf arrs nes shape op) =
         HistOp w rf arrs nes shape <$> rephraseLambda r op
 
--- | A helper for defining 'TraverseOpStms'.
-traverseSegOpStms :: (Monad m) => OpStmsTraverser m (SegOp lvl rep) rep
-traverseSegOpStms f segop = mapSegOpM mapper segop
+-- | A helper for defining 'TraverseOpBodies'.
+traverseSegOpBodies :: forall m lvl rep. (Monad m) => OpBodyTraverser m (SegOp lvl rep) rep
+traverseSegOpBodies f segop = mapSegOpM mapper segop
   where
     seg_scope = scopeOfSegSpace (segSpace segop)
+    f' :: (IsResult res) => Scope rep -> GBody rep res -> m (GBody rep res)
     f' scope = f (seg_scope <> scope)
     mapper =
       identitySegOpMapper
-        { mapOnSegBinOpLambda = traverseLambdaStms f',
-          mapOnSegOpBody = onBody
+        { mapOnSegBinOpLambda = traverseLambdaBodies f',
+          mapOnSegOpBody = f seg_scope
         }
-    onBody (Body dec stms res) =
-      Body dec <$> f seg_scope stms <*> pure res
 
 instance
   (ASTRep rep, Substitute lvl) =>

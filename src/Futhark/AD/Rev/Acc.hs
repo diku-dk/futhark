@@ -226,7 +226,7 @@ zeroOutUpdates certs_to_zeroes lam = lam {lambdaBody = onBody $ lambdaBody lam}
       where
         mapper =
           (identityMapper :: (Monad m) => Mapper SOACS SOACS m)
-            { mapOnOp = traverseSOACStms (\_ stms -> pure $ onStms stms),
+            { mapOnOp = traverseSOACBodies (\_ body -> pure body {bodyStms = onStms $ bodyStms body}),
               mapOnBody = \_ body -> pure $ onBody body
             }
     onStms = fmap onStm
