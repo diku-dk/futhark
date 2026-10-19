@@ -287,9 +287,8 @@ instance
   HasScope (Aliases rep) (TypeM rep)
   where
   lookupType = fmap typeOf . lookupVar
-  askScope = asks $ M.fromList . mapMaybe varType . M.toList . envVtable
-    where
-      varType (name, dec) = Just (name, dec)
+  lookupInfo = lookupVar
+  askScope = asks envVtable
 
 runTypeM ::
   Env rep ->
