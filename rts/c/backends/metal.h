@@ -17,7 +17,10 @@
 // Since kernels access buffers only through their GPU addresses, all
 // buffers are made resident through a residency set, and command
 // buffers are chained through an event, as untracked buffers would
-// otherwise let them overlap.
+// otherwise let them overlap.  Some devices, such as the paravirtual
+// GPU of a virtual machine, do not support residency sets; there the
+// buffers passed to each kernel are made resident with useResource
+// instead.
 
 #import <Metal/Metal.h>
 
@@ -182,6 +185,7 @@ struct futhark_context {
   id<MTLDevice> device;
   id<MTLCommandQueue> queue;
   id<MTLLibrary> library;
+  // Nil if the device does not support residency sets.
   id<MTLResidencySet> residency;
   // The command buffer and encoder currently being filled, if any.
   id<MTLCommandBuffer> cb;
@@ -231,6 +235,15 @@ static id<MTLComputeCommandEncoder> metal_encoder(struct futhark_context *ctx) {
     }
   }
   return ctx->encoder;
+}
+
+// Make a buffer resident for the current encoder, if it is not
+// already resident through the residency set.
+static void metal_use_buffer(struct futhark_context *ctx, id<MTLBuffer> b) {
+  if (ctx->residency == nil && b != nil) {
+    [metal_encoder(ctx) useResource:b
+                              usage:MTLResourceUsageRead | MTLResourceUsageWrite];
+  }
 }
 
 // Commit the current command buffer, if any, and return it (retained),
@@ -497,6 +510,7 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
     if (kernel->arg_is_pointer[i]) {
       id<MTLBuffer> b = metal_buffer(*(gpu_mem*)args[i]);
       uint64_t addr = b == nil ? 0 : [b gpuAddress];
+      metal_use_buffer(ctx, b);
       memcpy(args_struct + kernel->arg_offsets[i], &addr, sizeof(addr));
     } else {
       memcpy(args_struct + kernel->arg_offsets[i], args[i], args_sizes[i]);
@@ -560,6 +574,8 @@ static int gpu_memcpy(struct futhark_context* ctx,
       { [metal_buffer(dst) gpuAddress] + dst_offset,
         [metal_buffer(src) gpuAddress] + src_offset,
         (uint64_t)nbytes };
+    metal_use_buffer(ctx, metal_buffer(dst));
+    metal_use_buffer(ctx, metal_buffer(src));
     // Must match the choice made by the kernel.
     int64_t bytes_per_thread =
       (args.dst | args.src | args.n) % 16 == 0 ? 16
@@ -588,6 +604,7 @@ static int gpu_scalar_to_device(struct futhark_context* ctx,
   args.dst = [metal_buffer(dst) gpuAddress] + offset;
   args.n = size;
   memcpy(args.bytes, src, size);
+  metal_use_buffer(ctx, metal_buffer(dst));
   const int32_t block[3] = {8, 1, 1};
   const int32_t grid[3] = {1, 1, 1};
   metal_dispatch(ctx, ctx->write_kernel, &args, sizeof(args), grid, block, 0);
@@ -659,7 +676,8 @@ static int gpu_alloc_actual(struct futhark_context *ctx, size_t size, gpu_mem *m
     return FUTHARK_OUT_OF_MEMORY;
   }
   // The commit applies to command buffers committed after it, which
-  // includes the one currently being encoded.
+  // includes the one currently being encoded.  Messages to a nil
+  // residency set do nothing.
   [ctx->residency addAllocation:b];
   [ctx->residency commit];
   *mem_out = b;
@@ -901,9 +919,14 @@ int backend_context_setup(struct futhark_context* ctx) {
     MTLResidencySetDescriptor *desc = [[MTLResidencySetDescriptor new] autorelease];
     NSError *err = nil;
     ctx->residency = [ctx->device newResidencySetWithDescriptor:desc error:&err];
-    METAL_SUCCEED_FATAL(ctx->residency != nil, "newResidencySetWithDescriptor");
+    if (ctx->residency == nil && ctx->cfg->logging) {
+      fprintf(ctx->log, "Residency sets not supported (%s); using useResource.\n",
+              [[err localizedDescription] UTF8String]);
+    }
   }
-  [ctx->queue addResidencySet:ctx->residency];
+  if (ctx->residency != nil) {
+    [ctx->queue addResidencySet:ctx->residency];
+  }
 
   free_list_init(&ctx->gpu_free_list);
   metal_size_setup(ctx);
@@ -953,7 +976,9 @@ void backend_context_teardown(struct futhark_context* ctx) {
     metal_kernel_free(ctx->copy_kernel);
     metal_kernel_free(ctx->write_kernel);
     [ctx->library release];
-    [ctx->queue removeResidencySet:ctx->residency];
+    if (ctx->residency != nil) {
+      [ctx->queue removeResidencySet:ctx->residency];
+    }
     [ctx->residency release];
     [ctx->timeline release];
     [ctx->queue release];
