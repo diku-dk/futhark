@@ -39,7 +39,10 @@ module Futhark.IR.Aliases
     removeBodyAliases,
     removeLambdaAliases,
     removePatAliases,
-    removeScopeAliases,
+    removeNameInfoAliases,
+    WithoutAliases,
+    runWithoutAliases,
+    withoutAliases,
 
     -- * Tracking aliases
     AliasesAndConsumed,
@@ -51,6 +54,7 @@ where
 
 import Control.Monad.Identity
 import Control.Monad.Reader
+import Data.Bifunctor (first)
 import Data.Kind qualified
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -120,14 +124,6 @@ instance AliasesOf (VarAliases, dec) where
   aliasesOf = unAliases . fst
 
 instance FreeDec AliasDec
-
-withoutAliases ::
-  (HasScope (Aliases rep) m, Monad m) =>
-  ReaderT (Scope rep) m a ->
-  m a
-withoutAliases m = do
-  scope <- asksScope removeScopeAliases
-  runReaderT m scope
 
 instance
   ( ASTRep rep,
@@ -209,14 +205,60 @@ removeAliases =
       rephraseOp = rephraseInOp removeAliases
     }
 
--- | Remove alias information from an aliased scope.
-removeScopeAliases :: Scope (Aliases rep) -> Scope rep
-removeScopeAliases = M.map unAlias
+-- | Remove alias information from a single scope entry.
+removeNameInfoAliases :: NameInfo (Aliases rep) -> NameInfo rep
+removeNameInfoAliases (LetName (_, dec)) = LetName dec
+removeNameInfoAliases (FParamName dec) = FParamName dec
+removeNameInfoAliases (LParamName dec) = LParamName dec
+removeNameInfoAliases (IndexName it) = IndexName it
+
+-- | A reader monad transformer that presents a scope of @'Aliases' rep@ as a
+-- scope of @rep@. An entry is converted when it is looked up, so the cost does
+-- not depend on the size of the scope. Scope added with 'localScope' is kept
+-- apart from the aliased scope.
+newtype WithoutAliases rep m a
+  = WithoutAliases (ReaderT (Scope rep, Scope (Aliases rep)) m a)
+  deriving (Functor, Applicative, Monad)
+
+instance
+  (Monad m, RepTypes rep, RepTypes (Aliases rep)) =>
+  HasScope rep (WithoutAliases rep m)
   where
-    unAlias (LetName (_, dec)) = LetName dec
-    unAlias (FParamName dec) = FParamName dec
-    unAlias (LParamName dec) = LParamName dec
-    unAlias (IndexName it) = IndexName it
+  lookupInfo name = WithoutAliases . asks $ \(extra, scope) ->
+    case M.lookup name extra of
+      Just info -> info
+      Nothing ->
+        maybe notFound removeNameInfoAliases $ M.lookup name scope
+    where
+      notFound =
+        error $
+          "WithoutAliases.lookupInfo: Name "
+            ++ prettyString name
+            ++ " not found in type environment."
+  askScope =
+    WithoutAliases . asks $ \(extra, scope) ->
+      extra <> M.map removeNameInfoAliases scope
+
+instance
+  (Monad m, RepTypes rep, RepTypes (Aliases rep)) =>
+  LocalScope rep (WithoutAliases rep m)
+  where
+  localScope scope (WithoutAliases m) =
+    WithoutAliases $ local (first (scope <>)) m
+
+instance (MonadFreshNames m) => MonadFreshNames (WithoutAliases rep m) where
+  getNameSource = WithoutAliases $ lift getNameSource
+  putNameSource = WithoutAliases . lift . putNameSource
+
+-- | Run a 'WithoutAliases' computation in the given aliased scope.
+runWithoutAliases :: WithoutAliases rep m a -> Scope (Aliases rep) -> m a
+runWithoutAliases (WithoutAliases m) scope = runReaderT m (mempty, scope)
+
+withoutAliases ::
+  (HasScope (Aliases rep) m, Monad m) =>
+  WithoutAliases rep m a ->
+  m a
+withoutAliases m = runWithoutAliases m =<< askScope
 
 -- | Remove alias information from a program.
 removeProgAliases ::
@@ -404,11 +446,9 @@ instance
   mkExpPat ids e =
     mkAliasedPat (mkExpPat ids $ removeExpAliases e) e
 
-  mkLetNames names e = do
-    env <- asksScope removeScopeAliases
-    flip runReaderT env $ do
-      Let pat dec _ <- mkLetNames names $ removeExpAliases e
-      pure $ mkAliasedStm pat dec e
+  mkLetNames names e = withoutAliases $ do
+    Let pat dec _ <- mkLetNames names $ removeExpAliases e
+    pure $ mkAliasedStm pat dec e
 
   mkBody stms res =
     let Body bodyrep _ _ = mkBody (fmap removeStmAliases stms) res

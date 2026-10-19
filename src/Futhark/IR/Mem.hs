@@ -103,7 +103,6 @@ where
 import Control.Category
 import Control.Monad
 import Control.Monad.Except
-import Control.Monad.Reader
 import Control.Monad.State
 import Data.Foldable (traverse_)
 import Data.Function ((&))
@@ -121,7 +120,8 @@ import Futhark.IR.Aliases
     CanBeAliased (..),
     removeExpAliases,
     removePatAliases,
-    removeScopeAliases,
+    runWithoutAliases,
+    withoutAliases,
   )
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.IR.Pretty
@@ -597,8 +597,7 @@ matchRetTypeToResult ::
   Result ->
   TC.TypeM rep ()
 matchRetTypeToResult rettype result = do
-  scope <- askScope
-  result_ts <- runReaderT (mapM (subExpMemInfo . resSubExp) result) $ removeScopeAliases scope
+  result_ts <- withoutAliases $ mapM (subExpMemInfo . resSubExp) result
   matchReturnType rettype (map resSubExp result) result_ts
 
 matchFunctionReturnType ::
@@ -671,7 +670,7 @@ matchBranchReturnType ::
   TC.TypeM rep ()
 matchBranchReturnType rettype (Body _ stms res) = do
   scope <- askScope
-  ts <- runReaderT (mapM (subExpMemInfo . resSubExp) res) $ removeScopeAliases (scope <> scopeOf stms)
+  ts <- runWithoutAliases (mapM (subExpMemInfo . resSubExp) res) (scope <> scopeOf stms)
   matchReturnType rettype (map resSubExp res) ts
 
 -- | Helper function for index function unification.
@@ -807,8 +806,7 @@ matchPatToExp ::
   Exp (Aliases rep) ->
   TC.TypeM rep ()
 matchPatToExp pat e = do
-  scope <- asksScope removeScopeAliases
-  rt <- maybe illformed pure $ runReader (expReturns $ removeExpAliases e) scope
+  rt <- maybe illformed pure =<< withoutAliases (expReturns $ removeExpAliases e)
 
   let (ctx_ids, val_ts) = unzip $ bodyReturnsFromPat $ removePatAliases pat
       (ctx_map_ids, ctx_map_exts) = getExtMaps $ zip ctx_ids [0 .. 1]
