@@ -191,7 +191,7 @@ fixLambdaParams lam fixes = do
     maybeFix p (Just x) = letBindNames [paramName p] $ BasicOp $ SubExp x
     maybeFix _ Nothing = pure ()
 
-removeLambdaResults :: [Bool] -> Lambda rep -> Lambda rep
+removeLambdaResults :: (Buildable rep) => [Bool] -> Lambda rep -> Lambda rep
 removeLambdaResults keep lam =
   lam
     { lambdaBody = lam_body',
@@ -201,7 +201,7 @@ removeLambdaResults keep lam =
     keep' :: [a] -> [a]
     keep' = map snd . filter fst . zip (keep ++ repeat True)
     lam_body = lambdaBody lam
-    lam_body' = lam_body {bodyResult = keep' $ bodyResult lam_body}
+    lam_body' = mkBody (bodyStms lam_body) (keep' $ bodyResult lam_body)
     ret = keep' $ lambdaReturnType lam
 
 {-# NOINLINE soacRules #-}
@@ -317,7 +317,7 @@ liftIdentityMapping _ pat aux op
           let (pat', ses') = unzip mapresult
               fun' =
                 fun
-                  { lambdaBody = (lambdaBody fun) {bodyResult = subExpsRes ses'},
+                  { lambdaBody = mkBody (bodyStms (lambdaBody fun)) (subExpsRes ses'),
                     lambdaReturnType = rettype'
                   }
           auxing aux $ do
@@ -337,7 +337,7 @@ liftIdentityStreaming _ (Pat pes) aux (Stream w arrs nes lam)
       let (variant_map_ts, variant_map_pes, variant_map_res) = unzip3 variant_map
           lam' =
             lam
-              { lambdaBody = (lambdaBody lam) {bodyResult = fold_res ++ variant_map_res},
+              { lambdaBody = mkBody (bodyStms (lambdaBody lam)) (fold_res ++ variant_map_res),
                 lambdaReturnType = fold_ts ++ variant_map_ts
               }
 
@@ -474,7 +474,7 @@ removeUnusedPreLamResult _ pat aux (Screma w arrs (ScremaForm pre_lam scans reds
               (lambdaReturnType pre_lam)
           pre_lam' =
             pre_lam
-              { lambdaBody = (lambdaBody pre_lam) {bodyResult = pre_lam_new_res},
+              { lambdaBody = mkBody (bodyStms (lambdaBody pre_lam)) pre_lam_new_res,
                 lambdaReturnType = pre_lam_new_ts
               }
           post_lam' =
@@ -511,7 +511,7 @@ removeDuplicateMapOutput _ (Pat pes) aux (Screma w arrs form)
               let (ses', ts', pes') = unzip3 ses_ts_pes'
                   fun' =
                     fun
-                      { lambdaBody = (lambdaBody fun) {bodyResult = ses'},
+                      { lambdaBody = mkBody (bodyStms (lambdaBody fun)) ses',
                         lambdaReturnType = ts'
                       }
               auxing aux $ do

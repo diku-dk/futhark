@@ -85,8 +85,9 @@ removeDeadGPUBodyResult (_, used) pat aux (GPUBody types body)
           pick = map snd . filter fst . zip pat_used
           pat' = pick (patElems pat)
           types' = pick types
-          body' = body {bodyResult = pick (bodyResult body)}
-       in Simplify $ auxing aux $ letBind (Pat pat') $ Op $ GPUBody types' body'
+       in Simplify . auxing aux $ do
+            body' <- mkBodyM (bodyStms body) (pick (bodyResult body))
+            letBind (Pat pat') $ Op $ GPUBody types' body'
   | otherwise = Skip
 removeDeadGPUBodyResult _ _ _ _ = Skip
 
