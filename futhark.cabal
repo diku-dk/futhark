@@ -242,6 +242,7 @@ library
       Futhark.CodeGen.ImpGen.GPU.SegScan.SinglePass
       Futhark.CodeGen.ImpGen.GPU.SegScan.TwoPass
       Futhark.CodeGen.ImpGen.GPU.ToOpenCL
+      Futhark.CodeGen.ImpGen.GPU.ToOpenCL.Metal
       Futhark.CodeGen.ImpGen.HIP
       Futhark.CodeGen.ImpGen.Metal
       Futhark.CodeGen.ImpGen.Multicore
