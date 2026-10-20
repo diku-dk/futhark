@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * A compiler crash when unifying parametric module types. (#2581)
 
+* Invalid simplification of indexes could lead to compiler crash.
+
 ## [0.28.1]
 
 ### Added

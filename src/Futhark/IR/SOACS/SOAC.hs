@@ -802,6 +802,7 @@ instance (RepTypes rep) => ST.IndexOp (SOAC rep) where
         pure (lam, se, drop num_accs $ lambdaParams lam, arrs)
 
       arrIndex p arr = do
+        guard $ primType $ paramType p
         ST.Indexed cs pe <- ST.index' arr [i] vtable
         pure (paramName p, (pe, cs))
 

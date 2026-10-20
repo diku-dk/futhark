@@ -160,6 +160,7 @@ ruleBasicOp vtable pat aux (Update _ src _ (Var v))
 ruleBasicOp vtable pat aux (Update safety src (Slice [DimSlice i n s]) (Var v))
   | isCt1 n,
     isCt1 s,
+    Just 1 <- arrayRank <$> ST.lookupType v vtable,
     Just (ST.Indexed cs e) <- ST.index v [intConst Int64 0] vtable =
       Simplify $ do
         e' <- toSubExp "update_elem" e
