@@ -10,7 +10,7 @@ import Data.IORef (IORef, readIORef, writeIORef)
 import Data.Int (Int32)
 import Data.Maybe (fromMaybe, isJust)
 import Futhark.Compiler.Program (LoadedProg, lpFilePaths, lpWarnings, noLoadedProg, reloadProg)
-import Futhark.LSP.Diagnostic (diagnosticSource, maxDiagnostic, publishErrorDiagnostics, publishWarningDiagnostics)
+import Futhark.LSP.Diagnostic (errorDiagnostics, publishDiagnostics, showUnlocatedErrors, warningDiagnostics)
 import Futhark.LSP.State (State (..), updateStaleContent, updateStaleMapping)
 import Futhark.LSP.Tool (computeMapping, logWithSeverity, transformVFS)
 import Futhark.Util (showText)
@@ -19,7 +19,7 @@ import Language.LSP.Protocol.Types
   ( filePathToUri,
     toNormalizedUri,
   )
-import Language.LSP.Server (LspT, flushDiagnosticsBySource, getVirtualFile, getVirtualFiles)
+import Language.LSP.Server (LspT, getVirtualFile, getVirtualFiles)
 import Language.LSP.VFS (virtualFileVersion)
 
 -- | Get the current state.  If the given file is not part of the
@@ -79,21 +79,22 @@ tryCompile state path old_loaded_prog = do
   logWithSeverity Debug <& "Reloading program from " <> showText path
   vfs <- getVirtualFiles
   res <- liftIO $ reloadProg old_loaded_prog [path] (transformVFS vfs) -- NOTE: vfs only keeps track of current opened files
-  flushDiagnosticsBySource maxDiagnostic diagnosticSource
+  diagnosed <-
+    publishDiagnostics vfs (stateDiagnosed state) $
+      either errorDiagnostics (warningDiagnostics . listWarnings . lpWarnings) res
   case res of
     Right new_loaded_prog -> do
-      logWithSeverity Debug <& "Successfully compiled, publishing warnings"
-      publishWarningDiagnostics $ listWarnings $ lpWarnings new_loaded_prog
+      logWithSeverity Debug <& "Successfully compiled"
       maybe_virtual_file <- getVirtualFile $ toNormalizedUri $ filePathToUri path
       let new_state = case maybe_virtual_file of
             Nothing -> state {stateProgram = Just new_loaded_prog} -- should never happen
             Just virtual_file -> updateStaleContent path virtual_file new_loaded_prog state
-      pure $ Right new_state {stateFailed = Nothing}
+      pure $ Right new_state {stateFailed = Nothing, stateDiagnosed = diagnosed}
     Left prog_error -> do
-      logWithSeverity Debug <& "Compilation failed, publishing diagnostics"
-      publishErrorDiagnostics prog_error
+      logWithSeverity Debug <& "Compilation failed"
+      showUnlocatedErrors prog_error
       attempt <- compileAttempt path
-      pure $ Left state {stateFailed = attempt}
+      pure $ Left state {stateFailed = attempt, stateDiagnosed = diagnosed}
 
 getLoadedProg :: State -> LoadedProg
 getLoadedProg state = fromMaybe noLoadedProg (stateProgram state)

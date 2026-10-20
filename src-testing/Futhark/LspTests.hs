@@ -21,9 +21,9 @@ import Data.Text qualified as T
 import Futhark.CLI.LSP (serverDefinition)
 import Futhark.Fmt.Printer (fmtToText)
 import Language.Futhark.Parser.Monad (SyntaxError (..))
-import Language.LSP.Protocol.Lens (uri)
+import Language.LSP.Protocol.Lens (uri, version)
 import Language.LSP.Protocol.Message
-  ( SMethod (SMethod_TextDocumentFormatting, SMethod_WindowShowMessage, SMethod_WorkspaceApplyEdit),
+  ( SMethod (SMethod_TextDocumentFormatting, SMethod_TextDocumentPublishDiagnostics, SMethod_WindowShowMessage, SMethod_WorkspaceApplyEdit),
     TNotificationMessage (TNotificationMessage),
     TResponseError (TResponseError),
     TResponseMessage (TResponseMessage),
@@ -46,9 +46,12 @@ import Language.LSP.Protocol.Types
     MarkupKind (MarkupKind_PlainText),
     MessageType (MessageType_Error),
     Position (..),
+    PublishDiagnosticsParams (..),
     Range (..),
     SemanticTokens (..),
     ShowMessageParams (ShowMessageParams),
+    TextDocumentContentChangeEvent (..),
+    TextDocumentContentChangeWholeDocument (..),
     TextDocumentIdentifier,
     type (|?) (..),
   )
@@ -57,6 +60,7 @@ import Language.LSP.Test
   ( Session,
     SessionConfig (..),
     anyMessage,
+    changeDoc,
     createDoc,
     defaultConfig,
     documentContents,
@@ -70,6 +74,7 @@ import Language.LSP.Test
     getDefinitions,
     getHover,
     getSemanticTokens,
+    getVersionedDoc,
     message,
     request,
     runSessionWithHandles,
@@ -134,6 +139,28 @@ testWarningsWithErrors = serverTestCase "Warnings with errors" $ do
       @?= [(0, Just DiagnosticSeverity_Warning), (1, Just DiagnosticSeverity_Error)]
   where
     lineAndSeverity Diagnostic {..} = (_line (_start _range), _severity)
+
+-- The clearing of fixed diagnostics must carry the current document
+-- version, or clients may discard it as stale.  A client that has
+-- since changed the document discards it anyway, so every
+-- compilation must also publish for every open document.
+testDiagnosticsClearedOnFix :: TestTree
+testDiagnosticsClearedOnFix = serverTestCase "Diagnostics cleared on fix" $ do
+  docIdent <- createMainDoc "def main = 1i32 + true"
+  _ <- waitForDiagnostics
+  changeTo docIdent "def main = 1i32 + 2"
+  expectCleared docIdent
+  changeTo docIdent "def main = 1i32 + 3"
+  expectCleared docIdent
+  where
+    changeTo docIdent s =
+      changeDoc docIdent [TextDocumentContentChangeEvent $ InR $ TextDocumentContentChangeWholeDocument s]
+    expectCleared docIdent = do
+      TNotificationMessage _ _ (PublishDiagnosticsParams _ diags_version diags) <- publishedDiagnostics
+      doc <- getVersionedDoc docIdent
+      liftIO $ (diags_version, diags) @?= (Just (doc ^. version), [])
+    publishedDiagnostics =
+      message SMethod_TextDocumentPublishDiagnostics <|> (anyMessage *> publishedDiagnostics)
 
 testUnlocatedError :: TestTree
 testUnlocatedError = testCase "Error without location" . runServerSessionPairWith config $ do
@@ -453,6 +480,7 @@ tests =
     "Futhark.LspTests"
     [ testDiagnosticsOnOpen,
       testWarningsWithErrors,
+      testDiagnosticsClearedOnFix,
       testUnlocatedError,
       testHoverInformation,
       testDefinition,
