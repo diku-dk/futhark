@@ -32,6 +32,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Multicore backend contexts would become unusuable after the first failure.
 
+* Partial arithmetic operations accessed through prelude modules (like `i32./`)
+  lacked safety checks.
+
 ## [0.28.1]
 
 ### Added

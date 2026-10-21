@@ -1536,6 +1536,17 @@ certifyingNonnegative t x m = do
   c <- assert "nonzero_cert" nonnegative "negative exponent"
   certifying c m
 
+protectBinOp :: I.BinOp -> SubExp -> SubExp -> InternaliseM a -> InternaliseM a
+protectBinOp (I.SDiv t Unsafe) _ y = certifyingNonzero t y
+protectBinOp (I.SQuot t Unsafe) _ y = certifyingNonzero t y
+protectBinOp (I.SMod t Unsafe) _ y = certifyingNonzero t y
+protectBinOp (I.SRem t Unsafe) _ y = certifyingNonzero t y
+protectBinOp (I.UDiv t Unsafe) _ y = certifyingNonzero t y
+protectBinOp (I.UMod t Unsafe) _ y = certifyingNonzero t y
+protectBinOp (I.UCeilDiv t Unsafe) _ y = certifyingNonzero t y
+protectBinOp (I.SCeilDiv t Unsafe) _ y = certifyingNonzero t y
+protectBinOp _ _ _ = id
+
 internaliseBinOp ::
   Name ->
   E.BinOp ->
@@ -1567,11 +1578,9 @@ internaliseBinOp desc E.Times x y (E.Unsigned t) _ =
 internaliseBinOp desc E.Times x y (E.FloatType t) _ =
   simpleBinOp desc (I.FMul t) x y
 internaliseBinOp desc E.Divide x y (E.Signed t) _ =
-  certifyingNonzero t y $
-    simpleBinOp desc (I.SDiv t I.Unsafe) x y
+  simpleBinOp desc (I.SDiv t I.Unsafe) x y
 internaliseBinOp desc E.Divide x y (E.Unsigned t) _ =
-  certifyingNonzero t y $
-    simpleBinOp desc (I.UDiv t I.Unsafe) x y
+  simpleBinOp desc (I.UDiv t I.Unsafe) x y
 internaliseBinOp desc E.Divide x y (E.FloatType t) _ =
   simpleBinOp desc (I.FDiv t) x y
 internaliseBinOp desc E.Pow x y (E.FloatType t) _ =
@@ -1582,25 +1591,19 @@ internaliseBinOp desc E.Pow x y (E.Signed t) _ =
 internaliseBinOp desc E.Pow x y (E.Unsigned t) _ =
   simpleBinOp desc (I.Pow t) x y
 internaliseBinOp desc E.Mod x y (E.Signed t) _ =
-  certifyingNonzero t y $
-    simpleBinOp desc (I.SMod t I.Unsafe) x y
+  simpleBinOp desc (I.SMod t I.Unsafe) x y
 internaliseBinOp desc E.Mod x y (E.Unsigned t) _ =
-  certifyingNonzero t y $
-    simpleBinOp desc (I.UMod t I.Unsafe) x y
+  simpleBinOp desc (I.UMod t I.Unsafe) x y
 internaliseBinOp desc E.Mod x y (E.FloatType t) _ =
   simpleBinOp desc (I.FMod t) x y
 internaliseBinOp desc E.Quot x y (E.Signed t) _ =
-  certifyingNonzero t y $
-    simpleBinOp desc (I.SQuot t I.Unsafe) x y
+  simpleBinOp desc (I.SQuot t I.Unsafe) x y
 internaliseBinOp desc E.Quot x y (E.Unsigned t) _ =
-  certifyingNonzero t y $
-    simpleBinOp desc (I.UDiv t I.Unsafe) x y
+  simpleBinOp desc (I.UDiv t I.Unsafe) x y
 internaliseBinOp desc E.Rem x y (E.Signed t) _ =
-  certifyingNonzero t y $
-    simpleBinOp desc (I.SRem t I.Unsafe) x y
+  simpleBinOp desc (I.SRem t I.Unsafe) x y
 internaliseBinOp desc E.Rem x y (E.Unsigned t) _ =
-  certifyingNonzero t y $
-    simpleBinOp desc (I.UMod t I.Unsafe) x y
+  simpleBinOp desc (I.UMod t I.Unsafe) x y
 internaliseBinOp desc E.ShiftR x y (E.Signed t) _ =
   simpleBinOp desc (I.AShr t) x y
 internaliseBinOp desc E.ShiftR x y (E.Unsigned t) _ =
@@ -1676,7 +1679,8 @@ simpleBinOp ::
   I.SubExp ->
   InternaliseM [I.SubExp]
 simpleBinOp desc bop x y =
-  letTupExp' desc $ I.BasicOp $ I.BinOp bop x y
+  protectBinOp bop x y $
+    letTupExp' desc (I.BasicOp $ I.BinOp bop x y)
 
 simpleCmpOp ::
   Name ->
@@ -1904,7 +1908,7 @@ isIntrinsicFunction qname args = do
       | Just bop <- find ((== s) . nameFromText . prettyText) allBinOps = Just $ \desc -> do
           x' <- internaliseExp1 "x" x
           y' <- internaliseExp1 "y" y
-          fmap pure $ letSubExp desc $ I.BasicOp $ I.BinOp bop x' y'
+          simpleBinOp desc bop x' y'
       | Just cmp <- find ((== s) . nameFromText . prettyText) allCmpOps = Just $ \desc -> do
           x' <- internaliseExp1 "x" x
           y' <- internaliseExp1 "y" y
