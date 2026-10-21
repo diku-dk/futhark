@@ -4,4 +4,18 @@ fields "{bool: bool, i32: i32}"
 zip arr_i32_bool "[]{bool: bool, i32: i32}" arr_bool arr_i32
 free arr_i32 arr_bool
 unzip arr_i32_bool arr_bool arr_i32
+index i arr_i32 0
+index b arr_bool 0
+new_array bad "[]i32" 1
+type bad
+new bad "{bool: bool, i32: i32}" b
+type bad
+construct bad sum bar i
+type bad
+construct bad sum nosuch
+type bad
+construct pair sum bar i b
+destruct pair x pair
+type x
+free pair i b
 store output.data.actual arr_i32_bool arr_i32 arr_bool

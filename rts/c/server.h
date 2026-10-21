@@ -763,13 +763,6 @@ void cmd_new_array(struct server_state *s, const char *args[]) {
   if (type == NULL) {
     return;
   }
-  struct variable *to = create_variable(s, to_name, type);
-
-  if (to == NULL) {
-    failure();
-    printf("Variable already exists: %s\n", to_name);
-    return;
-  }
 
   if (type->kind != ARRAY) {
     failure();
@@ -869,6 +862,16 @@ void cmd_new_array(struct server_state *s, const char *args[]) {
     }
   }
 
+  struct variable *to = create_variable(s, to_name, type);
+
+  if (to == NULL) {
+    failure();
+    printf("Variable already exists: %s\n", to_name);
+    free(value_ptrs);
+    free(values);
+    return;
+  }
+
   // The copy from 'values' may be asynchronous, so we must synchronise
   // before freeing it.
   int err = a->new(s->ctx, value_ptr(&to->value), a->info != NULL ? (void*)values : value_ptrs, dims);
@@ -876,6 +879,9 @@ void cmd_new_array(struct server_state *s, const char *args[]) {
   free(value_ptrs);
   free(values);
   error_check(s, err);
+  if (err != 0) {
+    drop_variable(s, to);
+  }
 }
 
 void cmd_set(struct server_state *s, const char *args[]) {
@@ -1000,7 +1006,12 @@ void cmd_index(struct server_state *s, const char *args[]) {
     return;
   }
 
-  a->index(s->ctx, value_ptr(&to->value), from->value.value.v_ptr, indices);
+  int err = a->index(s->ctx, value_ptr(&to->value), from->value.value.v_ptr, indices);
+  err |= futhark_context_sync(s->ctx);
+  error_check(s, err);
+  if (err != 0) {
+    drop_variable(s, to);
+  }
 }
 
 void cmd_zip(struct server_state *s, const char *args[]) {
@@ -1250,7 +1261,12 @@ void cmd_project(struct server_state *s, const char *args[]) {
     return;
   }
 
-  field->project(s->ctx, value_ptr(&to->value), from->value.value.v_ptr);
+  int err = field->project(s->ctx, value_ptr(&to->value), from->value.value.v_ptr);
+  err |= futhark_context_sync(s->ctx);
+  error_check(s, err);
+  if (err != 0) {
+    drop_variable(s, to);
+  }
 }
 
 void cmd_new(struct server_state *s, const char *args[]) {
@@ -1258,13 +1274,6 @@ void cmd_new(struct server_state *s, const char *args[]) {
   const char *type_name = get_arg(args, 1);
   const struct type *type = get_type(s, type_name);
   if (type == NULL) {
-    return;
-  }
-  struct variable *to = create_variable(s, to_name, type);
-
-  if (to == NULL) {
-    failure();
-    printf("Variable already exists: %s\n", to_name);
     return;
   }
 
@@ -1308,7 +1317,20 @@ void cmd_new(struct server_state *s, const char *args[]) {
     value_ptrs[i] = value_ptr(&v->value);
   }
 
-  r->new(s->ctx, value_ptr(&to->value), value_ptrs);
+  struct variable *to = create_variable(s, to_name, type);
+
+  if (to == NULL) {
+    failure();
+    printf("Variable already exists: %s\n", to_name);
+    return;
+  }
+
+  int err = r->new(s->ctx, value_ptr(&to->value), value_ptrs);
+  err |= futhark_context_sync(s->ctx);
+  error_check(s, err);
+  if (err != 0) {
+    drop_variable(s, to);
+  }
 }
 
 void cmd_construct(struct server_state *s, const char *args[]) {
@@ -1317,13 +1339,6 @@ void cmd_construct(struct server_state *s, const char *args[]) {
   const char *variant_name = get_arg(args, 2);
   const struct type *type = get_type(s, type_name);
   if (type == NULL) {
-    return;
-  }
-  struct variable *to = create_variable(s, to_name, type);
-
-  if (to == NULL) {
-    failure();
-    printf("Variable already exists: %s\n", to_name);
     return;
   }
 
@@ -1371,7 +1386,20 @@ void cmd_construct(struct server_state *s, const char *args[]) {
         value_ptrs[i] = value_ptr(&v->value);
       }
 
-      var->new(s->ctx, value_ptr(&to->value), value_ptrs);
+      struct variable *to = create_variable(s, to_name, type);
+
+      if (to == NULL) {
+        failure();
+        printf("Variable already exists: %s\n", to_name);
+        return;
+      }
+
+      int err = var->new(s->ctx, value_ptr(&to->value), value_ptrs);
+      err |= futhark_context_sync(s->ctx);
+      error_check(s, err);
+      if (err != 0) {
+        drop_variable(s, to);
+      }
       return;
     }
   }
@@ -1410,7 +1438,8 @@ void cmd_destruct(struct server_state *s, const char *args[]) {
     return;
   }
 
-  const void **value_ptrs = alloca(num_args * sizeof(struct variable*));
+  struct variable **outs = alloca(num_args * sizeof(struct variable*));
+  const void **value_ptrs = alloca(num_args * sizeof(void*));
 
   for (int i = 0; i < num_args; i++) {
     const char *vname = get_arg(args, i+1);
@@ -1418,13 +1447,23 @@ void cmd_destruct(struct server_state *s, const char *args[]) {
     if (vn == NULL) {
       failure();
       printf("Variable already exists: %s\n", vname);
+      for (int j = 0; j < i; j++) {
+        drop_variable(s, outs[j]);
+      }
       return;
     }
+    outs[i] = vn;
     value_ptrs[i] = value_ptr(&vn->value);
   }
 
-  var->destruct(s->ctx, value_ptrs, v->value.value.v_ptr);
-  return;
+  int err = var->destruct(s->ctx, value_ptrs, v->value.value.v_ptr);
+  err |= futhark_context_sync(s->ctx);
+  error_check(s, err);
+  if (err != 0) {
+    for (int i = 0; i < num_args; i++) {
+      drop_variable(s, outs[i]);
+    }
+  }
 }
 
 void cmd_entry_points(struct server_state *s, const char *args[]) {
