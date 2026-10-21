@@ -469,6 +469,9 @@ compileExp (UnOpExp Complement {} x) = do
 compileExp (UnOpExp (Neg Bool) x) = do
   x' <- compileExp x
   pure [C.cexp|!$exp:x'|]
+compileExp (UnOpExp (Neg (IntType t)) x) = do
+  x' <- compileExp x
+  pure [C.cexp|($ty:(intTypeToCType t))$id:(prettyString (Sub t OverflowWrap))(0, $exp:x')|]
 compileExp (UnOpExp Neg {} x) = do
   x' <- compileExp x
   pure [C.cexp|-$exp:x'|]
