@@ -77,8 +77,8 @@ programmers writing in Futhark.
 futhark eval [options...] <exprs...>
 ------------------------------------
 
-Evaluates expressions given as command-line arguments. Optionally
-allows a file import using ``-f``.
+Evaluates expressions given as command-line arguments. Optionally allows a file
+import using ``-f``. Prints results textually.
 
 If ``--backend`` is passed, the entry points of the file loaded with ``-f`` are
 compiled, as for :ref:`futhark-repl(1)`.
