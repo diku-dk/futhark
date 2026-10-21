@@ -1238,6 +1238,7 @@ void cmd_project(struct server_state *s, const char *args[]) {
   if (field == NULL) {
     failure();
     printf("No such field\n");
+    return;
   }
 
   struct variable *to = create_variable(s, to_name, field->type);
