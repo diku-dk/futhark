@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Invalid simplification of indexes could lead to compiler crash.
 
+* Multicore backend contexts would become unusuable after the first failure.
+
 ## [0.28.1]
 
 ### Added
