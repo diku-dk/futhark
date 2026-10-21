@@ -89,7 +89,7 @@ static int cache_restore(const char *fname, const struct cache_hash *hash,
     goto error;
   }
 
-  if (memcmp(f_hash, hash->hash, CACHE_HASH_SIZE) != 0) {
+  if (memcmp(f_hash, hash->hash, CACHE_HASH_SIZE*sizeof(int32_t)) != 0) {
     errno = 0;
     goto error;
   }
