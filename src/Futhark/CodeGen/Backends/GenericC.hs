@@ -674,8 +674,9 @@ compileConstants (Constants ps init_consts) = do
     libDecl
       [C.cedecl|static int free_constants($ty:ctx_ty *ctx) {
         (void)ctx;
+        int err = 0;
         $items:free_consts
-        return 0;
+        return err;
       }|]
 
   mapM getConst ps
@@ -697,7 +698,8 @@ compileConstants (Constants ps init_consts) = do
     resetMemConst (MemParam name space) = resetMem name space
 
     freeConst ScalarParam {} = pure ()
-    freeConst (MemParam name space) = unRefMem [C.cexp|ctx->constants->$id:name|] space
+    freeConst (MemParam name space) =
+      unRefMem [C.cexp|ctx->constants->$id:name|] space [C.cstm|err = 1;|]
 
     getConst (ScalarParam name bt) = do
       let ctp = primTypeToCType bt

@@ -245,8 +245,13 @@ data Operations op s = Operations
     opsGetParam :: Name -> (C.Exp, C.Exp)
   }
 
+-- | Unreference all declared memory.  The result is placed after the
+-- @cleanup@ label, so a failure is recorded in @err@ rather than
+-- jumping to @cleanup@ again.
 freeAllocatedMem :: CompilerM op s [C.BlockItem]
-freeAllocatedMem = collect $ mapM_ (uncurry unRefMem) =<< gets compDeclaredMem
+freeAllocatedMem = collect $ mapM_ free =<< gets compDeclaredMem
+  where
+    free (name, space) = unRefMem name space [C.cstm|err = 1;|]
 
 declAllocatedMem :: CompilerM op s [C.BlockItem]
 declAllocatedMem = collect $ mapM_ f =<< gets compDeclaredMem
@@ -583,8 +588,8 @@ resetMem mem space = do
       when refcount $
         stm [C.cstm|$exp:mem.references = NULL;|]
 
-setMem :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> CompilerM op s ()
-setMem dest src space = do
+setMem :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> C.Stm -> CompilerM op s ()
+setMem dest src space on_failure = do
   refcount <- fatMemory space
   let src_s = T.unpack $ expText $ C.toExp src noLoc
   if refcount
@@ -592,7 +597,7 @@ setMem dest src space = do
       stm
         [C.cstm|if ($id:(fatMemSet space)(ctx, &$exp:dest, &$exp:src,
                                                $string:src_s) != 0) {
-                       return 1;
+                       $stm:on_failure
                      }|]
     else case space of
       ScalarSpace ds _ -> do
@@ -607,15 +612,15 @@ setMem dest src space = do
                   }|]
       _ -> stm [C.cstm|$exp:dest = $exp:src;|]
 
-unRefMem :: (C.ToExp a) => a -> Space -> CompilerM op s ()
-unRefMem mem space = do
+unRefMem :: (C.ToExp a) => a -> Space -> C.Stm -> CompilerM op s ()
+unRefMem mem space on_failure = do
   refcount <- fatMemory space
   cached <- isJust <$> cacheMem mem
   let mem_s = T.unpack $ expText $ C.toExp mem noLoc
   when (refcount && not cached) $
     stm
       [C.cstm|if ($id:(fatMemUnRef space)(ctx, &$exp:mem, $string:mem_s) != 0) {
-                  return 1;
+                  $stm:on_failure
                 }|]
 
 allocMem ::

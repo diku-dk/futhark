@@ -111,7 +111,7 @@ arrayLibraryFunctions pub space pt signed rank = do
       let dim_s = "dim" ++ show i
        in stm [C.cstm|arr->shape[$int:i] = $id:dim_s;|]
 
-  free_body <- collect $ unRefMem [C.cexp|arr->mem|] space
+  free_body <- collect $ unRefMem [C.cexp|arr->mem|] space [C.cstm|ret = 1;|]
 
   values_body <-
     collect $
@@ -221,9 +221,10 @@ arrayLibraryFunctions pub space pt signed rank = do
           }
 
           int $id:free_array($ty:ctx_ty *ctx, $ty:array_type *arr) {
+            int ret = 0;
             $items:(criticalSection ops free_body)
             free(arr);
-            return 0;
+            return ret;
           }
 
           int $id:values_array($ty:ctx_ty *ctx, $ty:array_type *arr, $ty:pt' *data) {

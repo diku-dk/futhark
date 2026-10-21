@@ -303,7 +303,7 @@ compileCode (Allocate name (Count (TPrimExp e)) space) = do
       allocMem name size space [C.cstm|{err = 1; goto cleanup;}|]
 compileCode (Free name space) = do
   cached <- isJust <$> cacheMem name
-  unless cached $ unRefMem name space
+  unless cached $ unRefMem name space [C.cstm|{err = 1; goto cleanup;}|]
 compileCode (For i bound body) = do
   let i' = C.toIdent i
       t = primTypeToCType $ primExpType bound
@@ -400,7 +400,7 @@ compileCode (SetScalar dest src) = do
   src' <- compileExp src
   stm [C.cstm|$id:dest = $exp:src';|]
 compileCode (SetMem dest src space) =
-  setMem dest src space
+  setMem dest src space [C.cstm|{err = 1; goto cleanup;}|]
 compileCode (Call [dest] fname args)
   | isBuiltInFunction fname = do
       args' <- mapM compileArg args

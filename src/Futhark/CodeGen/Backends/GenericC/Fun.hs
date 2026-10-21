@@ -32,7 +32,7 @@ compileFunBody output_ptrs outputs code = do
     setRetVal' p (MemParam name space) =
       -- It is required that the memory block is already initialised
       -- (although it may be NULL).
-      setMem [C.cexp|*$exp:p|] name space
+      setMem [C.cexp|*$exp:p|] name space [C.cstm|{err = 1; goto cleanup;}|]
     setRetVal' p (ScalarParam name _) =
       stm [C.cstm|*$exp:p = $id:name;|]
 
