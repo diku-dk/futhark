@@ -19,6 +19,7 @@ module Futhark.Eval
     Evaluation (..),
     EvalRecordRef,
     runEvalRecordRef,
+    I.prettyValue,
   )
 where
 
@@ -44,7 +45,7 @@ import Futhark.Server qualified as S
 import Futhark.Test.Compile (FutharkExe (..), compileProgram, futharkServerCfg)
 import Futhark.Util (showText)
 import Futhark.Util.Options (ArgDescr (..), FunOptDescr, OptDescr (..))
-import Futhark.Util.Pretty (commasep, hPutDoc, hPutDocLn, hardline, putDocLn)
+import Futhark.Util.Pretty (commasep, hPutDoc, hPutDocLn, putDocLn)
 import Language.Futhark.Core (locText)
 import Language.Futhark.Interpreter qualified as I
 import Language.Futhark.Interpreter.FFI.Push qualified as FFI
@@ -111,7 +112,7 @@ runExpr ::
   (Evaluation m, MonadIO m) =>
   InterpreterState ->
   T.Text ->
-  m (Doc AnsiStyle)
+  m I.Value
 runExpr state str =
   case parseExp "" str of
     Left (SyntaxError _ serr) -> abort $ pretty serr
@@ -123,7 +124,7 @@ runParsedExpr ::
   (Evaluation m, MonadIO m) =>
   InterpreterState ->
   UncheckedExp ->
-  m (Doc AnsiStyle)
+  m I.Value
 runParsedExpr (InterpreterState (src, env, ctx, s)) uexp = do
   fexp <- case T.checkExp [] src env uexp of
     (_, Left terr) -> do
@@ -143,7 +144,7 @@ runParsedExpr (InterpreterState (src, env, ctx, s)) uexp = do
       forced <- liftIO $ forceValue s val
       case forced of
         Left err -> abort $ I.prettyInterpreterError err
-        Right val' -> pure $ I.prettyValue val' <> hardline
+        Right val' -> pure val'
 
 data EvalConfig = EvalConfig
   { evalPrintWarnings :: Bool,
