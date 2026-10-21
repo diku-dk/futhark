@@ -220,6 +220,22 @@ fromData (Just s) v
         =<< FFI.runServerM s (FFI.gc >> FFI.putData v)
 fromData _ v = pure $ fromDataValue v
 
+doLoadValue :: Maybe FFI.Server -> [V.ValueType] -> FilePath -> IO (Either T.Text (Value m))
+doLoadValue s ts fname = tryIO $ do
+  vs <- loadValues fname
+  let vs_ts = map V.valueType vs
+  when (vs_ts /= ts) . fail $
+    "Expected file \""
+      <> fname
+      <> "\" to contain data of types "
+      <> unwords (map prettyString ts)
+      <> " but found data of types "
+      <> unwords (map prettyString vs_ts)
+  asValue <$> mapM (fromData s) vs
+  where
+    asValue [v] = v
+    asValue vs = toTuple vs
+
 -- | Run an IO operation. Arrays are put on the server, if one is given.
 doIOOp :: Maybe FFI.Server -> IOOp -> IO (Either T.Text (Value m))
 doIOOp s (LoadBytes fname) =
@@ -237,19 +253,3 @@ doIOOp s (LoadValue t fname) =
           <> ": only primitives, arrays of primitives, and tuples of these can be loaded."
     Just ts -> doLoadValue s ts fname
 {-# NOINLINE doIOOp #-}
-
-doLoadValue :: Maybe FFI.Server -> [V.ValueType] -> FilePath -> IO (Either T.Text (Value m))
-doLoadValue s ts fname = tryIO $ do
-  vs <- loadValues fname
-  let vs_ts = map V.valueType vs
-  when (vs_ts /= ts) . fail $
-    "Expected file \""
-      <> fname
-      <> "\" to contain data of types "
-      <> unwords (map prettyString ts)
-      <> " but found data of types "
-      <> unwords (map prettyString vs_ts)
-  asValue <$> mapM (fromData s) vs
-  where
-    asValue [v] = v
-    asValue vs = toTuple vs
