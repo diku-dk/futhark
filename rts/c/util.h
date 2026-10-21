@@ -7,13 +7,19 @@
 
 static const char *fut_progname = "(embedded Futhark)";
 
-static void futhark_panic(int eval, const char *fmt, ...) __attribute__((noreturn));
-static char* msgprintf(const char *s, ...);
+static void futhark_panic(int eval, const char *fmt, ...)
+  __attribute__((noreturn, format(printf, 2, 3)));
+static char* msgprintf(const char *s, ...)
+  __attribute__((format(printf, 1, 2)));
+static inline void check_err(int errval, int sets_errno, const char *fun, int line,
+                             const char *msg, ...)
+  __attribute__((format(printf, 5, 6)));
 static void* slurp_file(const char *filename, size_t *size);
 static int dump_file(const char *file, const void *buf, size_t n);
 struct str_builder;
 static void str_builder_init(struct str_builder *b);
-static void str_builder(struct str_builder *b, const char *s, ...);
+static void str_builder(struct str_builder *b, const char *s, ...)
+  __attribute__((format(printf, 2, 3)));
 static char *strclone(const char *str);
 
 static void futhark_panic(int eval, const char *fmt, ...) {
@@ -31,22 +37,26 @@ static char* msgprintf(const char *s, ...) {
   va_list vl;
   va_start(vl, s);
   size_t needed = 1 + (size_t)vsnprintf(NULL, 0, s, vl);
+  va_end(vl);
   char *buffer = (char*) malloc(needed);
   va_start(vl, s); // Must re-init.
   vsnprintf(buffer, needed, s, vl);
+  va_end(vl);
   return buffer;
 }
 
 static inline void check_err(int errval, int sets_errno, const char *fun, int line,
                              const char *msg, ...) {
   if (errval) {
-    char errnum[10];
+    char errnum[12];
+    (void)snprintf(errnum, sizeof(errnum), "%d", errval);
 
     va_list vl;
     va_start(vl, msg);
 
     fprintf(stderr, "ERROR: ");
     vfprintf(stderr, msg, vl);
+    va_end(vl);
     fprintf(stderr, " in %s() at line %d with error code %s\n",
             fun, line,
             sets_errno ? strerror(errno) : errnum);
@@ -125,6 +135,7 @@ static void str_builder(struct str_builder *b, const char *s, ...) {
   va_list vl;
   va_start(vl, s);
   size_t needed = (size_t)vsnprintf(NULL, 0, s, vl);
+  va_end(vl);
 
   while (b->capacity < b->used + needed + 1) {
     b->capacity *= 2;
@@ -133,6 +144,7 @@ static void str_builder(struct str_builder *b, const char *s, ...) {
 
   va_start(vl, s); // Must re-init.
   vsnprintf(b->str+b->used, b->capacity-b->used, s, vl);
+  va_end(vl);
   b->used += needed;
 }
 

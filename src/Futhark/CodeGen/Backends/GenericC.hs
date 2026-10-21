@@ -196,7 +196,7 @@ defineMemorySpace space = do
         [C.cedecl|int $id:(fatMemAlloc space) ($ty:ctx_ty *ctx, $ty:mty *block, typename int64_t size, const char *desc) {
   if (size < 0) {
     futhark_panic(1, "Negative allocation of %lld bytes attempted for %s in %s.\n",
-          (long long)size, desc, $string:spacedesc, ctx->$id:usagename);
+          (long long int)size, desc, $string:spacedesc);
   }
   int ret = $id:(fatMemUnRef space)(ctx, block, desc);
 

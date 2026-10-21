@@ -365,20 +365,21 @@ compileBuiltinFun (fname, func@(Function _ outputs inputs _ _))
 -- | Handle logging an error message in ISPC.
 handleError :: ErrorMsg Exp -> String -> ISPCCompilerM ()
 handleError msg stacktrace = do
-  -- Get format sting
-  (formatstr, formatargs) <- GC.errorMsgString msg
-  let formatstr' = "Error: " <> formatstr <> "\n\nBacktrace:\n%s"
   -- Get args types and names for shim
   let arg_types = errorMsgArgTypes msg
   arg_names <- mapM (newVName . const "arg") arg_types
   let params = zipWith (\ty name -> [C.cparam|$ty:(GC.primTypeToCType ty) $id:name|]) arg_types arg_names
   let params_uni = zipWith (\ty name -> [C.cparam|$tyqual:uniform $ty:(GC.primTypeToCType ty) $id:name|]) arg_types arg_names
+  -- Get format string. The shim formats its own parameters, so the
+  -- error values are replaced by references to them.
+  (formatstr, formatargs) <-
+    GC.errorMsgString $ shimMsg msg $ zip arg_names arg_types
+  let formatstr' = "Error: " <> formatstr <> "\n\nBacktrace:\n%s"
   -- Make shim
-  let formatargs' = mapArgNames msg formatargs arg_names
   shim <- MC.multicoreDef "assert_shim" $ \s -> do
     pure
       [C.cedecl|void $id:s(struct futhark_context* ctx, $params:params) {
-          set_error(ctx, msgprintf($string:formatstr', $args:formatargs', $string:stacktrace));
+          set_error(ctx, msgprintf($string:formatstr', $args:formatargs, $string:stacktrace));
       }|]
   ispcDecl
     [C.cedecl|extern "C" $tyqual:unmasked void $id:shim($tyqual:uniform struct futhark_context* $tyqual:uniform, $params:params_uni);|]
@@ -400,13 +401,11 @@ handleError msg stacktrace = do
 
     getErrorValExps (ErrorMsg m) = mapM compileExp $ mapMaybe getErrorVal m
 
-    mapArgNames' (x : xs) (y : ys) (t : ts)
-      | isJust $ getErrorVal x = [C.cexp|$id:t|] : mapArgNames' xs ys ts
-      | otherwise = y : mapArgNames' xs ys (t : ts)
-    mapArgNames' _ ys [] = ys
-    mapArgNames' _ _ _ = []
+    shimMsg (ErrorMsg parts) = ErrorMsg . shimParts parts
 
-    mapArgNames (ErrorMsg parts) = mapArgNames' parts
+    shimParts (ErrorVal _ _ : ps) ((v, t) : vs) = ErrorVal t (LeafExp v t) : shimParts ps vs
+    shimParts (p : ps) vs = p : shimParts ps vs
+    shimParts [] _ = []
 
 -- | Is this a space whose memory blocks we can address directly from ISPC
 -- code, and for which 'readHostMem'/'writeHostMem' know the layout?

@@ -608,7 +608,7 @@ static int read_is_binary(FILE *f) {
 }
 
 static const struct primtype_info_t* read_bin_read_type_enum(FILE *f) {
-  char read_binname[4];
+  char read_binname[5] = { 0 };
 
   int num_matched = fscanf(f, "%4c", read_binname);
   if (num_matched != 1) { futhark_panic(1, "binary-input: Couldn't read element type.\n"); }
@@ -655,14 +655,15 @@ static int read_bin_array(FILE *f,
   if (ret != 0) { futhark_panic(1, "binary-input: Couldn't get dims.\n"); }
 
   if (bin_dims != dims) {
-    futhark_panic(1, "binary-input: Expected %i dimensions, but got array with %i dimensions.\n",
-          dims, bin_dims);
+    futhark_panic(1, "binary-input: Expected %d dimensions, but got array with %d dimensions.\n",
+                  (int)dims, (int)bin_dims);
   }
 
   const struct primtype_info_t *bin_primtype = read_bin_read_type_enum(f);
   if (expected_type != bin_primtype) {
-    futhark_panic(1, "binary-input: Expected %iD-array with element type '%s' but got %iD-array with element type '%s'.\n",
-          dims, expected_type->type_name, dims, bin_primtype->type_name);
+    futhark_panic(1, "binary-input: Expected %dD-array with element type '%s' but got %dD-array with element type '%s'.\n",
+                  (int)dims, expected_type->type_name,
+                  (int)dims, bin_primtype->type_name);
   }
 
   int64_t elem_count = 1;
@@ -682,15 +683,16 @@ static int read_bin_array(FILE *f,
   int64_t elem_size = expected_type->size;
   void* tmp = realloc(*data, (size_t)(elem_count * elem_size));
   if (tmp == NULL) {
-    futhark_panic(1, "binary-input: Failed to allocate array of size %i.\n",
-          elem_count * elem_size);
+    futhark_panic(1, "binary-input: Failed to allocate array of size %lld.\n",
+                  (long long int)(elem_count * elem_size));
   }
   *data = tmp;
 
   int64_t num_elems_read = (int64_t)fread(*data, (size_t)elem_size, (size_t)elem_count, f);
   if (num_elems_read != elem_count) {
-    futhark_panic(1, "binary-input: tried to read %i elements of an array, but only got %i elements.\n",
-          elem_count, num_elems_read);
+    futhark_panic(1, "binary-input: tried to read %lld elements of an array, but only got %lld elements.\n",
+                  (long long int)elem_count,
+                  (long long int)num_elems_read);
   }
 
   // If we're on big endian platform we must change all multibyte elements
