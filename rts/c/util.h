@@ -108,6 +108,7 @@ static int dump_file(const char *file, const void *buf, size_t n) {
   }
 
   if (fwrite(buf, sizeof(char), n, f) != n) {
+    fclose(f);
     return 1;
   }
 

@@ -476,6 +476,7 @@ void cmd_store(struct server_state *s, const char *args[]) {
       if (v == NULL) {
         failure();
         printf("Unknown variable: %s\n", vname);
+        fclose(f);
         return;
       }
 

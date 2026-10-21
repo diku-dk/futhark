@@ -34,22 +34,26 @@ static char* load_tuning_file(const char *fname,
       if (*endptr && *endptr != '\n') {
         snprintf(line, max_line_len, "Invalid line %d (must be of form 'name=int').",
                  lineno);
+        fclose(f);
         return line;
       }
       if (set_tuning_param(cfg, line, (size_t)value) != 0) {
         char* err = (char*) malloc(max_line_len + 50);
         snprintf(err, max_line_len + 50, "Unknown name '%s' on line %d.", line, lineno);
         free(line);
+        fclose(f);
         return err;
       }
     } else {
       snprintf(line, max_line_len, "Invalid line %d (must be of form 'name=int').",
                lineno);
+      fclose(f);
       return line;
     }
   }
 
   free(line);
+  fclose(f);
 
   return NULL;
 }
