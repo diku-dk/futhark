@@ -138,7 +138,7 @@ static void str_builder(struct str_builder *b, const char *s, ...) {
 
 static void str_builder_str(struct str_builder *b, const char *s) {
   size_t needed = strlen(s);
-  if (b->capacity < b->used + needed + 1) {
+  while (b->capacity < b->used + needed + 1) {
     b->capacity *= 2;
     b->str = realloc(b->str, b->capacity);
   }
