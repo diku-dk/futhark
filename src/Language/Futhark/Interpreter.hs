@@ -31,6 +31,7 @@ module Language.Futhark.Interpreter
 
     -- * IO
     IOOp,
+    safeIO,
     determineIO,
     doIOOp,
     ioRelativeTo,
@@ -2462,8 +2463,13 @@ initialCtx =
     def fname
       | nameFromText fname `M.member` namesToPrimTypes = Nothing
       | Just op <- determineIO fname =
-          Just $ TermPoly Nothing $ \t ->
-            pure $ ValueFun $ doIO <=< op (evalTypeFully t) <=< force
+          Just $ TermPoly Nothing $ \t -> pure $ case op of
+            IOUnary f ->
+              ValueFun $ doIO <=< f (evalTypeFully t) <=< force
+            IOBinary f ->
+              ValueFun $ \x -> pure $ ValueFun $ \y -> do
+                x' <- force x
+                doIO =<< f (evalTypeFully t) x' y
     def s = error $ "Missing intrinsic: " ++ T.unpack s
 
     tdef :: Name -> Maybe TypeBinding

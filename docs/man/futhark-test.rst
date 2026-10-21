@@ -145,6 +145,9 @@ You should not pass abstract types produced by interpreted code to compiled
 entry points. A good rule of thumb is to do all nontrivial work inside entry
 points.
 
+The expression is treated as untrusted code, so IO operations that modify the
+file system, such as ``io.savevalue``, are not permitted. Reading files is allowed.
+
 PROPERTY-BASED TESTING
 ----------------------
 

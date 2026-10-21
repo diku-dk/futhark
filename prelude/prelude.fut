@@ -63,9 +63,20 @@ module io
       -- file. Only supports primitives, arrays of primitives, and tuples. If
       -- the type is a tuple, the file must contain one value for each element.
       val loadvalue 'a [k] : [k]u8 -> *a
+
+      -- | Save a Futhark value in the specified file using the binary data
+      -- format. This is obviously a rather dangerous operation if executed by
+      -- untrusted code as it can write to arbitrary files, and hence it is not
+      -- allowed in test specs.
+      --
+      -- Only primitives, arrays of primitives, and tuples of these can be
+      -- saved, as for 'loadvalue'. One value is written per field of a tuple,
+      -- in field order.
+      val savevalue 'a [k] : [k]u8 -> a -> ()
     } = {
   def loadbytes = intrinsics.io_loadbytes
   def loadimg = intrinsics.io_loadimg
   def loadaudio = intrinsics.io_loadaudio
   def loadvalue = intrinsics.io_loadvalue
+  def savevalue = intrinsics.io_savevalue
 }
