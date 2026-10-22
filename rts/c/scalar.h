@@ -35,7 +35,7 @@ SCALAR_FUN_ATTR uint32_t sub32(uint32_t x, uint32_t y) { return x - y; }
 SCALAR_FUN_ATTR uint64_t sub64(uint64_t x, uint64_t y) { return x - y; }
 
 SCALAR_FUN_ATTR uint8_t   mul8(uint8_t x, uint8_t y)   { return x * y; }
-SCALAR_FUN_ATTR uint16_t mul16(uint16_t x, uint16_t y) { return x * y; }
+SCALAR_FUN_ATTR uint16_t mul16(uint16_t x, uint16_t y) { return (uint32_t)x * y; }
 SCALAR_FUN_ATTR uint32_t mul32(uint32_t x, uint32_t y) { return x * y; }
 SCALAR_FUN_ATTR uint64_t mul64(uint64_t x, uint64_t y) { return x * y; }
 
@@ -691,9 +691,9 @@ SCALAR_FUN_ATTR uint16_t pow16(uint16_t x, uint16_t y) {
   uint16_t res = 1, rem = y;
   while (rem != 0) {
     if (rem & 1)
-      res *= x;
+      res = mul16(res, x);
     rem >>= 1;
-    x *= x;
+    x = mul16(x, x);
   }
   return res;
 }
@@ -765,14 +765,13 @@ SCALAR_FUN_ATTR int64_t btoi_bool_i64(bool x) { return x; }
 
 SCALAR_FUN_ATTR int8_t   abs8(int8_t x)  { return (int8_t)abs(x); }
 SCALAR_FUN_ATTR int16_t abs16(int16_t x) { return (int16_t)abs(x); }
+#if defined(__OPENCL_VERSION__)
 SCALAR_FUN_ATTR int32_t abs32(int32_t x) { return abs(x); }
-SCALAR_FUN_ATTR int64_t abs64(int64_t x) {
-#if defined(__OPENCL_VERSION__) || defined(ISPC)
-  return abs(x);
+SCALAR_FUN_ATTR int64_t abs64(int64_t x) { return abs(x); }
 #else
-  return llabs(x);
+SCALAR_FUN_ATTR int32_t abs32(int32_t x) { return x < 0 ? (int32_t)sub32(0, x) : x; }
+SCALAR_FUN_ATTR int64_t abs64(int64_t x) { return x < 0 ? (int64_t)sub64(0, x) : x; }
 #endif
-}
 
 #if defined(__OPENCL_VERSION__)
 
@@ -915,8 +914,8 @@ SCALAR_FUN_ATTR uint32_t futrts_umad_hi32(uint32_t a, uint32_t b, uint32_t c) { 
 SCALAR_FUN_ATTR uint64_t futrts_umad_hi64(uint64_t a, uint64_t b, uint64_t c) { return futrts_umul_hi64(a, b) + c; }
 SCALAR_FUN_ATTR  uint8_t futrts_smad_hi8 ( int8_t a,  int8_t b,  int8_t c) { return futrts_smul_hi8(a, b) + c; }
 SCALAR_FUN_ATTR uint16_t futrts_smad_hi16(int16_t a, int16_t b, int16_t c) { return futrts_smul_hi16(a, b) + c; }
-SCALAR_FUN_ATTR uint32_t futrts_smad_hi32(int32_t a, int32_t b, int32_t c) { return futrts_smul_hi32(a, b) + c; }
-SCALAR_FUN_ATTR uint64_t futrts_smad_hi64(int64_t a, int64_t b, int64_t c) { return futrts_smul_hi64(a, b) + c; }
+SCALAR_FUN_ATTR uint32_t futrts_smad_hi32(int32_t a, int32_t b, int32_t c) { return (uint32_t)futrts_smul_hi32(a, b) + (uint32_t)c; }
+SCALAR_FUN_ATTR uint64_t futrts_smad_hi64(int64_t a, int64_t b, int64_t c) { return (uint64_t)futrts_smul_hi64(a, b) + (uint64_t)c; }
 #endif
 
 #if defined(__OPENCL_VERSION__)
