@@ -139,8 +139,7 @@ genericOptions =
         optionDescription = "Read size=value assignments from the given file.",
         optionAction =
           [C.cstm|{
-                char *ret = load_tuning_file(optarg, cfg, (int(*)(void*, const char*, size_t))
-                                                          futhark_context_config_set_tuning_param);
+                char *ret = load_tuning_file(optarg, cfg);
                 if (ret != NULL) {
                   futhark_panic(1, "When loading tuning file '%s': %s\n", optarg, ret);
                 }}|]

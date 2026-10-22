@@ -699,7 +699,8 @@ static struct cuda_event* cuda_event_new(struct futhark_context* ctx) {
   }
 }
 
-static int cuda_event_report(struct str_builder* sb, struct cuda_event* e) {
+static int cuda_event_report(struct str_builder* sb, void* p) {
+  struct cuda_event* e = (struct cuda_event*)p;
   float ms;
   CUresult err;
   if ((err = cuEventElapsedTime(&ms, e->start, e->end)) != CUDA_SUCCESS) {
@@ -915,7 +916,7 @@ static int gpu_scalar_to_device(struct futhark_context* ctx,
               provenance,
               NULL,
               event,
-              (event_report_fn)cuda_event_report);
+              cuda_event_report);
     CUDA_SUCCEED_FATAL(cuEventRecord(event->start, ctx->stream));
   }
   CUDA_SUCCEED_OR_RETURN(cuMemcpyHtoD(dst + offset, src, size));
@@ -936,7 +937,7 @@ static int gpu_scalar_from_device(struct futhark_context* ctx,
               provenance,
               NULL,
               event,
-              (event_report_fn)cuda_event_report);
+              cuda_event_report);
     CUDA_SUCCEED_FATAL(cuEventRecord(event->start, ctx->stream));
   }
   CUDA_SUCCEED_OR_RETURN(cuMemcpyDtoH(dst, src + offset, size));
@@ -958,7 +959,7 @@ static int gpu_memcpy(struct futhark_context* ctx,
               provenance,
               NULL,
               event,
-              (event_report_fn)cuda_event_report);
+              cuda_event_report);
     CUDA_SUCCEED_FATAL(cuEventRecord(event->start, ctx->stream));
   }
   CUDA_SUCCEED_OR_RETURN(cuMemcpyAsync(dst+dst_offset, src+src_offset, nbytes, ctx->stream));
@@ -982,7 +983,7 @@ static int memcpy_host2gpu(struct futhark_context* ctx,
                 provenance,
                 NULL,
                 event,
-                (event_report_fn)cuda_event_report);
+                cuda_event_report);
       CUDA_SUCCEED_FATAL(cuEventRecord(event->start, ctx->stream));
     }
     if (sync) {
@@ -1013,7 +1014,7 @@ static int memcpy_gpu2host(struct futhark_context* ctx,
                 provenance,
                 NULL,
                 event,
-                (event_report_fn)cuda_event_report);
+                cuda_event_report);
       CUDA_SUCCEED_FATAL(cuEventRecord(event->start, ctx->stream));
     }
     if (sync) {
@@ -1073,7 +1074,7 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
               provenance,
               kvs,
               event,
-              (event_report_fn)cuda_event_report);
+              cuda_event_report);
   }
 
   CUDA_SUCCEED_OR_RETURN

@@ -553,7 +553,8 @@ static struct hip_event* hip_event_new(struct futhark_context* ctx) {
   }
 }
 
-static int hip_event_report(struct str_builder* sb, struct hip_event* e) {
+static int hip_event_report(struct str_builder* sb, void* p) {
+  struct hip_event* e = (struct hip_event*)p;
   float ms;
   hipError_t err;
   if ((err = hipEventElapsedTime(&ms, e->start, e->end)) != hipSuccess) {
@@ -733,7 +734,7 @@ static int gpu_scalar_to_device(struct futhark_context* ctx,
               provenance,
               NULL,
               event,
-              (event_report_fn)hip_event_report);
+              hip_event_report);
     HIP_SUCCEED_FATAL(hipEventRecord(event->start, ctx->stream));
   }
   HIP_SUCCEED_OR_RETURN(hipMemcpyHtoD((unsigned char*)dst + offset, src, size));
@@ -754,7 +755,7 @@ static int gpu_scalar_from_device(struct futhark_context* ctx,
               provenance,
               NULL,
               event,
-              (event_report_fn)hip_event_report);
+              hip_event_report);
     HIP_SUCCEED_FATAL(hipEventRecord(event->start, ctx->stream));
   }
   HIP_SUCCEED_OR_RETURN(hipMemcpyDtoH(dst, (unsigned char*)src + offset, size));
@@ -776,7 +777,7 @@ static int gpu_memcpy(struct futhark_context* ctx,
               provenance,
               NULL,
               event,
-              (event_report_fn)hip_event_report);
+              hip_event_report);
     HIP_SUCCEED_FATAL(hipEventRecord(event->start, ctx->stream));
   }
   HIP_SUCCEED_OR_RETURN(hipMemcpyWithStream((unsigned char*)dst+dst_offset, (unsigned char*)src+src_offset,
@@ -801,7 +802,7 @@ static int memcpy_host2gpu(struct futhark_context* ctx,
                 provenance,
                 NULL,
                 event,
-                (event_report_fn)hip_event_report);
+                hip_event_report);
       HIP_SUCCEED_FATAL(hipEventRecord(event->start, ctx->stream));
     }
     if (sync) {
@@ -835,7 +836,7 @@ static int memcpy_gpu2host(struct futhark_context* ctx,
                 provenance,
                 NULL,
                 event,
-                (event_report_fn)hip_event_report);
+                hip_event_report);
       HIP_SUCCEED_FATAL(hipEventRecord(event->start, ctx->stream));
     }
     if (sync) {
@@ -899,7 +900,7 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
               provenance,
               kvs,
               event,
-              (event_report_fn)hip_event_report);
+              hip_event_report);
   }
 
   HIP_SUCCEED_OR_RETURN

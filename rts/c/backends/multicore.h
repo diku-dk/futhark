@@ -117,7 +117,8 @@ static struct mc_event* mc_event_new(struct futhark_context* ctx) {
   }
 }
 
-static int mc_event_report(struct str_builder* sb, struct mc_event* e) {
+static int mc_event_report(struct str_builder* sb, void* p) {
+  struct mc_event* e = (struct mc_event*)p;
   float ms = e->aft - e->bef;
   str_builder(sb, ",\"duration\":%f", ms);
   free(e);

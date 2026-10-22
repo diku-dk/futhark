@@ -1644,8 +1644,9 @@ void run_server(struct futhark_prog *prog,
 // The aux struct lets us write generic method implementations without
 // code duplication.
 
-int restore_array(const struct array *a, FILE *f,
+int restore_array(const void *aux, FILE *f,
                   struct futhark_context *ctx, void *p) {
+  const struct array *a = (const struct array*)aux;
   void *data = NULL;
   int64_t shape[a->rank];
   if (read_array(f, a->info, &data, shape, a->rank) != 0) {
@@ -1658,8 +1659,9 @@ int restore_array(const struct array *a, FILE *f,
   return err;
 }
 
-void store_array(const struct array *a, FILE *f,
+void store_array(const void *aux, FILE *f,
                  struct futhark_context *ctx, void *p) {
+  const struct array *a = (const struct array*)aux;
   void *arr = *(void**)p;
   const int64_t *shape = a->shape(ctx, arr);
   int64_t size = a->info->size;
@@ -1673,8 +1675,9 @@ void store_array(const struct array *a, FILE *f,
   free(data);
 }
 
-int free_array(const struct array *a,
+int free_array(const void *aux,
                struct futhark_context *ctx, void *p) {
+  const struct array *a = (const struct array*)aux;
   void *arr = *(void**)p;
   return a->free(ctx, arr);
 }
@@ -1689,8 +1692,9 @@ struct opaque_aux {
   opaque_free_fn free;
 };
 
-int restore_opaque(const struct opaque_aux *aux, FILE *f,
+int restore_opaque(const void *aux_p, FILE *f,
                    struct futhark_context *ctx, void *p) {
+  const struct opaque_aux *aux = (const struct opaque_aux*)aux_p;
   // We have a problem: we need to load data from 'f', since the
   // restore function takes a pointer, but we don't know how much we
   // need (and cannot possibly).  So we do something hacky: we read
@@ -1715,8 +1719,9 @@ int restore_opaque(const struct opaque_aux *aux, FILE *f,
   }
 }
 
-void store_opaque(const struct opaque_aux *aux, FILE *f,
+void store_opaque(const void *aux_p, FILE *f,
                   struct futhark_context *ctx, void *p) {
+  const struct opaque_aux *aux = (const struct opaque_aux*)aux_p;
   void *obj = *(void**)p;
   size_t obj_size;
   void *data = NULL;
@@ -1726,8 +1731,9 @@ void store_opaque(const struct opaque_aux *aux, FILE *f,
   free(data);
 }
 
-int free_opaque(const struct opaque_aux *aux,
+int free_opaque(const void *aux_p,
                 struct futhark_context *ctx, void *p) {
+  const struct opaque_aux *aux = (const struct opaque_aux*)aux_p;
   void *obj = *(void**)p;
   return aux->free(ctx, obj);
 }

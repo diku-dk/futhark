@@ -411,7 +411,7 @@ static int write_str_u16(FILE *out, const void *src) {
   return fprintf(out, "%huu16", *(const uint16_t*)src);
 }
 
-static int write_str_i32(FILE *out, const int32_t *src) {
+static int write_str_i32(FILE *out, const void *src) {
   return fprintf(out, "%di32", *(const int32_t*)src);
 }
 
@@ -538,43 +538,43 @@ struct primtype_info_t {
 
 static const struct primtype_info_t i8_info =
   {.binname = "  i8", .type_name = "i8",   .size = 1,
-   .write_str = (writer)write_str_i8, .read_str = (str_reader)read_str_i8};
+   .write_str = write_str_i8, .read_str = read_str_i8};
 static const struct primtype_info_t i16_info =
   {.binname = " i16", .type_name = "i16",  .size = 2,
-   .write_str = (writer)write_str_i16, .read_str = (str_reader)read_str_i16};
+   .write_str = write_str_i16, .read_str = read_str_i16};
 static const struct primtype_info_t i32_info =
   {.binname = " i32", .type_name = "i32",  .size = 4,
-   .write_str = (writer)write_str_i32, .read_str = (str_reader)read_str_i32};
+   .write_str = write_str_i32, .read_str = read_str_i32};
 static const struct primtype_info_t i64_info =
   {.binname = " i64", .type_name = "i64",  .size = 8,
-   .write_str = (writer)write_str_i64, .read_str = (str_reader)read_str_i64};
+   .write_str = write_str_i64, .read_str = read_str_i64};
 static const struct primtype_info_t u8_info =
   {.binname = "  u8", .type_name = "u8",   .size = 1,
-   .write_str = (writer)write_str_u8, .read_str = (str_reader)read_str_u8};
+   .write_str = write_str_u8, .read_str = read_str_u8};
 static const struct primtype_info_t u16_info =
   {.binname = " u16", .type_name = "u16",  .size = 2,
-   .write_str = (writer)write_str_u16, .read_str = (str_reader)read_str_u16};
+   .write_str = write_str_u16, .read_str = read_str_u16};
 static const struct primtype_info_t u32_info =
   {.binname = " u32", .type_name = "u32",  .size = 4,
-   .write_str = (writer)write_str_u32, .read_str = (str_reader)read_str_u32};
+   .write_str = write_str_u32, .read_str = read_str_u32};
 static const struct primtype_info_t u64_info =
   {.binname = " u64", .type_name = "u64",  .size = 8,
-   .write_str = (writer)write_str_u64, .read_str = (str_reader)read_str_u64};
+   .write_str = write_str_u64, .read_str = read_str_u64};
 static const struct primtype_info_t f16_info =
   {.binname = " f16", .type_name = "f16",  .size = 2,
-   .write_str = (writer)write_str_f16, .read_str = (str_reader)read_str_f16};
+   .write_str = write_str_f16, .read_str = read_str_f16};
 static const struct primtype_info_t f32_info =
   {.binname = " f32", .type_name = "f32",  .size = 4,
-   .write_str = (writer)write_str_f32, .read_str = (str_reader)read_str_f32};
+   .write_str = write_str_f32, .read_str = read_str_f32};
 static const struct primtype_info_t f64_info =
   {.binname = " f64", .type_name = "f64",  .size = 8,
-   .write_str = (writer)write_str_f64, .read_str = (str_reader)read_str_f64};
+   .write_str = write_str_f64, .read_str = read_str_f64};
 static const struct primtype_info_t bool_info =
   {.binname = "bool", .type_name = "bool", .size = 1,
-   .write_str = (writer)write_str_bool, .read_str = (str_reader)read_str_bool};
+   .write_str = write_str_bool, .read_str = read_str_bool};
 static const struct primtype_info_t unit_info =
   {.binname = "bool", .type_name = "unit",   .size = 1,
-   .write_str = (writer)write_str_unit, .read_str = (str_reader)read_str_unit};
+   .write_str = write_str_unit, .read_str = read_str_unit};
 
 static const struct primtype_info_t* primtypes[] = {
   &i8_info, &i16_info, &i32_info, &i64_info,
@@ -706,7 +706,7 @@ static int read_bin_array(FILE *f,
 
 static int read_array(FILE *f, const struct primtype_info_t *expected_type, void **data, int64_t *shape, int64_t dims) {
   if (!read_is_binary(f)) {
-    return read_str_array(f, expected_type->size, (str_reader)expected_type->read_str, expected_type->type_name, data, shape, dims);
+    return read_str_array(f, expected_type->size, expected_type->read_str, expected_type->type_name, data, shape, dims);
   } else {
     return read_bin_array(f, expected_type, data, shape, dims);
   }
