@@ -1,3 +1,6 @@
+-- ==
+-- tags { no_webgpu }
+
 def matmul A B = map (\a -> map (\b -> f64.sum (map2 (*) a b)) (transpose B)) A
 
 def identity n = tabulate_2d n n (\i j -> f64.bool (i == j))

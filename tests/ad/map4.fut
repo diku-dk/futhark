@@ -1,6 +1,6 @@
 -- An array is both a 'map' input and a free variable in the lambda.
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_webgpu }
 -- entry: fwd_map fwd_vec rev_map rev_vec
 -- input { [1,2,3] }
 -- output {

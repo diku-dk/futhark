@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_webgpu }
 -- random input { [20000]f32 } error: Index \[-1\]
 
 def main [n] (xs: [n]f32) =

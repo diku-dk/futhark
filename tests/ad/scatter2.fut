@@ -3,7 +3,7 @@
 -- zero adjoint because diffUpdateAcc did not propagate the accumulator adjoint
 -- (with overwritten positions zeroed) to the input accumulator.
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_webgpu }
 -- input { [1.0] }
 -- output { [1.0] }
 

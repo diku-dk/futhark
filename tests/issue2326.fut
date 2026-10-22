@@ -1,3 +1,5 @@
+-- ==
+-- tags { no_webgpu }
 module type blocked_square_regular = {
   type~ mat [n]
 

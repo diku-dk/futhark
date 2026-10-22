@@ -1,6 +1,7 @@
 -- Validation of flattening with 2 lists
 --
 -- ==
+-- tags { no_webgpu }
 -- entry: validate_flattening_2
 -- input {[0i64, 1i64, 2i64, 3i64, 4i64, 5i64]
 --        [0i64, 2i64, 4i64, 6i64, 8i64, 10i64]

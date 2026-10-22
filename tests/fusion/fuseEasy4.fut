@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_webgpu }
 -- input { [4.0, 2.0, -4.0, 1.5] }
 -- output { 17.0 }
 

@@ -1,6 +1,6 @@
 -- See issue 1989.
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_webgpu }
 -- structure { UpdateAcc 3 }
 
 def gather1D 't [m] (arr1D: [m]t) (inds: [m]i32) : *[m]t =

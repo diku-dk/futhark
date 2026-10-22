@@ -1,5 +1,6 @@
 -- A case of tiling with a complex dependency.
 -- ==
+-- tags { no_webgpu }
 -- compiled random input { [100]i32 } auto output
 -- structure gpu { SegMap/Loop/SegMap 2 }
 

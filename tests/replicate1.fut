@@ -1,6 +1,7 @@
 -- Simple test to see whether we can properly replicate arrays.  This
 -- one sums the resulting array, to check very large ones.
 -- ==
+-- tags { no_webgpu }
 -- input { 20i64 } output { 3810 }
 -- compiled no_python no_wasm input { 2000i64 } output { -296967286i32 }
 -- structure gpu { Replicate 1 }

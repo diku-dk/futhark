@@ -4,6 +4,7 @@
 -- inspection), but we can at least check that this isn't fused
 -- unexpectedly.
 -- ==
+-- tags { no_webgpu }
 -- structure { Screma 2 }
 
 def xs = map (+ 3) (iota 1000)

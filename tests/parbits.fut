@@ -2,6 +2,7 @@
 -- assumed that the tests in primitive/ validate the sequential
 -- reference results.
 -- ==
+-- tags { no_webgpu }
 -- compiled random input { [100]u8 [100]u16 [100]u32 [100]u64 } auto output
 
 def main (u8s: []u8) (u16s: []u16) (u32s: []u32) (u64s: []u64) =

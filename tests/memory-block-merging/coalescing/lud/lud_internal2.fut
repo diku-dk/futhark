@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_webgpu }
 -- structure gpu-mem { Alloc 9 }
 -- structure seq-mem { Alloc 1 }
 

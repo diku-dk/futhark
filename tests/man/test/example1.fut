@@ -1,6 +1,6 @@
 -- Test simple indexing of an array.
 -- ==
--- tags { firsttag secondtag }
+-- tags { firsttag secondtag no_webgpu }
 -- input { [4,3,2,1] 1i64 }
 -- output { 3 }
 -- input { [4,3,2,1] 5i64 }

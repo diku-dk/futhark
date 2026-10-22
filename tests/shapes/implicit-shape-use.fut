@@ -2,6 +2,7 @@
 -- that were at one point problematic.
 --
 -- ==
+-- tags { no_webgpu }
 -- input {
 --   3i64
 --   [[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1]]

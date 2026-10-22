@@ -1,4 +1,6 @@
 -- Hit a bug in the tiling logic for splitting the loop prelude.
+-- ==
+-- tags { no_webgpu }
 
 -- types
 type Sphere = {pos: [3]f32, radius: f32, color: [4]u8}

@@ -1,6 +1,6 @@
 -- Array-valued scan from #2208. Each derivative is a suffix sum of adj.
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_webgpu }
 -- entry: scan_arr_add
 -- input { [[1f32, 2, 3], [4f32, 5, 6]]
 --         [[1f32, 2, 4], [3f32, 5, 7]] }

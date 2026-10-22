@@ -1,6 +1,6 @@
 -- Multiplication
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_webgpu }
 --  entry: rev_map rev_vec
 --  input {
 --    [4i64,5i64,2i64,4i64,5i64,2i64,0i64,0i64,4i64,5i64,1i64,4i64,1i64,3i64,3i64,1i64,8i64,-1i64]

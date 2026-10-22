@@ -2,6 +2,7 @@
 --
 -- This is intended to avoid shape slices.
 -- ==
+-- tags { no_webgpu }
 -- input {
 --   [[1,2,3],
 --    [4,5,6],

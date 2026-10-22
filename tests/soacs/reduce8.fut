@@ -1,5 +1,6 @@
 -- #1800
 -- ==
+-- tags { no_webgpu }
 -- input { 100i64 } auto output
 -- compiled input { 100000i64 } auto output
 

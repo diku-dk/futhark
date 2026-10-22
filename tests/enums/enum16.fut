@@ -1,5 +1,6 @@
 -- Enum in-place updates.
 -- ==
+-- tags { no_webgpu }
 -- input { }
 -- output { [2, 2, 1, 1] }
 

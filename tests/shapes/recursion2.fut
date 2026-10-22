@@ -1,6 +1,7 @@
 -- A recursive function without a declared return type may return a different
 -- size from each call, also when one occurrence is called repeatedly.
 -- ==
+-- tags { no_webgpu }
 -- input { [3, 1, 4, 1, 5, 9, 2, 6] } output { [1, 3] }
 
 def h [n] (xs: [n]i32) =

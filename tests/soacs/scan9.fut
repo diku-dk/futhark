@@ -1,5 +1,6 @@
 -- Scan with array operator and not interchangeable.
 -- ==
+-- tags { no_webgpu }
 -- entry: scan_arr
 -- random input { 100i64 100i64 [10000]i32 } auto output
 -- random compiled input { 1000i64 1000i64 [1000000]i32 } auto output

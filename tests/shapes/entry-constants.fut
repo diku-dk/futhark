@@ -1,5 +1,6 @@
 -- Dimension declarations on entry points can refer to constants.
 -- ==
+-- tags { no_webgpu }
 -- input { [1i64,2i64,3i64] } output { [0i64,1i64] }
 -- compiled input { [1i64,2i64] } error: invalid|match
 -- compiled input { [1i64,3i64,2i64] } error: invalid|match

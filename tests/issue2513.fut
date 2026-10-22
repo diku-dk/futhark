@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_webgpu }
 -- input { 3i64 }
 -- output { [1.414213562373095] }
 

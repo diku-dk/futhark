@@ -1,5 +1,7 @@
 -- Date computations.  Some complex scalar expressions and a branch.
 -- Once messed up the simplifier.
+-- ==
+-- tags { no_webgpu }
 
 def mod (x: i32, y: i32) : i32 = x - (x / y) * y
 

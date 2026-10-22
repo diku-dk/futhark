@@ -1,7 +1,7 @@
 -- Using a tuning parameter inside a parallel section, where the default value
 -- is variant.
 -- ==
--- tags { no_ispc }
+-- tags { no_ispc no_webgpu }
 -- compiled no_wasm input { [5i64] }
 -- output { [3i64] }
 

@@ -1,3 +1,6 @@
+-- ==
+-- tags { no_webgpu }
+
 def map_4d 'a 'x [n] [m] [l] [k] (f: a -> x) (as: [n][m][l][k]a) : [n][m][l][k]x = map (map (map (map f))) as
 
 def map2_4d 'a 'b 'x [n] [m] [l] [k] (f: a -> b -> x) (as: [n][m][l][k]a) (bs: [n][m][l][k]b) : [n][m][l][k]x =

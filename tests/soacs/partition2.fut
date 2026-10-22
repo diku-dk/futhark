@@ -1,5 +1,6 @@
 -- Slightly more complicated test involving arrays of tuples.
 -- ==
+-- tags { no_webgpu }
 -- input {
 --   [2,7,1,2,8,9,1,5,0,2]
 --   [6,1,0,9,8,7,9,4,2,1]

@@ -1,6 +1,6 @@
 -- Some tests to try out very large/sparse 2D histograms.
 -- ==
--- tags { no_python no_wasm }
+-- tags { no_python no_wasm no_webgpu }
 -- compiled input { 100i64      100i64 1000000i64 } auto output
 -- compiled input { 1000i64    1000i64 1000000i64 } auto output
 

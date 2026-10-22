@@ -1,3 +1,5 @@
+-- ==
+-- tags { no_webgpu }
 def max (x: i32, y: i32) : i32 =
   if x > y then x else y
 

@@ -1,5 +1,6 @@
 -- Intragroup relaxation.
 -- ==
+-- tags { no_webgpu }
 -- compiled no_python random input { 100 [100][256]f32 } auto output
 -- structure gpu { /SegMap 1 /SegMap/Loop/SegMap 1 }
 

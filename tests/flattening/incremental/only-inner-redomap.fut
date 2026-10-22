@@ -2,6 +2,7 @@
 -- map and a reduce; otherwise the map that comes out of the factoring is
 -- multi-versioned, despite only_inner.
 -- ==
+-- tags { no_webgpu }
 -- input { [[1i64, 2i64], [3i64, 4i64]] [5i64, 6i64] }
 -- auto output
 -- structure gpu { If 0 }
