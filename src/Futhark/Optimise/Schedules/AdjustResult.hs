@@ -51,8 +51,8 @@ manifestResult ::
 manifestResult env sched pat_orig
   | [patel_orig] <- patElems pat_orig,
     (nm_orig, tp_orig) <- (patElemName patel_orig, patElemDec patel_orig),
-    iota_inv <- M.fromList $ map (\(nm,(w,pe)) -> (pe, (nm,w))) $ M.toList $ iotas env,
-    (iot_nms, iot_ws) <- unzip $ mapMaybe (`M.lookup` iota_inv) (dimlens sched),
+    iota_inv <- M.fromList $ map (\(nm,(w,pe,sop)) -> (pe, (nm,w,sop))) $ M.toList $ iotas env,
+    (iot_nms, iot_ws, _) <- unzip3 $ mapMaybe (`M.lookup` iota_inv) (map fst $ dimlens sched),
     length iot_nms == length (dimlens sched) = do
   let tp_i64 = Prim $ IntType Int64
   ind_pars <- mapM (\ _ -> newParam "i" tp_i64) $ iot_nms
@@ -61,13 +61,13 @@ manifestResult env sched pat_orig
         foldl ff ([], pe0, pe0, -1) $
           filter ((/= pe0) . fst . snd . snd) $
             zip (map paramName ind_pars) $
-              zip (dimlens sched) $
-                zip (strides sched) (origids sched)
+              zip (map fst $ dimlens sched) $
+                zip (map fst $ strides sched) (origids sched)
       updt_inds = fst_ind : updt_inds0
   -- 2. make the init statement: currently only scratch is implemented!
   let iot_tps = map (\ w -> arrayOfShape tp_i64 (Shape [w])) iot_ws
       iot_pars= zipWith (Param mempty) iot_nms iot_tps 
-      tup4s_orig = zip (strides sched) $ zip3 ind_pars iot_pars iot_ws -- dimlens sched
+      tup4s_orig = zip (map fst $ strides sched) $ zip3 ind_pars iot_pars iot_ws -- dimlens sched
       tup4s_schd = map (\i -> tup4s_orig !! i) $ invPerm $ sigma sched
       (_, tup3s) = unzip $ filter (\(stride,_) -> not (stride == pe0)) tup4s_schd
   -- ^ tup3s contains triplets (i_param, iota_nm, size_pexp) in the permuted order

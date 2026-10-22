@@ -9,30 +9,32 @@ module Futhark.Optimise.Schedules
   ( applySchedules ) where
 
 --import Control.Monad
-import Control.Monad.Reader
-import Control.Monad.State hiding (state)
+--import Control.Monad.Reader
+--import Control.Monad.State hiding (state)
 import Control.Monad (forM)
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Sequence qualified as Sq
 import Data.Maybe
-import Futhark.Builder
+--import Futhark.Builder
 import Futhark.IR.SOACS
 -- import Futhark.Optimise.TileLoops.Shared
 import Futhark.Pass
-import Futhark.Tools
+--import Futhark.Tools
 --import Futhark.Transform.Rename
 --import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Mem.LMAD qualified as LMAD
+import Futhark.Optimise.Schedules.ScheduleM
+  (ScheduleEnv(..), ScheduleM, runScheduleM)
 import Futhark.Optimise.Schedules.EnvUtils
-  (TopEnv (..), freshTopEnv, addTileBinding, addIota2Env, peFromSe)
+  (TopEnv (..), freshTopEnv, updateTopdownEnv)
 import Futhark.Optimise.Schedules.SchedUtils
   ( BotEnv(..), freshBotEnv, parseSchedule, oneFullyConsumedMapRed )
 import Futhark.Optimise.Schedules.Safety(checkValidSched)
 import Futhark.Optimise.Schedules.Stripmine(applyStripmining)
 import Futhark.Optimise.Schedules.Permute(applyPermute)
 import Futhark.Optimise.Schedules.AdjustResult(manifestResult)
-import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..))
+--import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..))
 import Debug.Trace
 
 
@@ -40,6 +42,7 @@ import Debug.Trace
 --- SoP
 ----------------------------------------
 
+{--
 data ScheduleEnv = ScheduleEnv
   { vNameSource :: VNameSource,
     algEnv :: AlgEnv VName (PrimExp VName)
@@ -70,6 +73,7 @@ runScheduleM scope env (ScheduleM a) = modifyNameSource $ \src ->
   let state = runReaderT a scope
       (x, newEnv) = runState state (env {vNameSource = src})
    in (x, vNameSource newEnv)
+--}
 
 ----------------------------------------
 --- Environments
@@ -147,51 +151,6 @@ applySchedOnLambda env lam = do
   bdy <- localScope (scope <> scopeOf lam) $
            applySchedOnBody env $ lambdaBody lam
   pure $ lam { lambdaBody = bdy }
-
--- | The top-down pass records the scalar expansion, iotas,
---     tiling calls and the like.
---   ToDos:
---     1. maybe record also the change-of-layout transformations
---        into an LMAD, i.e., in the @arrTransf@ filed of @TopEnv@
-updateTopdownEnv :: TopEnv -> Stm SOACS -> TopEnv
-updateTopdownEnv env (Let pat _aux (Apply fnm arg_diets _ _))
-  | any (`L.isPrefixOf` (nameToString fnm)) tileFuns,
-    [(size_se, _)] <- arg_diets,
-    ptp:_ <- map (elemType . patElemDec)  $ patElems pat =
-  addTileBinding env (peFromSe env ptp size_se) $
-    map patElemName $ patElems pat
-  where
-    tileFuns = ["strip1", "strip2"]
-updateTopdownEnv env (Let (Pat [PatElem pat_nm pat_tp]) _aux e)
-  | BasicOp (Iota w start stride Int64) <- e,
-    start == se0 && stride == se1,
-    pe_w <- peFromSe env i64ptp w =
-    addIota2Env env (pat_nm, w, pe_w)
-  | BasicOp (BinOp bop s1 s2) <- e,
-    Prim ptp <- pat_tp,
-    (p1, p2) <- (peFromSe env ptp s1, peFromSe env ptp s2) =
-    env { scalars = M.insert pat_nm (BinOpExp bop p1 p2) (scalars env) }
-  | BasicOp (UnOp unop se) <- e,
-    Prim ptp <- pat_tp,
-    pe <- peFromSe env ptp se =
-    env { scalars = M.insert pat_nm (UnOpExp unop pe) (scalars env) }
-  | BasicOp (ArrayLit arg_ses (Prim ptp)) <- e =
-    env { arrayLits = M.insert pat_nm (map (peFromSe env ptp) arg_ses) (arrayLits env) }
-  | BasicOp (Scratch _ptp [se]) <- e,
-    se == se0 =
-    env { arrayLits = M.insert pat_nm [] (arrayLits env) }
-  | BasicOp (Replicate shp se) <- e,
-    [d] <- shapeDims shp,
-    Constant (IntValue (Int64Value n)) <- d =
-    let pe_se = peFromSe env (elemType pat_tp) se
-        arr_pe_se = replicate (fromIntegral n) pe_se
-    in  env { arrayLits = M.insert pat_nm arr_pe_se (arrayLits env) }
-  | otherwise = env
-  where
-    se0 = Constant $ IntValue $ Int64Value 0
-    se1 = Constant $ IntValue $ Int64Value 1
-    i64ptp = IntType Int64
-updateTopdownEnv env _ = env
 
 ----------------------------------------
 --- CORE FUNCTION is applySchedOnStm ---

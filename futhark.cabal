@@ -326,6 +326,7 @@ library
       Futhark.Optimise.DoubleBuffer
       Futhark.Optimise.EntryPointMem
       Futhark.Optimise.Schedules
+      Futhark.Optimise.Schedules.ScheduleM
       Futhark.Optimise.Schedules.EnvUtils
       Futhark.Optimise.Schedules.SchedUtils
       Futhark.Optimise.Schedules.Safety

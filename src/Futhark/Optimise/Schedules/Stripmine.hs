@@ -20,10 +20,11 @@ import Futhark.IR.SOACS.Simplify (simplifyLambda)
 import Futhark.Optimise.Fusion(fuseInLambda)
 import Futhark.Optimise.Schedules.EnvUtils
   ( TopEnv(..), invPerm, eqPEs, addPes, mulPes, minPes,
-    peFromSe, expandSE, addBinOp2Env, addTransf2Env, addIota2Env )
+    peFromSe, updateTopdownEnv, addIota2Env )
 import Futhark.Optimise.Schedules.SchedUtils
   ( HLSched(..), ParMode(..), splitAtSched, parMode, oneFullyConsumedMapRed )
 import Futhark.Analysis.PrimExp.Convert
+import Futhark.SoP.SoP
 
 -- import Debug.Trace
 
@@ -68,17 +69,17 @@ applyStripmining _ _ _ =
 -- | Core Utility function that stripmines a Map
 stripmineMap :: (LocalScope SOACS m, MonadFreshNames m) =>
     (Int, [(VName,Type)], SubExp) ->
-    TopEnv -> [PrimExp VName] ->
+    TopEnv -> [(PrimExp VName, SoP VName)] ->
     PrimExp VName -> Lambda SOACS ->
     m (Stms SOACS, TopEnv, SOAC SOACS)
 stripmineMap (k, inp_nm_tps, mm) env (n:ns) cur_ind lam = do
   i_p <- newParam ("i"++show k) $ Prim i64ptp
   let i_pe = LeafExp (paramName i_p) i64ptp
-      i_mul_ns = mulPes i_pe $ foldl mulPes pe1 ns
+      i_mul_ns = mulPes i_pe $ foldl mulPes pe1 $ map fst ns
       cur_ind' = addPes cur_ind i_mul_ns
   -- build the iota for this screma
   scope <- askScope
-  iota_info <- mkIota env k n
+  iota_info <- mkIota env k (fst n)
   if null ns
   then baseCase scope i_p cur_ind' iota_info
   else recuCase scope i_p cur_ind' iota_info
@@ -86,7 +87,7 @@ stripmineMap (k, inp_nm_tps, mm) env (n:ns) cur_ind lam = do
     baseCase scope i_p cur_ind' ((w,iotnm), prologue_stms) = do
       new_lam <-
         runLambdaBuilder [i_p] $ localScope scope $ do
-          let i_flat_pe = minPes cur_ind' $ BinOpExp (Sub Int64 OverflowWrap) (peFromSe env i64ptp mm) pe1
+          let i_flat_pe = minPes cur_ind' $ BinOpExp (Sub Int64 OverflowWrap) (fst $ peFromSe env i64ptp mm) pe1
           i_flat <- letSubExp ("i"++show k++"flat") =<< toExp i_flat_pe
           forM_ (zip (lambdaParams lam) inp_nm_tps) $ \ (lp, (inp_nm, inp_tp)) -> do
             let index_e = mkArrIndexingExp env inp_nm inp_tp i_flat
@@ -120,18 +121,18 @@ stripmineMap _ _ [] _ _ =
 --   are absolete and should be removed!!!
 stripmineRedoMap :: (LocalScope SOACS m, MonadFreshNames m) =>
     (Int, [(VName,Type)], SubExp) ->
-    TopEnv -> [(Int,PrimExp VName)] ->
+    TopEnv -> [(Int,(PrimExp VName, SoP VName))] ->
     PrimExp VName -> ScremaForm SOACS ->
     m (Stms SOACS, TopEnv, SOAC SOACS)
 stripmineRedoMap (k, inp_nm_tps, mm) env ((s,n):ns) cur_ind form@(ScremaForm lam [] reds)
   | null reds || isJust (oneFullyConsumedMapRed form) = do
   i_p <- newParam ("i"++show k) $ Prim i64ptp
   let i_pe = LeafExp (paramName i_p) i64ptp
-      i_mul_ns = mulPes i_pe $ foldl mulPes pe1 $ map snd ns
+      i_mul_ns = mulPes i_pe $ foldl mulPes pe1 $ map (fst . snd) ns
       cur_ind' = addPes cur_ind i_mul_ns
   -- build the iota for this screma
   scope <- askScope
-  iota_info <- mkIota env k n
+  iota_info <- mkIota env k (fst n)
   if null ns
   then baseCase scope i_p cur_ind' iota_info
   else recuCase scope i_p cur_ind' iota_info
@@ -141,7 +142,7 @@ stripmineRedoMap (k, inp_nm_tps, mm) env ((s,n):ns) cur_ind form@(ScremaForm lam
         runLambdaBuilder [i_p] $ localScope scope $ do
           let i_flat_pe = 
                if null reds
-               then minPes cur_ind' $ BinOpExp (Sub Int64 OverflowWrap) (peFromSe env i64ptp mm) pe1
+               then minPes cur_ind' $ BinOpExp (Sub Int64 OverflowWrap) (fst $ peFromSe env i64ptp mm) pe1
                else cur_ind'
           i_flat <- letSubExp ("i"++show k++"flat") =<< toExp i_flat_pe
           forM_ (zip (lambdaParams lam) inp_nm_tps) $ \ (lp, (inp_nm, inp_tp)) -> do
@@ -272,7 +273,8 @@ stripmineStmt k env sched (Let pat aux (Loop fpar_inis (ForLoop liter inttp lcou
       fpars' <- forM fpars $ \ fpar -> do
         let base_par_str = baseString $ paramName fpar
         newParam (base_par_str++show (0::Int)) (paramDec fpar)
-      (prol, env2, stm) <- recStripLoop dim_lens env1 dim_lens body1 (pat,fpars',inis) pe0
+      let dim_len_pes = map fst dim_lens
+      (prol, env2, stm) <- recStripLoop dim_len_pes env1 dim_len_pes body1 (pat,fpars',inis) pe0
       pure (prol <> prologue_lam, env2, Sq.singleton stm)
     -- recStripLoop :: [PrimExp VName] -> Env -> [PrimExp VName] -> Body SOACS -> ()
     -- Core Function for Stripmining a Normalized DO Loop
@@ -382,13 +384,16 @@ stripmineStmt k env sched stm@(Let pat aux
 
     --
     -- Core Function for Stripmining a Red o Map: Base Case
+    recStripRedomap :: (LocalScope SOACS m, MonadFreshNames m) =>
+        TopEnv -> [(Int, (PrimExp VName, SoP VName))] -> Lambda SOACS ->
+        ([VName], [SubExp]) -> PrimExp VName -> m (Stms SOACS, TopEnv, Stms SOACS)
     recStripRedomap env1 [] map_lam1 (_, acc_inis) cur_ind = do
       let (red_acc, red_els) = splitAt (length (lambdaReturnType red_lam)) $ lambdaParams red_lam
       scope <- askScope
       inp_tps <- mapM lookupType inp_nms
       loop_body <-
         runBodyBuilder $ localScope (scope <> scopeOfLParams red_acc) $ do
-          -- let i_flat_pe = minPes cur_ind' $ BinOpExp (Sub Int64 OverflowWrap) (peFromSe env i64ptp mm) pe1 
+          -- let i_flat_pe = minPes cur_ind' $ BinOpExp (Sub Int64 OverflowWrap) (fst $ peFromSe env i64ptp mm) pe1 
           i_flat <- letSubExp ("i"++show k++"flat") =<< toExp cur_ind
           forM_ (zip3 inp_nms inp_tps (lambdaParams map_lam1)) $ \ (arr, tp, arg) ->
             -- codegen of map's lambda arguments
@@ -396,7 +401,7 @@ stripmineStmt k env sched stm@(Let pat aux
                 mkArrIndexingExp env arr tp i_flat
           addStms $ bodyStms $ lambdaBody map_lam1
           -- pure $ bodyResult $ lambdaBody map_lam1
-          -- THIS CODE IS TOO MUCH! MAYBE NEEDED FOR A LOOP TRANSLATION AT SOME POINT ...
+          -- THIS CODE IS TOO MUCH! MAYBE NEEDED FOR A LOOP TRANSLATION AT SOME POINT...
           forM_ (zip red_els $ bodyResult $ lambdaBody map_lam1) $ \ (rlam_p, map_res) ->
             -- codegen of copy stamts connecting the map's lambda res with reduce's inp
             letBind (Pat [PatElem (paramName rlam_p) (paramDec rlam_p)]) $
@@ -413,7 +418,7 @@ stripmineStmt k env sched stm@(Let pat aux
       scope <- askScope
       i_p <- newParam ("i"++show k) $ Prim i64ptp
       pat_nms' <- forM (patElems pat) $ \_ -> newVName ("stripRedpat"++show k) 
-      let cur_ind' = addPes cur_ind $ mulPes (LeafExp (paramName i_p) i64ptp) $ foldl mulPes pe1 $ map snd schd'
+      let cur_ind' = addPes cur_ind $ mulPes (LeafExp (paramName i_p) i64ptp) $ foldl mulPes pe1 $ map (fst . snd) schd'
           num_vars = length $ lambdaReturnType red_lam
       -- the innermost level uses the two halves of reduce's lambda args as loop accumulator and
       --   array elements, respectively && also uses the vars of reduce's lambda result as result.
@@ -431,7 +436,7 @@ stripmineStmt k env sched stm@(Let pat aux
       case parMode sig of
         -- The case of a mapaccum subdimension, i.e., generating a map:
         Macc -> do
-          ((w,iotnm), new_prologue) <- mkIota env1 k dlen
+          ((w,iotnm), new_prologue) <- mkIota env1 k (fst dlen)
           new_lam <-
             runLambdaBuilder [i_p] $ localScope (scope <> scopeOfLParams red_acc') $ do
               addStms rec_stms; pure rec_res'
@@ -441,7 +446,7 @@ stripmineStmt k env sched stm@(Let pat aux
           pure (new_prologue <> rec_prologue, addIota2Env rec_env (iotnm, w, dlen), Sq.singleton map_stm)
         -- The case of a parallel dimension, i.e., generating a redomap
         _otherwise -> do
-          ((w,iotnm), new_prologue) <- mkIota env1 k dlen
+          ((w,iotnm), new_prologue) <- mkIota env1 k (fst dlen)
           new_lam <-
             runLambdaBuilder [i_p] $ localScope (scope <> scopeOfLParams red_acc') $ do
               addStms rec_stms; pure rec_res'
@@ -463,7 +468,11 @@ stripmineStmt k env sched stm@(Let pat aux
 --------------------------------------------------------------------------
 --- Stripmining Other Statements
 --------------------------------------------------------------------------
-stripmineStmt _k env _sched stm@(Let pat _aux e) = do
+stripmineStmt _k env _sched stm =
+  pure (mempty, updateTopdownEnv env stm, Sq.singleton stm)
+
+{--
+stripmineStmt _k env _sched stm@(Let pat _aux e) = do 
   let env' =
        case (patElems pat, e) of
         -- handling transpositions:
@@ -474,6 +483,7 @@ stripmineStmt _k env _sched stm@(Let pat _aux e) = do
           addBinOp2Env env (patElemName p_el,(patElemDec p_el)) binop e1 e2
         _ -> env
   pure $ (mempty, env', Sq.singleton stm)
+--}
 
 --------------------------------------------------------------------------
 --- Helpers
@@ -481,13 +491,13 @@ stripmineStmt _k env _sched stm@(Let pat _aux e) = do
 
 exactTiling :: TopEnv -> SubExp -> [PrimExp VName] -> Bool
 exactTiling env m dims =
-  eqPEs (expandSE env m i64ptp) (foldl mulPes pe1 dims)
+  eqPEs (fst $ peFromSe env i64ptp m) (foldl mulPes pe1 dims)
 
 validStripForDim :: TopEnv -> Int -> SubExp -> HLSched -> Maybe (HLSched, HLSched)
 validStripForDim env k m sched
   | q <- countSame $ origids sched,
     (sched', sched'') <- splitAtSched q sched,
-    validSize (dimlens sched') =
+    validSize $ map fst (dimlens sched') =
   Just (sched', sched'')
   where
     countSame [] = 0
@@ -496,16 +506,16 @@ validStripForDim env k m sched
       then 1 + countSame ctarr
       else 0
     validSize dims
-      | m_pe <- peFromSe env i64ptp m,
-        Just nms <- M.lookup m_pe (appTilesFwd env),
+      | (m_pe, _) <- peFromSe env i64ptp m,
+        Just (_, nms) <- M.lookup m_pe (appTilesFwd env),
         penms <- S.fromList $ map (`LeafExp` i64ptp) $ namesToList nms,
         length dims == S.size penms,
         penms == S.fromList dims = True
     validSize dims =
-      if eqPEs (expandSE env m i64ptp) (foldl mulPes pe1 dims)
+      if eqPEs (fst $ peFromSe env i64ptp m) (foldl mulPes pe1 dims)
       then True
       else error ( "\n\n\nvalidSize FAILS! expanded size: " ++
-                   prettyString (expandSE env m i64ptp) ++
+                   prettyString (fst $ peFromSe env i64ptp m) ++
                    " dims: " ++
                    prettyString (foldl mulPes pe1 dims) ++
                    "env-sizes: " ++ show (scalars env) ++
@@ -561,7 +571,7 @@ mkArrIndexingExp _ inp_nm inp_tp i_flat =
 mkIota :: (HasScope SOACS m, MonadFreshNames m) =>
     TopEnv -> Int -> PrimExp VName -> m ((SubExp, VName), Stms SOACS)
 mkIota env k n
-  | Just (iotnm, w) <- M.lookup n (inv_iotas env) =
+  | Just (iotnm, w, _) <- M.lookup n (inv_iotas env) =
     pure ((w, iotnm), Sq.empty)
   | otherwise = do
   scope <- askScope

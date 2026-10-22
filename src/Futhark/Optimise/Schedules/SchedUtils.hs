@@ -32,6 +32,7 @@ import Futhark.Tools
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Util.Pretty hiding (line, sep, (</>))
 import Futhark.Optimise.Schedules.EnvUtils( TopEnv(..), mulPes, peFromSe )
+import Futhark.SoP.SoP
 
 --import Debug.Trace
 
@@ -51,12 +52,12 @@ instance Pretty AdjustRes where
   pretty SubstituteRes = "Substitute Result"
 
 data HLSched = HLS
-  { dimlens :: [PrimExp VName]
+  { dimlens :: [(PrimExp VName, SoP VName)]
   , origids :: [Int]
   , sigma   :: [Int]
-  , strides :: [PrimExp VName]
+  , strides :: [(PrimExp VName, SoP VName)]
   , signals :: [Int]
-  , virthds :: [PrimExp VName]
+  , virthds :: [(PrimExp VName, SoP VName)]
   , whatres :: AdjustRes
 --  , permres :: [Int]
 --  , padinner:: [PrimExp VName]
@@ -116,18 +117,20 @@ parMode signal =
 --    3 -> Flip
     _ -> error "Impossible case reached!"
 
-mkRegIndStrides :: HLSched -> [PrimExp VName]
+mkRegIndStrides :: HLSched -> [(PrimExp VName, SoP VName)]
 mkRegIndStrides sched =
   let modes = map parMode $ signals sched
-      mul_carries = scanl f pe1 $ zip modes (dimlens sched)
-      strides = reverse $ scanl mulPes pe1 $ reverse (dimlens sched)
+      pe_sop_one = (pe1, int2SoP 1)
+      mul_carries = scanl f pe_sop_one $ zip modes (dimlens sched)
+      strides = reverse $ scanl mulPeSops pe_sop_one $ reverse (dimlens sched)
   in  map g $ zip3 modes mul_carries strides
   where
+    mulPeSops (p1, s1) (p2, s2) = (mulPes p1 p2, s1 .*. s2) 
     pe1 = ValueExp $ IntValue $ Int64Value 1
-    f carry (Flip, n) = mulPes n carry
+    f carry (Flip, n) = mulPeSops n carry
     f carry _ = carry
     g (Flip, carry, _) = carry
-    g (_, carry, strd) = mulPes strd carry
+    g (_, carry, strd) = mulPeSops strd carry
 
 -------------------------------
 ---   Parsing the Schedule  ---
@@ -151,7 +154,7 @@ parseSchedule _fnm td_env args pat
 --              , padinner= getPrimExpLit pad
 --              , fuselevs= getIntegerLit fus
               }
-      shp_pes = map (isInt64 . peFromSe td_env (IntType Int64)) $ shapeDims shp 
+      shp_pes = map (isInt64 . fst . peFromSe td_env (IntType Int64)) $ shapeDims shp 
       lmad = LMAD.iotaStrided (isInt64 pe0) (isInt64 pe1) shp_pes
   in  (getVName arr, pat_el, sched, lmad)
   where
@@ -164,10 +167,10 @@ parseSchedule _fnm td_env args pat
     getPrimExpLit (Constant _) =
       error ("The result of an array literal cannot be a constant")
     getPrimExpLit (Var nm)
-      | Just pes <- M.lookup nm (arrayLits td_env) = pes
+      | Just pe_sops <- M.lookup nm (arrayLits td_env) = pe_sops
       | otherwise = error ("something went wrong with tracking literals of " ++ prettyString nm)
     getIntegerLit nm =
-      map toInt $ getPrimExpLit nm
+      map (toInt . fst) $ getPrimExpLit nm
     --
     getAdjustRes (Var _) = error "Illegal var name denoting AdjustResult"
     getAdjustRes (Constant pval)
@@ -194,7 +197,7 @@ nullSched sched =
   null (dimlens sched) || null (strides sched) ||
   null (origids sched) || null (signals sched) || null (sigma sched)
 
-headOfSched :: HLSched -> (PrimExp VName, PrimExp VName, Int, Int, Int)
+headOfSched :: HLSched -> ((PrimExp VName, SoP VName), (PrimExp VName, SoP VName), Int, Int, Int)
 headOfSched sched
   | nullSched sched =
     error ("Illegal Schedule passed as argument to headOfSched: "++prettyString sched)
@@ -229,7 +232,7 @@ sortByPerm sched =
       | p1 > p2 = GT
       | True = GT
 
-append2Sched :: (PrimExp VName, PrimExp VName, Int, Int, Int) -> HLSched -> HLSched
+append2Sched :: ((PrimExp VName, SoP VName), (PrimExp VName, SoP VName), Int, Int, Int) -> HLSched -> HLSched
 append2Sched (l, s, o, p, d) sched =
   sched { dimlens = l : (dimlens sched)
         , strides = s : (strides sched)

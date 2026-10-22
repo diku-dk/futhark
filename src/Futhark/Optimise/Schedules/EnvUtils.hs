@@ -8,12 +8,10 @@ module Futhark.Optimise.Schedules.EnvUtils
   , InvTileTab
   , TopEnv (..)
   , freshTopEnv
-  , addTileBinding
   , addIota2Env
   , addTransf2Env
-  , addBinOp2Env
+  , updateTopdownEnv
   , tileFuns
-  , expandSE
   , eqPEs
   , addPes
   , mulPes
@@ -27,10 +25,14 @@ module Futhark.Optimise.Schedules.EnvUtils
 where
 
 import Data.List qualified as L
-import Data.Maybe
+--import Data.Set qualified as S 
+--import Data.Maybe
 import Data.Map.Strict qualified as M
 import Futhark.IR.SOACS hiding (SOAC (..))
 import Futhark.Tools
+import Futhark.SoP.SoP
+--import Futhark.SoP.Convert
+--import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..))
 
 --import Debug.Trace
 
@@ -55,26 +57,26 @@ tileFuns = ["strip1", "strip2"]
 --   E.g., `let (m, t1, t2) = strip2 (2*M)`
 --     produces `2*M -> [m, t1, t2]`
 --   ToDo:  maybe use the Poly IR here?
-type FwdTileTab = M.Map (PrimExp VName) Names
+type FwdTileTab = M.Map (PrimExp VName) (SoP VName, Names)
 
 -- ^ Binds a symbolic tile names to a tuple:
 --     1. the original size that was tiled
 --     2. the list containing the produced tiles.
 --   E.g., `let (m, t1, t2) = strip2 (2*M)`
 --     produces `m -> (2*M, [m, t1, t2])`
-type InvTileTab = M.Map VName (PrimExp VName, Names)
+type InvTileTab = M.Map VName ((PrimExp VName, SoP VName), Names)
 
 data TopEnv = TopEnv
   { bdy_res     :: [SubExp]
   , appTilesFwd :: FwdTileTab
   , appTilesInv :: InvTileTab
-  , iotas       :: M.Map VName (SubExp, PrimExp VName) -- , Stms SOACS
+  , iotas       :: M.Map VName (SubExp, PrimExp VName, SoP VName) -- , Stms SOACS
     -- ^ binds the name of an iota array to its size
-  , inv_iotas   :: M.Map (PrimExp VName) (VName, SubExp)
+  , inv_iotas   :: M.Map (PrimExp VName) (VName, SubExp, SoP VName)
     -- ^ binds a size pexp to the name of a iota and its SubExp size
-  , scalars     :: M.Map VName (PrimExp VName)
+  , scalars     :: M.Map VName (PrimExp VName, SoP VName)
     -- ^ binds the name of a scalar var to its expression
-  , arrayLits   :: M.Map VName [PrimExp VName]
+  , arrayLits   :: M.Map VName [(PrimExp VName, SoP VName)]
     -- ^ binds the name of an array literal to its expression 
   , arrTransf   :: M.Map VName (VName, [Int])
     -- ^ Models a chain of rearrange transformations:
@@ -85,19 +87,19 @@ data TopEnv = TopEnv
 freshTopEnv :: TopEnv
 freshTopEnv = TopEnv [] mempty mempty mempty mempty mempty mempty mempty
 
-addIota2Env :: TopEnv -> (VName, SubExp, PrimExp VName) -> TopEnv
-addIota2Env env (iotnm, w_se, w_pe) =
-  env { iotas     = M.insert iotnm (w_se,  w_pe) (iotas env)
-      , inv_iotas = M.insert w_pe  (iotnm, w_se) (inv_iotas env) }
+addIota2Env :: TopEnv -> (VName, SubExp, (PrimExp VName, SoP VName)) -> TopEnv
+addIota2Env env (iotnm, w_se, (w_pe, w_sop)) =
+  env { iotas     = M.insert iotnm (w_se,  w_pe, w_sop) (iotas env)
+      , inv_iotas = M.insert w_pe  (iotnm, w_se, w_sop) (inv_iotas env) }
 
-addTileBinding :: TopEnv -> PrimExp VName -> [VName] -> TopEnv
-addTileBinding env pe tile_nms =
+addTileBinding :: TopEnv -> (PrimExp VName, SoP VName) -> [VName] -> TopEnv
+addTileBinding env (pe, sop) tile_nms =
   let nms = namesFromList tile_nms
-      fwdenv = M.insert pe nms $ appTilesFwd env
+      fwdenv = M.insert pe (sop, nms) $ appTilesFwd env
       bwdenv = foldl (foldfun nms) (appTilesInv env) tile_nms
   in  env { appTilesFwd = fwdenv, appTilesInv = bwdenv }
   where
-    foldfun nms env_cur nm = M.insert nm (pe, nms) env_cur 
+    foldfun nms env_cur nm = M.insert nm ((pe,sop), nms) env_cur
 
 addTransf2Env :: TopEnv -> VName -> VName -> [Int] -> TopEnv
 addTransf2Env env nm_new nm_old perm_new =
@@ -107,15 +109,96 @@ addTransf2Env env nm_new nm_old perm_new =
          Just (nm_old0, perm_old) ->
            (nm_old0, composePerms perm_new perm_old)
   in env { arrTransf = M.insert nm_new (nm_old', perm') (arrTransf env) }
+  where
+    composePerms :: [Int] -> [Int] -> [Int]
+    composePerms prm_new prm_old = 
+      map (\ i -> prm_old !! i) prm_new
 
-expandSE :: TopEnv -> SubExp -> PrimType -> PrimExp  VName
-expandSE _ (Constant pval) _ = ValueExp pval
-expandSE env (Var vnm) ptp = fromMaybe (LeafExp vnm ptp) $ M.lookup vnm $ scalars env
-
+{--
 addBinOp2Env :: TopEnv -> (VName, Type) -> BinOp -> SubExp -> SubExp -> TopEnv
 addBinOp2Env env (nm,tp) bop s1 s2 =
   env { scalars = M.insert nm (BinOpExp bop (expSE s1) (expSE s2)) (scalars env) }
-  where expSE se = expandSE env se $ elemType tp
+  where expSE se = peFromSe env (elemType tp) se
+--}
+
+{--
+-- @fromSoP@ and @toSoPNum@ require to work under @MonadSoP@
+addBinOp2Env :: (MonadSoP VName (PrimExp VName) m) => TopEnv -> (VName, Type) -> BinOp -> SubExp -> SubExp -> m TopEnv
+addBinOp2Env env (nm,tp) bop s1 s2 = do
+  let ((pex1, sop1), (pex2, sop2)) = (expSE s1, expSE s2)
+      fv_sop = S.union (freeInSoP sop1) (freeInSoP sop2)
+      -- in order for this to work, it needs to be inside a monad
+  pe_sop1 <- fromSoP sop1
+  pe_sop2 <- fromSoP sop2
+  (_, sop0) <- toSoPNum $ BinOpExp bop pe_sop1 pe_sop2
+  let sop  = if null (S.difference (freeInSoP sop0) fv_sop)
+             then sop0 -- success, no new variables were introduced
+             else sym2SoP nm -- binop result is not in SoP domain
+      pe   = BinOpExp bop pex1 pex2
+  pure $ env { scalars = M.insert nm (pe, sop) (scalars env) }
+  where
+    expSE se = peFromSe env (elemType tp) se
+    freeInSoP :: SoP VName -> S.Set VName
+    freeInSoP = free
+--}
+
+-- | The top-down pass records the scalar expansion, iotas,
+--     tiling calls and the like.
+--   ToDos:
+--     1. maybe record also the change-of-layout transformations
+--        into an LMAD, i.e., in the @arrTransf@ filed of @TopEnv@
+updateTopdownEnv :: TopEnv -> Stm SOACS -> TopEnv
+updateTopdownEnv env (Let pat _aux (Apply fnm arg_diets _ _))
+  | any (`L.isPrefixOf` (nameToString fnm)) tileFuns,
+    [(size_se, _)] <- arg_diets,
+    ptp:_ <- map (elemType . patElemDec)  $ patElems pat =
+  addTileBinding env (peFromSe env ptp size_se) $
+    map patElemName $ patElems pat
+  where
+    tileFuns = ["strip1", "strip2"]
+updateTopdownEnv env (Let (Pat [PatElem pat_nm pat_tp]) _aux e)
+  | BasicOp (Iota w start stride Int64) <- e,
+    start == se0 && stride == se1,
+    pe_sop_w <- peFromSe env i64ptp w =
+    addIota2Env env (pat_nm, w, pe_sop_w)
+  | BasicOp (BinOp bop s1 s2) <- e,
+    Prim ptp <- pat_tp =
+    let (p1, sop1) = peFromSe env ptp s1
+        (p2, sop2) = peFromSe env ptp s2
+        pex = BinOpExp bop p1 p2
+        sop = applyBinOp2SoP bop sop1 sop2
+    in env { scalars = M.insert pat_nm (pex,sop) (scalars env) }
+  | BasicOp (UnOp unop se) <- e,
+    Prim ptp <- pat_tp,
+    (pe, sop) <- peFromSe env ptp se =
+    env { scalars = M.insert pat_nm (UnOpExp unop pe, applyUnOp2SoP unop sop) (scalars env) }
+  | BasicOp (ArrayLit arg_ses (Prim ptp)) <- e =
+    env { arrayLits = M.insert pat_nm (map (peFromSe env ptp) arg_ses) (arrayLits env) }
+  | BasicOp (Scratch _ptp [se]) <- e,
+    se == se0 =
+    env { arrayLits = M.insert pat_nm [] (arrayLits env) }
+  | BasicOp (Replicate shp se) <- e,
+    [d] <- shapeDims shp,
+    Constant (IntValue (Int64Value n)) <- d =
+    let pe_sop = peFromSe env (elemType pat_tp) se
+        arr_pe_sop = replicate (fromIntegral n) pe_sop
+    in  env { arrayLits = M.insert pat_nm arr_pe_sop (arrayLits env) }
+  | BasicOp (Rearrange vnm sigma) <- e =
+    addTransf2Env env pat_nm vnm sigma
+  | otherwise = env
+  where
+    se0 = Constant $ IntValue $ Int64Value 0
+    se1 = Constant $ IntValue $ Int64Value 1
+    i64ptp = IntType Int64
+    --
+    applyBinOp2SoP Add{} sop1 sop2 = sop1 .+. sop2
+    applyBinOp2SoP Sub{} sop1 sop2 = sop1 .-. sop2
+    applyBinOp2SoP Mul{} sop1 sop2 = sop1 .*. sop2
+    applyBinOp2SoP _ _ _ = sym2SoP pat_nm
+    --
+    applyUnOp2SoP (Complement _) sop = int2SoP 0 .-. sop
+    applyUnOp2SoP _ _ = sym2SoP pat_nm
+updateTopdownEnv env _ = env
 
 -------------------------------------------------------
 --- Simple Utilities
@@ -131,10 +214,6 @@ invPerm xs =
   where
     f i | Just ind <- L.elemIndex i xs = ind
     f _ = error "Violation of assumed permutation semantics"
-
-composePerms :: [Int] -> [Int] -> [Int]
-composePerms perm_new perm_old = 
-  map (\ i -> perm_old !! i) perm_new
 
 eqPEs :: PrimExp VName -> PrimExp VName -> Bool
 eqPEs p1 p2 | p1 == p2 = True
@@ -182,10 +261,18 @@ findPType se = do
     _ -> error ("In findPType subexp: " ++ prettyString se ++
                 " has type "++prettyString tp++", which is not PrimType")
 
-peFromSe :: TopEnv -> PrimType -> SubExp -> PrimExp VName
-peFromSe _ _ (Constant pv) = ValueExp pv
-peFromSe env ptp (Var vnm) =
-  case M.lookup vnm (scalars env) of
-    Just pe -> pe
-    Nothing -> LeafExp vnm ptp
+peFromSe :: TopEnv -> PrimType -> SubExp -> (PrimExp VName, SoP VName)
+peFromSe _ ptp@(IntType _) (Constant pv@(IntValue iv))
+  | ptp == primValueType pv = (ValueExp pv, int2SoP $ valueIntegral iv) 
+peFromSe _ ptp (Constant pv) =
+  error ("In peFromSe: value " ++ prettyString pv ++ " is not of int type " ++ prettyString ptp)
+peFromSe env ptp (Var vnm)
+  | Nothing <- M.lookup vnm (scalars env) =
+  (LeafExp vnm ptp, sym2SoP vnm)
+peFromSe env ptp@(IntType _) (Var vnm)
+  | Just (pe, sop) <- M.lookup vnm (scalars env),
+    primExpType pe == ptp =
+  (pe, sop)
+peFromSe _env ptp (Var vnm) =
+  error ("In peFromSe: the binding of: " ++ prettyString vnm ++ " is not of int type " ++ prettyString ptp)
 
