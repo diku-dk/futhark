@@ -13,6 +13,9 @@ entry f32_to_i32 = map i32.f32
 entry f32_to_u32 = map u32.f32
 entry f64_to_i32 = map i32.f64
 entry f64_to_u32 = map u32.f64
+entry f16_to_i16 = map i16.f16
+entry f16_to_u16 = map u16.f16
+entry f64_to_i64 = map i64.f64
 entry f16_to_bool = map bool.f16
 entry f32_to_bool = map bool.f32
 entry f64_to_bool = map bool.f64
@@ -82,6 +85,21 @@ entry f64_to_bool = map bool.f64
 -- entry: f64_to_u32
 -- input { [f64.nan, f64.inf, -f64.inf, -1f64, 1f64, 3.5f64, -3.5f64] }
 -- output { [0u32, 0u32, 0u32, 0u32, 1u32, 3u32, 0u32] }
+
+-- ==
+-- entry: f16_to_i16
+-- input { [f16.nan, f16.inf, -f16.inf, 40000f16, -40000f16, -1f16, 3.5f16, -3.5f16] }
+-- output { [0i16, 0i16, 0i16, 0i16, 0i16, -1i16, 3i16, -3i16] }
+
+-- ==
+-- entry: f16_to_u16
+-- input { [f16.nan, f16.inf, -f16.inf, -1f16, 1f16, 3.5f16, 65504f16] }
+-- output { [0u16, 0u16, 0u16, 0u16, 1u16, 3u16, 65504u16] }
+
+-- ==
+-- entry: f64_to_i64
+-- input { [f64.nan, f64.inf, 9223372036854775808f64, -9223372036854775808f64, -3.5f64] }
+-- output { [0i64, 0i64, 0i64, -9223372036854775808i64, -3i64] }
 
 -- ==
 -- entry: f16_to_bool

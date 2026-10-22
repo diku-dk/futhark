@@ -143,7 +143,9 @@ type RuleOp rep a =
   Rule rep
 
 -- | A simplification rule takes some argument and a statement, and
--- tries to simplify the statement.
+-- tries to simplify the statement.  Rules must construct new bodies and
+-- statements with e.g. 'mkBodyM' and 'letBind', not by modifying
+-- existing ones, as their precomputed information would then be wrong.
 data SimplificationRule rep a
   = RuleGeneric (RuleGeneric rep a)
   | RuleBasicOp (RuleBasicOp rep a)

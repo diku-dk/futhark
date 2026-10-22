@@ -634,7 +634,8 @@ static cl_event* opencl_event_new(struct futhark_context* ctx) {
   }
 }
 
-static int opencl_event_report(struct str_builder* sb, cl_event* e) {
+static int opencl_event_report(struct str_builder* sb, void* p) {
+  cl_event* e = (cl_event*)p;
   cl_int err;
   cl_ulong start_t, end_t;
 
@@ -1213,7 +1214,7 @@ static int gpu_scalar_to_device(struct futhark_context* ctx,
               provenance,
               NULL,
               event,
-              (event_report_fn)opencl_event_report);
+              opencl_event_report);
   }
   OPENCL_SUCCEED_OR_RETURN
     (clEnqueueWriteBuffer
@@ -1233,7 +1234,7 @@ static int gpu_scalar_from_device(struct futhark_context* ctx,
               provenance,
               NULL,
               event,
-              (event_report_fn)opencl_event_report);
+              opencl_event_report);
   }
   OPENCL_SUCCEED_OR_RETURN
     (clEnqueueReadBuffer
@@ -1254,7 +1255,7 @@ static int gpu_memcpy(struct futhark_context* ctx, const char *provenance,
                 provenance,
                 NULL,
                 event,
-                (event_report_fn)opencl_event_report);
+                opencl_event_report);
     }
     // OpenCL swaps the usual order of operands for memcpy()-like
     // functions.  The order below is not a typo.
@@ -1282,7 +1283,7 @@ static int memcpy_host2gpu(struct futhark_context* ctx, const char *provenance,
                 provenance,
                 NULL,
                 event,
-                (event_report_fn)opencl_event_report);
+                opencl_event_report);
     }
     OPENCL_SUCCEED_OR_RETURN
       (clEnqueueWriteBuffer(ctx->queue,
@@ -1311,7 +1312,7 @@ static int memcpy_gpu2host(struct futhark_context* ctx, const char *provenance,
                 provenance,
                 NULL,
                 event,
-                (event_report_fn)opencl_event_report);
+                opencl_event_report);
     }
     OPENCL_SUCCEED_OR_RETURN
       (clEnqueueReadBuffer(ctx->queue, src,
@@ -1361,7 +1362,7 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
               provenance,
               kvs,
               event,
-              (event_report_fn)opencl_event_report);
+              opencl_event_report);
   }
 
   if (ctx->debugging) {

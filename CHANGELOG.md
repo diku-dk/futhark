@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* `io.savevalue` for writing a value to a file in the binary data format.
+
 ### Removed
 
 ### Changed
@@ -25,6 +27,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Signed division by -1 is now properly defined.
 
 * A compiler crash when unifying parametric module types. (#2581)
+
+* Invalid simplification of indexes could lead to compiler crash.
+
+* Multicore backend contexts would become unusuable after the first failure.
+
+* Partial arithmetic operations accessed through prelude modules (like `i32./`)
+  lacked safety checks.
+
+* `u16.f16`, `u16.f32`, and `u16.f64` was defective in the interpreter.
+
+* Various cases where generated C code might exhibit undefined behaviour.
 
 ## [0.28.1]
 

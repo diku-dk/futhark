@@ -7,8 +7,8 @@
    int64_t k, int64_t m, int64_t n,                                     \
    int64_t cb, int64_t ce, int64_t rb, int64_t re)                      \
   {                                                                     \
-  int32_t r = re - rb;                                                  \
-  int32_t c = ce - cb;                                                  \
+  int64_t r = re - rb;                                                  \
+  int64_t c = ce - cb;                                                  \
   if (k == 1) {                                                         \
     if (r <= 64 && c <= 64) {                                           \
       for (int64_t j = 0; j < c; j++) {                                 \
@@ -37,11 +37,11 @@
                                         ELEM_TYPE *src, int64_t src_strides[r], \
                                         int64_t shape[r]) {             \
     if (r == 1) {                                                       \
-      for (int i = 0; i < shape[0]; i++) {                              \
+      for (int64_t i = 0; i < shape[0]; i++) {                          \
         dst[i*dst_strides[0]] = src[i*src_strides[0]];                  \
       }                                                                 \
     } else if (r > 1) {                                                 \
-      for (int i = 0; i < shape[0]; i++) {                              \
+      for (int64_t i = 0; i < shape[0]; i++) {                          \
         lmad_copy_elements_##NAME(r-1,                                  \
                                   dst+i*dst_strides[0], dst_strides+1,  \
                                   src+i*src_strides[0], src_strides+1,  \
@@ -57,7 +57,7 @@ static bool lmad_is_tr(int64_t *n_out, int64_t *m_out,
                        const int64_t strides[r],
                        const int64_t shape[r]) {
   for (int i = 1; i < r; i++) {
-    int n = 1, m = 1;
+    int64_t n = 1, m = 1;
     bool ok = true;
     int64_t expected = 1;
     // Check strides before 'i'.

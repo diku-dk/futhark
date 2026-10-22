@@ -11,6 +11,7 @@ import Futhark.Eval
     evalConfig,
     evalServerOptions,
     newInterpreterState,
+    prettyValue,
     runExpr,
   )
 import Futhark.Util.Options
@@ -41,7 +42,9 @@ runExprs exprs cfg = do
       hPutDocLn stderr reason
       exitWith $ ExitFailure 2
     Right s -> pure s
-  forM_ exprs $ \expr -> putDocLn =<< runExpr interpreter_state (T.pack expr)
+  forM_ exprs $ \expr ->
+    putDocLn . prettyValue
+      =<< runExpr interpreter_state (T.pack expr)
 
 options :: [FunOptDescr EvalConfig]
 options =

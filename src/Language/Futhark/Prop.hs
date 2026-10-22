@@ -1070,6 +1070,14 @@ intrinsics =
                     $ RetType []
                     $ Scalar
                     $ t_a Fresh
+                ),
+                ( "io_savevalue",
+                  IntrinsicPolyFun
+                    [sp_k, tp_a]
+                    [ Array Observe (shape [k]) (Prim $ Unsigned Int8),
+                      Scalar $ t_a Observe
+                    ]
+                    $ RetType [] (Scalar $ tupleRecord [])
                 )
               ]
               ++

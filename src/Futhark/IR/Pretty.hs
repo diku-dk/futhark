@@ -399,7 +399,8 @@ instance Pretty EntryPointType where
   pretty (TypeOpaque desc) = "opaque" <+> dquotes (pretty desc)
 
 instance Pretty EntryParam where
-  pretty (EntryParam name o t) = pretty name <> colon <+> pretty o <> pretty t
+  pretty (EntryParam name o t) =
+    dquotes (pretty name) <> colon <+> pretty o <> pretty t
 
 instance Pretty EntryResult where
   pretty (EntryResult o t) = pretty o <> pretty t
@@ -431,7 +432,7 @@ instance Pretty OpaqueType where
   pretty (OpaqueRecord fs) =
     "record" <+> nestedBlock (stack $ map p fs)
     where
-      p (f, et) = pretty f <> ":" <+> pretty et
+      p (f, et) = dquotes (pretty f) <> ":" <+> pretty et
   pretty (OpaqueSum ts cs) =
     "sum" <+> nestedBlock (stack $ pretty ts : map p cs)
     where
@@ -442,9 +443,12 @@ instance Pretty OpaqueType where
         <+> dquotes (pretty v)
         <+> nestedBlock (stack $ map pretty ts)
   pretty (OpaqueRecordArray r v fs) =
-    "record_array" <+> pretty r <> "d" <+> dquotes (pretty v) <+> nestedBlock (stack $ map p fs)
+    "record_array" <+> pretty r
+      <> "d"
+        <+> dquotes (pretty v)
+        <+> nestedBlock (stack $ map p fs)
     where
-      p (f, et) = pretty f <> ":" <+> pretty et
+      p (f, et) = dquotes (pretty f) <> ":" <+> pretty et
 
 instance Pretty OpaqueTypes where
   pretty (OpaqueTypes ts) = "types" <+> nestedBlock (stack $ map p ts)

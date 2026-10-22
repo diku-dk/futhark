@@ -9,3 +9,37 @@ i32 i32
 %%% OK
 %%% OK
 %%% OK
+%%% OK
+%%% FAILURE
+Expected 1 values, but got 0.
+%%% OK
+%%% FAILURE
+Unknown variable: bad
+%%% OK
+%%% FAILURE
+2 fields expected but 1 values provided.
+%%% OK
+%%% FAILURE
+Unknown variable: bad
+%%% OK
+%%% FAILURE
+2 values expected but 1 values provided.
+%%% OK
+%%% FAILURE
+Unknown variable: bad
+%%% OK
+%%% FAILURE
+No such variant
+%%% OK
+%%% FAILURE
+Unknown variable: bad
+%%% OK
+%%% OK
+%%% FAILURE
+Variable already exists: pair
+%%% OK
+%%% FAILURE
+Unknown variable: x
+%%% OK
+%%% OK
+%%% OK

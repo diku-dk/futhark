@@ -7,7 +7,7 @@ module Futhark.IR.GPU.Op
 
     -- * Host operations
     HostOp (..),
-    traverseHostOpStms,
+    traverseHostOpBodies,
     simplifyKernelOp,
     typeCheckHostOp,
 
@@ -241,17 +241,16 @@ data HostOp op rep
     GPUBody [Type] (Body rep)
   deriving (Eq, Ord, Show)
 
--- | A helper for defining 'TraverseOpStms'.
-traverseHostOpStms ::
+-- | A helper for defining 'TraverseOpBodies'.
+traverseHostOpBodies ::
   (Monad m) =>
-  OpStmsTraverser m (op rep) rep ->
-  OpStmsTraverser m (HostOp op rep) rep
-traverseHostOpStms _ f (SegOp segop) = SegOp <$> traverseSegOpStms f segop
-traverseHostOpStms _ _ (SizeOp sizeop) = pure $ SizeOp sizeop
-traverseHostOpStms onOtherOp f (OtherOp other) = OtherOp <$> onOtherOp f other
-traverseHostOpStms _ f (GPUBody ts body) = do
-  stms <- f mempty $ bodyStms body
-  pure $ GPUBody ts $ body {bodyStms = stms}
+  OpBodyTraverser m (op rep) rep ->
+  OpBodyTraverser m (HostOp op rep) rep
+traverseHostOpBodies _ f (SegOp segop) = SegOp <$> traverseSegOpBodies f segop
+traverseHostOpBodies _ _ (SizeOp sizeop) = pure $ SizeOp sizeop
+traverseHostOpBodies onOtherOp f (OtherOp other) = OtherOp <$> onOtherOp f other
+traverseHostOpBodies _ f (GPUBody ts body) =
+  GPUBody ts <$> f mempty body
 
 instance (ASTRep rep, Substitute (op rep)) => Substitute (HostOp op rep) where
   substituteNames substs (SegOp op) =

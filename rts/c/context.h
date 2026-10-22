@@ -87,8 +87,10 @@ static void add_event(struct futhark_context* ctx,
 }
 
 char *futhark_context_get_error(struct futhark_context *ctx) {
+  lock_lock(&ctx->error_lock);
   char *error = ctx->error;
   ctx->error = NULL;
+  lock_unlock(&ctx->error_lock);
   return error;
 }
 

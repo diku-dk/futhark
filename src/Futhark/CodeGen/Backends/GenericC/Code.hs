@@ -65,8 +65,9 @@ compilePrimExp f (UnOpExp USignum {} x) = do
 compilePrimExp f (UnOpExp (Neg Bool) x) = do
   x' <- compilePrimExp f x
   pure [C.cexp|!$exp:x'|]
--- Negation of integers is handled by a function that does the operation using
--- unsigned types, so we can avoid overflow.
+compilePrimExp f (UnOpExp (Neg (IntType t)) x) = do
+  x' <- compilePrimExp f x
+  pure [C.cexp|($ty:(intTypeToCType t))$id:(prettyString (Sub t OverflowWrap))(0, $exp:x')|]
 compilePrimExp f (UnOpExp (Neg (FloatType _)) x) = do
   x' <- compilePrimExp f x
   pure [C.cexp|-$exp:x'|]
@@ -305,7 +306,7 @@ compileCode (Allocate name (Count (TPrimExp e)) space) = do
       allocMem name size space [C.cstm|{err = 1; goto cleanup;}|]
 compileCode (Free name space) = do
   cached <- isJust <$> cacheMem name
-  unless cached $ unRefMem name space
+  unless cached $ unRefMem name space [C.cstm|{err = 1; goto cleanup;}|]
 compileCode (For i bound body) = do
   let i' = C.toIdent i
       t = primTypeToCType $ primExpType bound
@@ -402,7 +403,7 @@ compileCode (SetScalar dest src) = do
   src' <- compileExp src
   stm [C.cstm|$id:dest = $exp:src';|]
 compileCode (SetMem dest src space) =
-  setMem dest src space
+  setMem dest src space [C.cstm|{err = 1; goto cleanup;}|]
 compileCode (Call [dest] fname args)
   | isBuiltInFunction fname = do
       args' <- mapM compileArg args

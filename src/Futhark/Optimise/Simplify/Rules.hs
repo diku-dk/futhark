@@ -41,7 +41,7 @@ topDownRules =
     RuleGeneric toScratch
   ]
 
-bottomUpRules :: (BuilderOps rep, TraverseOpStms rep) => [BottomUpRule rep]
+bottomUpRules :: (BuilderOps rep, TraverseOpBodies rep) => [BottomUpRule rep]
 bottomUpRules =
   [ RuleGeneric withAccBottomUp,
     RuleBasicOp simplifyIndex
@@ -50,7 +50,7 @@ bottomUpRules =
 -- | A set of standard simplification rules.  These assume pure
 -- functional semantics, and so probably should not be applied after
 -- memory block merging.
-standardRules :: (BuilderOps rep, TraverseOpStms rep) => RuleBook rep
+standardRules :: (BuilderOps rep, TraverseOpBodies rep) => RuleBook rep
 standardRules =
   ruleBook topDownRules bottomUpRules
     <> loopRules
@@ -222,28 +222,36 @@ withAccTopDown vtable (Let pat aux (WithAcc inputs lam)) = Simplify . auxing aux
       pure $ Just x
 withAccTopDown _ _ = Skip
 
-elimUpdates :: forall rep. (ASTRep rep, TraverseOpStms rep) => [VName] -> Body rep -> (Body rep, [VName])
-elimUpdates get_rid_of = flip runState mempty . onBody
+elimUpdates ::
+  forall rep.
+  (BuilderOps rep, TraverseOpBodies rep) =>
+  [VName] ->
+  Body rep ->
+  RuleM rep (Body rep, [VName])
+elimUpdates get_rid_of = flip runStateT mempty . onBody
   where
+    onBody :: (IsResult res) => GBody rep res -> StateT [VName] (RuleM rep) (GBody rep res)
     onBody body = do
-      stms' <- onStms $ bodyStms body
-      pure body {bodyStms = stms'}
-    onStms = traverse onStm
+      stms' <- traverse onStm $ bodyStms body
+      lift $ mkBodyM stms' $ bodyResult body
     onStm (Let pat@(Pat [PatElem _ dec]) aux (BasicOp (UpdateAcc _ acc _ _)))
       | Acc c _ _ <- typeOf dec,
         c `elem` get_rid_of = do
           modify (insert c)
-          pure $ Let pat aux $ BasicOp $ SubExp $ Var acc
-    onStm (Let pat aux e) = Let pat aux <$> onExp e
+          mkStm pat aux $ BasicOp $ SubExp $ Var acc
+    onStm (Let pat aux e) = mkStm pat aux =<< onExp e
+    mkStm pat aux e = do
+      dec <- lift $ mkExpDecM pat e
+      pure $ Let pat aux {stmAuxDec = dec} e
     onExp = mapExpM mapper
       where
         mapper =
-          (identityMapper :: forall m. (Monad m) => Mapper rep rep m)
-            { mapOnOp = traverseOpStms (\_ stms -> onStms stms),
-              mapOnBody = \_ body -> onBody body
+          (identityMapper :: Mapper rep rep (StateT [VName] (RuleM rep)))
+            { mapOnOp = traverseOpBodies (const onBody),
+              mapOnBody = const onBody
             }
 
-withAccBottomUp :: (TraverseOpStms rep, BuilderOps rep) => BottomUpRuleGeneric rep
+withAccBottomUp :: (TraverseOpBodies rep, BuilderOps rep) => BottomUpRuleGeneric rep
 -- Eliminate dead results.  See Note [Dead Code Elimination for WithAcc]
 withAccBottomUp (_, utable) (Let pat aux (WithAcc inputs lam))
   | not $ all (`UT.used` utable) $ patNames pat = Simplify $ do
@@ -267,7 +275,7 @@ withAccBottomUp (_, utable) (Let pat aux (WithAcc inputs lam))
 
       when (null get_rid_of && nonacc_pes' == nonacc_pes) cannotSimplify
 
-      let (body', eliminated) = elimUpdates get_rid_of $ lambdaBody lam
+      (body', eliminated) <- elimUpdates get_rid_of $ lambdaBody lam
 
       when (null eliminated && nonacc_pes' == nonacc_pes) cannotSimplify
 

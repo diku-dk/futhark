@@ -7,7 +7,7 @@
 -- also re-exported from here.
 module Futhark.IR.MC.Op
   ( MCOp (..),
-    traverseMCOpStms,
+    traverseMCOpBodies,
     typeCheckMCOp,
     simplifyMCOp,
     module Futhark.IR.SegOp,
@@ -50,13 +50,13 @@ data MCOp op rep
     OtherOp (op rep)
   deriving (Eq, Ord, Show)
 
-traverseMCOpStms ::
+traverseMCOpBodies ::
   (Monad m) =>
-  OpStmsTraverser m (op rep) rep ->
-  OpStmsTraverser m (MCOp op rep) rep
-traverseMCOpStms _ f (ParOp par_op op) =
-  ParOp <$> traverse (traverseSegOpStms f) par_op <*> traverseSegOpStms f op
-traverseMCOpStms onInner f (OtherOp op) = OtherOp <$> onInner f op
+  OpBodyTraverser m (op rep) rep ->
+  OpBodyTraverser m (MCOp op rep) rep
+traverseMCOpBodies _ f (ParOp par_op op) =
+  ParOp <$> traverse (traverseSegOpBodies f) par_op <*> traverseSegOpBodies f op
+traverseMCOpBodies onInner f (OtherOp op) = OtherOp <$> onInner f op
 
 instance (ASTRep rep, Substitute (op rep)) => Substitute (MCOp op rep) where
   substituteNames substs (ParOp par_op op) =

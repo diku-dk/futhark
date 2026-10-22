@@ -29,6 +29,7 @@ import Futhark.Data
 import Futhark.Error (prettyCompilerError)
 import Futhark.Eval
   ( EvalConfig (..),
+    Trust (Trusted),
     evalConfig,
     forceValue,
     initialiseInterpreter,
@@ -665,7 +666,7 @@ data Env = Env
 runInterpreter :: Env -> F I.ExtOp a -> LiterateM a
 runInterpreter env =
   either (throwError . PP.docText . I.prettyInterpreterError) pure
-    <=< runInterpreterWith report (Just (envServer env)) Nothing
+    <=< runInterpreterWith Trusted report (Just (envServer env)) Nothing
   where
     report d =
       when (scriptVerbose (envOpts env) > 0) $

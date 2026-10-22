@@ -221,10 +221,23 @@ collectCerts m = do
   put (a, b, mempty)
   pure (x, cs)
 
--- | Mark that we have changed something and it would be a good idea
--- to re-run the simplifier.
+-- | Mark that we have changed something so we can run the simplifier again, to
+-- a fixed point.
 changed :: SimpleM rep ()
 changed = modify $ \(src, _, cs) -> (src, True, cs)
+
+-- | Run the computation and report whether it changed anything. If not, we can
+-- reuse the original code, along with its precomputed information. This saves
+-- on redundantly recomputing annotations, although the savings are likely
+-- marginal.
+collectChanged :: SimpleM rep a -> SimpleM rep (a, Bool)
+collectChanged m = do
+  (src, old, cs) <- get
+  put (src, False, cs)
+  x <- m
+  (src', new, cs') <- get
+  put (src', old || new, cs')
+  pure (x, new)
 
 usedCerts :: Certs -> SimpleM rep ()
 usedCerts cs = modify $ \(a, b, c) -> (a, b, cs <> c)
@@ -427,12 +440,14 @@ nonrecSimplifyStm ::
   (SimplifiableRep rep) =>
   Stm (Wise rep) ->
   SimpleM rep (Stm (Wise rep))
-nonrecSimplifyStm (Let pat (StmAux cs attrs loc (_, dec)) e) = do
-  cs' <- simplify cs
-  e' <- simplifyExpBase e
-  (pat', pat_cs) <- collectCerts $ traverse (simplify . snd) pat
-  let aux' = StmAux (cs' <> pat_cs) attrs loc dec
-  pure $ mkWiseStm pat' aux' e'
+nonrecSimplifyStm stm@(Let pat (StmAux cs attrs loc (_, dec)) e) = do
+  (stm', changed') <- collectChanged $ do
+    cs' <- simplify cs
+    e' <- simplifyExpBase e
+    (pat', pat_cs) <- collectCerts $ traverse (simplify . snd) pat
+    let aux' = StmAux (cs' <> pat_cs) attrs loc dec
+    pure $ mkWiseStm pat' aux' e'
+  pure $ if changed' then stm' else stm
 
 -- Bottom-up simplify a statement.  Recurses into sub-Bodies and Ops.
 -- Does not copy-propagate into the pattern and similar, as it is
@@ -443,10 +458,14 @@ recSimplifyStm ::
   Stm (Wise rep) ->
   UT.UsageTable ->
   SimpleM rep (Stms (Wise rep), Stm (Wise rep))
-recSimplifyStm (Let pat (StmAux cs attrs loc (_, dec)) e) usage = do
-  ((e', e_hoisted), e_cs) <- collectCerts $ simplifyExp (usage <> UT.usageInPat pat) pat e
+recSimplifyStm stm@(Let pat (StmAux cs attrs loc (_, dec)) e) usage = do
+  (((e', e_hoisted), e_cs), changed') <-
+    collectChanged . collectCerts $ simplifyExp (usage <> UT.usageInPat pat) pat e
   let aux' = StmAux (cs <> e_cs) attrs loc dec
-  pure (e_hoisted, mkWiseStm (removePatWisdom pat) aux' e')
+  pure $
+    if changed' || e_cs /= mempty
+      then (e_hoisted, mkWiseStm (removePatWisdom pat) aux' e')
+      else (mempty, stm)
 
 hoistStms ::
   (SimplifiableRep rep) =>
@@ -524,7 +543,9 @@ hoistStms rules block orig_stms final = do
                 localVtable (ST.insertStm stms_h') $
                   hoistableStms usageInStm stms_t
               if not $ any (`UT.isUsedDirectly` usage) $ provides stms_h'
-                then -- Dead statement.
+                then do
+                  -- Dead statement.
+                  changed
                   pure (x, usage, stms_t')
                 else do
                   (stms_h_stms, stms_h'') <- recSimplifyStm stms_h' usage
@@ -736,13 +757,14 @@ simplifyBody ::
   [UT.Usages] ->
   Body (Wise rep) ->
   SimpleM rep (Stms (Wise rep), Body (Wise rep))
-simplifyBody blocker usage res_usages (Body _ stms res) = do
-  (res', stms', hoisted) <-
-    blockIf blocker stms $ do
+simplifyBody blocker usage res_usages body@(Body _ stms res) = do
+  ((res', stms', hoisted), changed') <-
+    collectChanged . blockIf blocker stms $ do
       (res', res_usage) <- simplifyResult res_usages res
       pure (res', res_usage <> usage)
-  body' <- constructBody stms' res'
-  pure (hoisted, body')
+  if changed'
+    then (hoisted,) <$> constructBody stms' res'
+    else pure (mempty, body)
 
 -- | Simplify a single body.
 simplifyBodyNoHoisting ::
@@ -951,6 +973,7 @@ simplifyExpBase (BasicOp (BinOp op x y))
   | commutativeBinOp op = do
       x' <- simplify x
       y' <- simplify y
+      when (x' > y') changed
       pure $ BasicOp $ BinOp op (min x' y') (max x' y')
 simplifyExpBase e = mapExpM hoist e
   where
@@ -969,7 +992,7 @@ type SimplifiableRep rep =
     Simplifiable (LParamInfo rep),
     Simplifiable (RetType rep),
     Simplifiable (BranchType rep),
-    TraverseOpStms (Wise rep),
+    TraverseOpBodies (Wise rep),
     CanBeWise (OpC rep),
     ST.IndexOp (Op (Wise rep)),
     IsOp (OpC rep),
@@ -1115,7 +1138,10 @@ simplifyLambdaWith f blocked usage lam@(Lambda params rettype body) = do
 
 instance Simplifiable Certs where
   simplify (Certs []) = pure (Certs [])
-  simplify (Certs ocs) = Certs . nubOrd . concat <$> mapM check ocs
+  simplify (Certs ocs) = do
+    ocs' <- nubOrd . concat <$> mapM check ocs
+    when (ocs' /= ocs) changed
+    pure $ Certs ocs'
     where
       check idd = do
         vv <- ST.lookupSubExp idd <$> askVtable

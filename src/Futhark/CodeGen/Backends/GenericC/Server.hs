@@ -98,8 +98,7 @@ genericOptions =
         optionDescription = "Read size=value assignments from the given file.",
         optionAction =
           [C.cstm|{
-                char *ret = load_tuning_file(optarg, cfg, (int(*)(void*, const char*, size_t))
-                                                          futhark_context_config_set_tuning_param);
+                char *ret = load_tuning_file(optarg, cfg);
                 if (ret != NULL) {
                   futhark_panic(1, "When loading tuning file '%s': %s\n", optarg, ret);
                 }}|]
@@ -151,6 +150,9 @@ typeBoilerplate manifest (tname, TypeArray c_type_name et rank ops) =
       array_new_wrap = arrayNew ops <> "_wrap"
       array_set_wrap = arraySet ops <> "_wrap"
       array_index_wrap = arrayIndex ops <> "_wrap"
+      array_shape_wrap = arrayShape ops <> "_wrap"
+      array_values_wrap = arrayValues ops <> "_wrap"
+      array_free_wrap = arrayFree ops <> "_wrap"
       shape_args = [[C.cexp|shape[$int:i]|] | i <- [0 .. rank - 1]]
       is_args = [[C.cexp|is[$int:i]|] | i <- [0 .. rank - 1]]
    in ( [C.cedecl|const struct type $id:type_name;|],
@@ -165,16 +167,29 @@ typeBoilerplate manifest (tname, TypeArray c_type_name et rank ops) =
                 return 0;
               }
               int $id:array_set_wrap(struct futhark_context *ctx,
-                                     typename $id:c_type_name arr,
-                                     $ty:element_c_type *val,
+                                     const void *arr,
+                                     void *val,
                                      const typename int64_t *is) {
-                return $id:(arraySet ops)(ctx, arr, *val, $args:is_args);
+                return $id:(arraySet ops)(ctx, (typename $id:c_type_name)arr,
+                                          *($ty:element_c_type*)val, $args:is_args);
+              }
+              const typename int64_t* $id:array_shape_wrap(struct futhark_context *ctx,
+                                                           const void *arr) {
+                return $id:(arrayShape ops)(ctx, (typename $id:c_type_name)arr);
               }
               int $id:array_index_wrap(struct futhark_context *ctx,
                                        void *dest,
-                                       typename $id:c_type_name arr,
+                                       const void *arr,
                                        const typename int64_t *is) {
-                return $id:(arrayIndex ops)(ctx, dest, arr, $args:is_args);
+                return $id:(arrayIndex ops)(ctx, dest, (typename $id:c_type_name)arr, $args:is_args);
+              }
+              int $id:array_values_wrap(struct futhark_context *ctx,
+                                        const void *arr,
+                                        void *data) {
+                return $id:(arrayValues ops)(ctx, (typename $id:c_type_name)arr, data);
+              }
+              int $id:array_free_wrap(struct futhark_context *ctx, void *arr) {
+                return $id:(arrayFree ops)(ctx, arr);
               }
               const struct array $id:array_name = {
                 .rank = $int:rank,
@@ -183,19 +198,19 @@ typeBoilerplate manifest (tname, TypeArray c_type_name et rank ops) =
                 .name = $string:(T.unpack tname),
                 .num_fields = 0,
                 .fields = NULL,
-                .new = (typename array_new_fn)$id:array_new_wrap,
-                .set = (typename array_set_fn)$id:array_set_wrap,
-                .shape = (typename array_shape_fn)$id:(arrayShape ops),
-                .index = (typename array_index_fn)$id:array_index_wrap,
-                .values = (typename array_values_fn)$id:(arrayValues ops),
-                .free = (typename array_free_data_fn)$id:(arrayFree ops),
+                .new = $id:array_new_wrap,
+                .set = $id:array_set_wrap,
+                .shape = $id:array_shape_wrap,
+                .index = $id:array_index_wrap,
+                .values = $id:array_values_wrap,
+                .free = $id:array_free_wrap,
                 .zip = NULL,
               };
               const struct type $id:type_name = {
                 .name = $string:(T.unpack tname),
-                .restore = (typename restore_fn)restore_array,
-                .store = (typename store_fn)store_array,
-                .free = (typename free_fn)free_array,
+                .restore = restore_array,
+                .store = store_array,
+                .free = free_array,
                 .aux = &$id:array_name,
                 .kind = $exp:(cKind Array),
                 .info = &$id:array_name
@@ -204,21 +219,34 @@ typeBoilerplate manifest (tname, TypeArray c_type_name et rank ops) =
 typeBoilerplate manifest (tname, TypeOpaque c_type_name ops extra_ops _) =
   let type_name = typeStructName tname
       aux_name = type_name <> "_aux"
+      store_wrap = opaqueStore ops <> "_wrap"
+      restore_wrap = opaqueRestore ops <> "_wrap"
+      free_wrap = opaqueFree ops <> "_wrap"
       (transparent_edecls, transparent_init, kind) = transparentDefs type_name extra_ops
    in ( [C.cedecl|const struct type $id:type_name;|],
         [C.cinit|&$id:type_name|],
         transparent_edecls
           ++ [C.cunit|
+              int $id:store_wrap(struct futhark_context *ctx, const void *obj,
+                                 void **p, size_t *n) {
+                return $id:(opaqueStore ops)(ctx, obj, p, n);
+              }
+              void* $id:restore_wrap(struct futhark_context *ctx, void *p) {
+                return $id:(opaqueRestore ops)(ctx, p);
+              }
+              int $id:free_wrap(struct futhark_context *ctx, void *obj) {
+                return $id:(opaqueFree ops)(ctx, obj);
+              }
               const struct opaque_aux $id:aux_name = {
-                .store = (typename opaque_store_fn)$id:(opaqueStore ops),
-                .restore = (typename opaque_restore_fn)$id:(opaqueRestore ops),
-                .free = (typename opaque_free_fn)$id:(opaqueFree ops)
+                .store = $id:store_wrap,
+                .restore = $id:restore_wrap,
+                .free = $id:free_wrap
               };
               const struct type $id:type_name = {
                 .name = $string:(T.unpack tname),
-                .restore = (typename restore_fn)restore_opaque,
-                .store = (typename store_fn)store_opaque,
-                .free = (typename free_fn)free_opaque,
+                .restore = restore_opaque,
+                .store = store_opaque,
+                .free = free_opaque,
                 .aux = &$id:aux_name,
                 .kind = $exp:(cKind kind),
                 .info = $init:transparent_init
@@ -234,14 +262,15 @@ typeBoilerplate manifest (tname, TypeOpaque c_type_name ops extra_ops _) =
                 field_v = "v" <> show (i :: Int)
              in ( [C.cinit|{.name = $string:(T.unpack name),
                             .type = &$id:(typeStructName field_tname),
-                            .project = (typename project_fn)$id:project
+                            .project = $id:(projectWrapName project)
                            }|],
                   [C.citem|const $ty:field_c_type $id:field_v =
                             *(const $ty:field_c_type*)fields[$int:i];|],
                   [C.cexp|$id:field_v|]
                 )
           (field_inits, get_fields, field_args) = unzip3 $ zipWith onField [0 ..] fields
-       in ( [C.cunit|
+       in ( concatMap (projectWrap . recordFieldProject) fields
+              ++ [C.cunit|
              const struct field $id:fields_name[] = {
                $inits:field_inits
              };
@@ -298,16 +327,20 @@ typeBoilerplate manifest (tname, TypeOpaque c_type_name ops extra_ops _) =
                     }|]
                 )
 
+          variant_wrap = variant <> "_wrap"
           (variant_inits, variant_wraps) = unzip $ map onVariant variants
        in ( foldl1 (++) variant_wraps
               ++ [C.cunit|
+             int $id:variant_wrap(struct futhark_context *ctx, const void *v) {
+               return $id:variant(ctx, v);
+             }
              const struct variant $id:variants_name[] = {
                $inits:variant_inits
              };
              const struct sum $id:sum_name = {
                .num_variants = $int:(length variants),
                .variants = $id:variants_name,
-               .variant = (int (*)(struct futhark_context *, const void *))$id:variant
+               .variant = $id:variant_wrap
              };|],
             [C.cinit|&$id:sum_name|],
             Sum
@@ -351,6 +384,7 @@ typeBoilerplate manifest (tname, TypeOpaque c_type_name ops extra_ops _) =
           new_wrap = new <> "_wrap"
           set_wrap = set <> "_wrap"
           index_wrap = index <> "_wrap"
+          shape_wrap = shape <> "_wrap"
           shape_args = [[C.cexp|shape[$int:i]|] | i <- [0 .. rank - 1]]
           is_args = [[C.cexp|is[$int:i]|] | i <- [0 .. rank - 1]]
           (zip_defs, fields_init, num_fields, zip_init) =
@@ -369,14 +403,15 @@ typeBoilerplate manifest (tname, TypeOpaque c_type_name ops extra_ops _) =
                           field_v = "f" <> prettyText i
                        in ( [C.cinit|{ .name = $string:(T.unpack (recordFieldName field)),
                                        .type = &$id:(typeStructName (recordFieldType field)),
-                                       .project = (typename project_fn)$id:(recordFieldProject field)
+                                       .project = $id:(projectWrapName (recordFieldProject field))
                                      }|],
                             [C.citem|const $ty:field_type $id:field_v =
                                          (const $ty:field_type)f[$int:i];|],
                             [C.cexp|$id:field_v|]
                           )
                     (field_inits, get_fields, zip_args) = unzip3 $ zipWith onField [0 :: Int ..] fields
-                 in ( [C.cunit|const struct field $id:fields_name[] = {
+                 in ( concatMap (projectWrap . recordFieldProject) fields
+                        ++ [C.cunit|const struct field $id:fields_name[] = {
                                   $inits:field_inits
                                 };|]
                         ++ [C.cunit|int $id:zip_wrap(struct futhark_context *ctx,
@@ -388,14 +423,16 @@ typeBoilerplate manifest (tname, TypeOpaque c_type_name ops extra_ops _) =
                                     }|],
                       [C.cexp|$id:fields_name|],
                       length fields,
-                      [C.cexp|(typename array_zip_fn)$id:zip_wrap|]
+                      [C.cexp|$id:zip_wrap|]
                     )
        in ( zip_defs
               ++ [C.cunit|
                int $id:new_wrap(struct futhark_context *ctx,
-                                typename $id:c_type_name *outp,
-                                $ty:element_c_type *ps[],
-                               const typename int64_t shape[]) {
+                                void **outp,
+                                const void *p,
+                                const typename int64_t *shape) {
+                typename $id:c_type_name *out = (typename $id:c_type_name*) outp;
+                $ty:element_c_type **ps = ($ty:element_c_type **) p;
                 typename int64_t n_values = 1;
                 for (int i = 0; i < $int:rank; ++i) {
                   n_values *= shape[i];
@@ -404,19 +441,24 @@ typeBoilerplate manifest (tname, TypeOpaque c_type_name ops extra_ops _) =
                 for (typename int64_t i = 0; i < n_values; ++i) {
                   values[i] = *ps[i];
                 }
-                return $id:new(ctx, outp, values, $args:shape_args);
+                return $id:new(ctx, out, values, $args:shape_args);
               }
               int $id:set_wrap(struct futhark_context *ctx,
-                               typename $id:c_type_name arr,
-                               $ty:element_c_type *val,
+                               const void *arr,
+                               void *val,
                                const typename int64_t *is) {
-                return $id:set(ctx, arr, *val, $args:is_args);
+                return $id:set(ctx, (typename $id:c_type_name)arr,
+                               *($ty:element_c_type*)val, $args:is_args);
+              }
+              const typename int64_t* $id:shape_wrap(struct futhark_context *ctx,
+                                                     const void *arr) {
+                return $id:shape(ctx, (typename $id:c_type_name)arr);
               }
                int $id:index_wrap(struct futhark_context *ctx,
                                   void *dest,
-                                  typename $id:c_type_name arr,
+                                  const void *arr,
                                   const typename int64_t *is) {
-                 return $id:index(ctx, dest, arr, $args:is_args);
+                 return $id:index(ctx, dest, (typename $id:c_type_name)arr, $args:is_args);
                }
                const struct array $id:array_name = {
                  .rank = $int:rank,
@@ -425,10 +467,10 @@ typeBoilerplate manifest (tname, TypeOpaque c_type_name ops extra_ops _) =
                  .name = $string:(T.unpack tname),
                  .num_fields = $int:num_fields,
                  .fields = $exp:fields_init,
-                 .new = (typename array_new_fn)$id:new_wrap,
-                 .set = (typename array_set_fn)$id:set_wrap,
-                 .shape = (typename array_shape_fn)$id:shape,
-                 .index = (typename array_index_fn)$id:index_wrap,
+                 .new = $id:new_wrap,
+                 .set = $id:set_wrap,
+                 .shape = $id:shape_wrap,
+                 .index = $id:index_wrap,
                  .values = NULL,
                  .free = NULL,
                  .zip = $exp:zip_init,
@@ -436,6 +478,15 @@ typeBoilerplate manifest (tname, TypeOpaque c_type_name ops extra_ops _) =
             [C.cinit|&$id:array_name|],
             Array
           )
+
+projectWrapName :: CFuncName -> CFuncName
+projectWrapName project = project <> "_wrap"
+
+projectWrap :: CFuncName -> [C.Definition]
+projectWrap project =
+  [C.cunit|int $id:(projectWrapName project)(struct futhark_context *ctx, void *out, const void *obj) {
+             return $id:project(ctx, out, obj);
+           }|]
 
 entryTypeBoilerplate :: Manifest -> ([C.Definition], [C.Initializer], [C.Definition])
 entryTypeBoilerplate manifest =

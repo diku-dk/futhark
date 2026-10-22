@@ -11,8 +11,10 @@ where
 
 import Data.Int (Int32)
 import Data.Map qualified as M
+import Data.Set qualified as S
 import Futhark.Compiler.Program (LoadedProg)
 import Futhark.LSP.PositionMapping (PositionMapping, StaleFile (..))
+import Language.LSP.Protocol.Types (NormalizedUri)
 import Language.LSP.VFS (VirtualFile)
 
 -- | The state of the language server.
@@ -24,12 +26,15 @@ data State = State
     staleData :: M.Map FilePath StaleFile,
     -- | The file and version of the most recent compilation, if it
     -- failed.  Used to avoid recompiling unchanged files.
-    stateFailed :: Maybe (FilePath, Int32)
+    stateFailed :: Maybe (FilePath, Int32),
+    -- | The files for which the most recent compilation published
+    -- diagnostics.  These must be cleared by the next compilation.
+    stateDiagnosed :: S.Set NormalizedUri
   }
 
 -- | Initial state.
 emptyState :: State
-emptyState = State Nothing M.empty Nothing
+emptyState = State Nothing M.empty Nothing S.empty
 
 -- | Get the contents of a stale (last successfully complied) file's contents.
 getStaleContent :: State -> FilePath -> Maybe VirtualFile

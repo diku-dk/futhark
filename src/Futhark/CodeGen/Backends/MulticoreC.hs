@@ -236,7 +236,7 @@ benchmarkCode name code = do
                  $exp:provenance,
                  NULL,
                  $id:event,
-                 (typename event_report_fn)mc_event_report);
+                 mc_event_report);
        lock_unlock(&ctx->event_list_lock);
      }|]
 

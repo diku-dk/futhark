@@ -26,6 +26,7 @@ module Language.Futhark.Interpreter.Values
 
     -- * Conversion
     fromDataValue,
+    toDataValue,
     asByteString,
   )
 where
@@ -171,10 +172,11 @@ prettyValueWith pprPrim = pprPrec 0
     pprElem v@ValueArray {} = pprPrec 0 v
     pprElem v = group $ pprPrec 0 v
 
-    putV (P.IntValue x) = SignedValue x
-    putV (P.FloatValue x) = FloatValue x
-    putV (P.BoolValue x) = BoolValue x
-    putV P.UnitValue = BoolValue True
+putV :: P.PrimValue -> PrimValue
+putV (P.IntValue x) = SignedValue x
+putV (P.FloatValue x) = FloatValue x
+putV (P.BoolValue x) = BoolValue x
+putV P.UnitValue = BoolValue True
 
 -- | Prettyprint value.
 prettyValue :: Value m -> Doc a
@@ -334,6 +336,58 @@ fromDataValue (V.F64Value shape vector) =
   fromDataValueWith (FloatValue . Float64Value) shape vector
 fromDataValue (V.BoolValue shape vector) =
   fromDataValueWith BoolValue shape vector
+
+-- | Convert a value to a value in the externally observable data format, which
+-- must have the given data format type. Only primitives and arrays of
+-- primitives can be converted, and the type is needed because the shape and
+-- element type of an empty array cannot be determined from the value alone. It
+-- is an error to pass a value that resides on a server, which must be fetched
+-- (see 'Language.Futhark.Interpreter.FFI.Push.getLazy') first.
+toDataValue :: V.ValueType -> Value m -> V.Value
+toDataValue (V.ValueType dims pt) v
+  | product dims /= length vs =
+      error $
+        "toDataValue: "
+          <> show (length vs)
+          <> " values do not fill an array of shape "
+          <> show dims
+  | otherwise =
+      case pt of
+        V.I8 -> V.I8Value shape $ conv $ P.valueIntegral . asInt
+        V.I16 -> V.I16Value shape $ conv $ P.valueIntegral . asInt
+        V.I32 -> V.I32Value shape $ conv $ P.valueIntegral . asInt
+        V.I64 -> V.I64Value shape $ conv $ P.valueIntegral . asInt
+        V.U8 -> V.U8Value shape $ conv $ P.valueIntegral . asInt
+        V.U16 -> V.U16Value shape $ conv $ P.valueIntegral . asInt
+        V.U32 -> V.U32Value shape $ conv $ P.valueIntegral . asInt
+        V.U64 -> V.U64Value shape $ conv $ P.valueIntegral . asInt
+        V.F16 -> V.F16Value shape $ conv asF16
+        V.F32 -> V.F32Value shape $ conv asF32
+        V.F64 -> V.F64Value shape $ conv asF64
+        V.Bool -> V.BoolValue shape $ conv asBool
+  where
+    shape = SVec.fromList dims
+    conv :: (SVec.Storable a) => (PrimValue -> a) -> SVec.Vector a
+    conv f = SVec.fromList $ map f vs
+    -- The elements of the value, in row-major order.
+    vs = prims v
+    prims (ValuePrim p) = [p]
+    prims (ValueAD _ var) = [putV $ AD.varPrimal var]
+    prims (ValueArray _ arr) = concatMap prims $ elems arr
+    prims v' = error $ "toDataValue: cannot convert " <> show v'
+    asInt (SignedValue x) = x
+    asInt (UnsignedValue x) = x
+    asInt p = wrong "an integer" p
+    asF16 (FloatValue (Float16Value x)) = x
+    asF16 p = wrong "an f16" p
+    asF32 (FloatValue (Float32Value x)) = x
+    asF32 p = wrong "an f32" p
+    asF64 (FloatValue (Float64Value x)) = x
+    asF64 p = wrong "an f64" p
+    asBool (BoolValue x) = x
+    asBool p = wrong "a bool" p
+    wrong what p =
+      error $ "toDataValue: expected " <> what <> ", but found " <> show p
 
 -- | If the value represents an array of type @[]u8@, then return those bytes.
 asByteString :: Value m -> Maybe BS.ByteString

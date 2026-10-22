@@ -13,12 +13,14 @@ module Futhark.Eval
     forceValue,
     externaliseLast,
     runInterpreterWith,
+    Trust (..),
     interpretImports,
     initialiseInterpreter,
     newInterpreterState,
     Evaluation (..),
     EvalRecordRef,
     runEvalRecordRef,
+    I.prettyValue,
   )
 where
 
@@ -44,7 +46,7 @@ import Futhark.Server qualified as S
 import Futhark.Test.Compile (FutharkExe (..), compileProgram, futharkServerCfg)
 import Futhark.Util (showText)
 import Futhark.Util.Options (ArgDescr (..), FunOptDescr, OptDescr (..))
-import Futhark.Util.Pretty (commasep, hPutDoc, hPutDocLn, hardline, putDocLn)
+import Futhark.Util.Pretty (commasep, hPutDoc, hPutDocLn, putDocLn)
 import Language.Futhark.Core (locText)
 import Language.Futhark.Interpreter qualified as I
 import Language.Futhark.Interpreter.FFI.Push qualified as FFI
@@ -111,7 +113,7 @@ runExpr ::
   (Evaluation m, MonadIO m) =>
   InterpreterState ->
   T.Text ->
-  m (Doc AnsiStyle)
+  m I.Value
 runExpr state str =
   case parseExp "" str of
     Left (SyntaxError _ serr) -> abort $ pretty serr
@@ -123,7 +125,7 @@ runParsedExpr ::
   (Evaluation m, MonadIO m) =>
   InterpreterState ->
   UncheckedExp ->
-  m (Doc AnsiStyle)
+  m I.Value
 runParsedExpr (InterpreterState (src, env, ctx, s)) uexp = do
   fexp <- case T.checkExp [] src env uexp of
     (_, Left terr) -> do
@@ -136,14 +138,14 @@ runParsedExpr (InterpreterState (src, env, ctx, s)) uexp = do
             "The following types are ambiguous: "
               <> commasep (map (pretty . nameToText . toName . typeParamName) tparams)
           ]
-  pval <- runInterpreterWith trace s Nothing $ I.interpretExp ctx fexp
+  pval <- runInterpreterWith Trusted trace s Nothing $ I.interpretExp ctx fexp
   case pval of
     Left err -> abort $ I.prettyInterpreterError err
     Right val -> do
       forced <- liftIO $ forceValue s val
       case forced of
         Left err -> abort $ I.prettyInterpreterError err
-        Right val' -> pure $ I.prettyValue val' <> hardline
+        Right val' -> pure val'
 
 data EvalConfig = EvalConfig
   { evalPrintWarnings :: Bool,
@@ -332,7 +334,13 @@ initialiseInterpreter cfg maybe_file server imports =
     evalWith s =
       runExceptT
         . fmap (\(tenv, ienv) -> (s, tenv, ienv))
-        . interpretImports (runInterpreterWith trace s Nothing)
+        . interpretImports (runInterpreterWith Trusted trace s Nothing)
+
+-- | Whether the code we are interpreting is trusted to perform any IO
+-- operation it likes, or is untrusted code for which only the operations
+-- deemed safe by 'I.safeIO' are permitted.
+data Trust = Trusted | Untrusted
+  deriving (Eq, Show)
 
 -- | Run an interpreter action non-interactively. Breakpoints are ignored, as
 -- there is no way to enter a debugging prompt. Traces, and the breakpoints
@@ -342,12 +350,13 @@ initialiseInterpreter cfg maybe_file server imports =
 -- the working directory.
 runInterpreterWith ::
   (MonadIO m) =>
+  Trust ->
   (Doc AnsiStyle -> m ()) ->
   Maybe FFI.Server ->
   Maybe FilePath ->
   F I.ExtOp a ->
   m (Either I.InterpreterError a)
-runInterpreterWith report s dir m = runF m (pure . Right) intOp
+runInterpreterWith trust report s dir m = runF m (pure . Right) intOp
   where
     intOp (I.ExtOpError err) = pure $ Left err
     intOp (I.ExtOpTrace w v c) = do
@@ -358,6 +367,11 @@ runInterpreterWith report s dir m = runF m (pure . Right) intOp
       report $ pretty (locText w) <> ": ignoring breakpoint."
       c
     intOp (I.ExtOpFFI sm c) = either (pure . Left) c =<< liftIO (runFFI s sm)
-    intOp (I.ExtOpIO op c) =
-      either (pure . Left . I.InterpreterError) c
-        =<< liftIO (I.doIOOp s (maybe id I.ioRelativeTo dir op))
+    intOp (I.ExtOpIO op c)
+      | trust == Untrusted,
+        not $ I.safeIO op =
+          pure . Left . I.InterpreterError $
+            "This IO operation is not permitted in untrusted code."
+      | otherwise =
+          either (pure . Left . I.InterpreterError) c
+            =<< liftIO (I.doIOOp s (maybe id I.ioRelativeTo dir op))

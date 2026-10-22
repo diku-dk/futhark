@@ -47,7 +47,7 @@ import Data.Text.Encoding qualified as T
 import Data.Text.IO qualified as T
 import Futhark.Compiler (readProgramFilesExceptKnown)
 import Futhark.Error (prettyCompilerError)
-import Futhark.Eval (externaliseLast, interpretImports, runInterpreterWith)
+import Futhark.Eval (Trust (Untrusted), externaliseLast, interpretImports, runInterpreterWith)
 import Futhark.FreshNames (VNameSource)
 import Futhark.Server
 import Futhark.Server.Values
@@ -151,7 +151,9 @@ getValuesBS _ _ (ScriptFile f) =
 -- are dispatched to the server, files are read relative to the given directory,
 -- and traces and breakpoints are ignored.
 runScript :: FFI.Server -> FilePath -> F I.ExtOp a -> IO (Either I.InterpreterError a)
-runScript server dir = runInterpreterWith (const $ pure ()) (Just server) (Just dir)
+runScript server dir =
+  -- Script expressions come from test specifications, which we do not trust.
+  runInterpreterWith Untrusted (const $ pure ()) (Just server) (Just dir)
 
 -- | The entry points of the program (the last import).
 programEntryPoints :: Imports -> M.Map Name EntryPoint

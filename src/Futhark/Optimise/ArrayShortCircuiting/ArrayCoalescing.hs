@@ -12,6 +12,7 @@ where
 
 import Control.Exception.Base qualified as Exc
 import Control.Monad
+import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Function ((&))
@@ -539,11 +540,11 @@ makeSegMapCoals lvlOK lvl td_env kernel_body pat_certs (active, inhb) (PatElem p
   | Just (MemBlock tp return_shp return_mem _) <-
       getScopeMemInfo return_name $ scope td_env <> scopeOf (bodyStms kernel_body),
     lvlOK lvl,
-    MemMem pat_space <- runReader (lookupMemInfo pat_mem) $ removeScopeAliases $ scope td_env,
+    MemMem pat_space <- memInfo (scope td_env) pat_mem,
     MemMem return_space <-
-      scope td_env <> scopeOf (bodyStms kernel_body) <> scopeOfSegSpace space
-        & removeScopeAliases
-        & runReader (lookupMemInfo return_mem),
+      memInfo
+        (scope td_env <> scopeOf (bodyStms kernel_body) <> scopeOfSegSpace space)
+        return_mem,
     pat_space == return_space =
       case M.lookup pat_mem active of
         Nothing ->
@@ -1665,11 +1666,15 @@ isFParamMem td_env m =
     Just FParamName {} -> True
     _ -> False
 
+-- | The memory information of a name, which must be in scope.
+memInfo :: (Coalesceable rep inner) => ScopeTab rep -> VName -> MemInfo SubExp NoMode MemBind
+memInfo scope v = runIdentity $ runWithoutAliases (lookupMemInfo v) scope
+
 -- | The space of a memory block, if it is in scope.
 memSpace :: (Coalesceable rep inner) => TopdownEnv rep -> VName -> Maybe Space
 memSpace td_env m
   | Just (MemMem space) <-
-      nameInfoToMemInfo <$> M.lookup m (removeScopeAliases (scope td_env)) =
+      nameInfoToMemInfo . removeNameInfoAliases <$> M.lookup m (scope td_env) =
       Just space
   | otherwise = Nothing
 

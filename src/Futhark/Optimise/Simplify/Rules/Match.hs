@@ -148,10 +148,10 @@ hoistBranchInvariant _ pat _ (cond, cases, defbody, MatchDec ret ifsort) =
         then Skip
         else Simplify $ do
           ctx_fixes <- sequence hoistings
-          let onCase (Case vs body) case_res = Case vs $ body {bodyResult = case_res}
-              cases' = zipWith onCase cases $ transpose case_reses_tr
-              defbody' = defbody {bodyResult = defbody_res'}
+          let onCase (Case vs body) case_res = Case vs <$> mkBodyM (bodyStms body) case_res
               ret' = foldr (uncurry fixExt) ts ctx_fixes
+          cases' <- zipWithM onCase cases $ transpose case_reses_tr
+          defbody' <- mkBodyM (bodyStms defbody) defbody_res'
           -- We may have to add some reshapes if we made the type
           -- less existential.
           cases'' <- mapM (traverse $ reshapeBodyResults $ map extTypeOf ret') cases'

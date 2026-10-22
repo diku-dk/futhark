@@ -32,7 +32,7 @@ module Futhark.IR.SegOp
     SegOpMapper (..),
     identitySegOpMapper,
     mapSegOpM,
-    traverseSegOpStms,
+    traverseSegOpBodies,
 
     -- * Simplification
     simplifySegOp,
@@ -726,19 +726,18 @@ instance RephraseOp (SegOp lvl) where
       onOp (HistOp w rf arrs nes shape op) =
         HistOp w rf arrs nes shape <$> rephraseLambda r op
 
--- | A helper for defining 'TraverseOpStms'.
-traverseSegOpStms :: (Monad m) => OpStmsTraverser m (SegOp lvl rep) rep
-traverseSegOpStms f segop = mapSegOpM mapper segop
+-- | A helper for defining 'TraverseOpBodies'.
+traverseSegOpBodies :: forall m lvl rep. (Monad m) => OpBodyTraverser m (SegOp lvl rep) rep
+traverseSegOpBodies f segop = mapSegOpM mapper segop
   where
     seg_scope = scopeOfSegSpace (segSpace segop)
+    f' :: (IsResult res) => Scope rep -> GBody rep res -> m (GBody rep res)
     f' scope = f (seg_scope <> scope)
     mapper =
       identitySegOpMapper
-        { mapOnSegBinOpLambda = traverseLambdaStms f',
-          mapOnSegOpBody = onBody
+        { mapOnSegBinOpLambda = traverseLambdaBodies f',
+          mapOnSegOpBody = f seg_scope
         }
-    onBody (Body dec stms res) =
-      Body dec <$> f seg_scope stms <*> pure res
 
 instance
   (ASTRep rep, Substitute lvl) =>
@@ -1230,7 +1229,7 @@ topDownSegOp vtable (Pat kpes) dec (SegMap lvl space ts (Body _ kstms kres)) = S
   when (kres == kres') cannotSimplify
 
   kbody <- mkBodyM kstms kres'
-  addStm $ Let (Pat kpes') dec $ Op $ segOp $ SegMap lvl space ts' kbody
+  auxing dec . letBind (Pat kpes') $ Op $ segOp $ SegMap lvl space ts' kbody
   where
     isInvariant Constant {} = True
     isInvariant (Var v) = isJust $ ST.lookup v vtable
@@ -1261,7 +1260,7 @@ topDownSegOp _ (Pat pes) _ (SegRed lvl space ts kbody ops)
           (red_pes', red_ts', red_res') = unzip3 $ concat aux
           pes' = red_pes' ++ map_pes
           ts' = red_ts' ++ map_ts
-          kbody' = kbody {bodyResult = red_res' ++ map_res}
+      kbody' <- mkBodyM (bodyStms kbody) (red_res' ++ map_res)
       letBind (Pat pes') $ Op $ segOp $ SegRed lvl space ts' kbody' ops'
   where
     (red_pes, map_pes) = splitAt (segBinOpResults ops) pes
@@ -1307,9 +1306,10 @@ topDownSegOp _ (Pat pes) _ (SegRed lvl space ts kbody ops)
 topDownSegOp _ pat aux op
   | SegScan lvl space ts kbody seg_op post_op <- op,
     -- Figure out which of the names in 'pat' are used...
-    Just (new_kbody, new_ts, m_new_post_op) <-
+    Just (new_res, new_ts, m_new_post_op) <-
       newKbodyPostOp kbody ts seg_op post_op = Simplify $ do
       new_post_op <- m_new_post_op
+      new_kbody <- mkBodyM (bodyStms kbody) new_res
       auxing aux
         . letBind pat
         . Op
@@ -1319,7 +1319,7 @@ topDownSegOp _ pat aux op
     newKbodyPostOp kbody ts seg_op post_op =
       if null sub_map_res_ts_pars
         then Nothing
-        else Just (new_kbody, new_ts, new_post_op)
+        else Just (new_res, new_ts, new_post_op)
       where
         res = bodyResult kbody
         post_lam = segPostOpLambda post_op
@@ -1330,7 +1330,6 @@ topDownSegOp _ pat aux op
             [Ident (paramName p) t]
             (BasicOp $ SubExp $ kernelResultSubExp r)
 
-        new_kbody = kbody {bodyResult = new_res}
         new_post_op = do
           let sub_res = map (\(r, _, _, _) -> r) sub_map_res_ts_pars
           temp_body <- renameBody $ kbody {bodyResult = sub_res}
@@ -1403,7 +1402,7 @@ bottomUpSegOp (_vtable, used) (Pat kpes) aux (SegScan lvl space kts body ops (Se
       postlam' <- mkLambda (lambdaParams postlam) $ do
         addStms $ bodyStms $ lambdaBody postlam
         pure res'
-      addStm $ Let (Pat kpes') aux $ Op $ segOp $ SegScan lvl space kts body ops (SegPostOp postlam')
+      auxing aux . letBind (Pat kpes') $ Op $ segOp $ SegScan lvl space kts body ops (SegPostOp postlam')
   | otherwise = Skip
   where
     keep (pe, _) = patElemName pe `UT.used` used
@@ -1413,7 +1412,7 @@ bottomUpSegOp (_vtable, used) (Pat kpes) dec segop
   | (_, kpes', kts', kres') <- unzip4 $ filter keep $ zip4 [0 ..] kpes kts kres,
     kpes' /= kpes = Simplify $ do
       kbody' <- localScope (scopeOfSegSpace space) $ mkBodyM kstms kres'
-      addStm $ Let (Pat kpes') dec $ Op $ segOp $ mk_segop kts' kbody'
+      auxing dec . letBind (Pat kpes') $ Op $ segOp $ mk_segop kts' kbody'
   where
     space = segSpace segop
     (kts, Body _ kstms kres, num_nonmap_results, mk_segop) =
@@ -1437,7 +1436,7 @@ bottomUpSegOp (vtable, _used) (Pat kpes) dec segop = Simplify $ do
   kbody' <-
     localScope (scopeOfSegSpace space) $ mkBodyM kstms' kres'
 
-  addStm $ Let (Pat kpes') dec $ Op $ segOp $ mk_segop kts' kbody'
+  auxing dec . letBind (Pat kpes') $ Op $ segOp $ mk_segop kts' kbody'
   where
     (kts, Body _ kstms kres, num_nonmap_results, mk_segop) =
       segOpGuts segop

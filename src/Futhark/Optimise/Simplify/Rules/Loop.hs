@@ -95,8 +95,8 @@ hoistLoopInvariantLoopParams vtable pat aux (merge, form, loopbody) = do
       Skip
     (invariant, explpat', merge', res') -> Simplify . auxing aux $ do
       -- We have moved something invariant out of the loop.
-      let loopbody' = loopbody {bodyResult = res'}
-          explpat'' = map fst explpat'
+      loopbody' <- mkBodyM (bodyStms loopbody) res'
+      let explpat'' = map fst explpat'
       forM_ invariant $ \(v1, (v2, cs)) ->
         certifying cs $ letBindNames [identName v1] $ BasicOp $ SubExp v2
       letBind (Pat explpat'') $ Loop merge' form loopbody'

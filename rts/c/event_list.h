@@ -47,11 +47,15 @@ struct kvs* kvs_new(void) {
   return kvs;
 }
 
+void kvs_printf(struct kvs* kvs, const char* key, const char* fmt, ...)
+  __attribute__((format(printf, 3, 4)));
+
 void kvs_printf(struct kvs* kvs, const char* key, const char* fmt, ...) {
   va_list vl;
   va_start(vl, fmt);
 
   size_t needed = 1 + (size_t)vsnprintf(NULL, 0, fmt, vl);
+  va_end(vl);
 
   while (kvs->buf_used+needed > kvs->buf_size) {
     kvs->buf_size *= 2;
@@ -70,6 +74,7 @@ void kvs_printf(struct kvs* kvs, const char* key, const char* fmt, ...) {
 
   va_start(vl, fmt); // Must re-init.
   vsnprintf(&kvs->buf[kvs->vals[kvs->n]], needed, fmt, vl);
+  va_end(vl);
 
   kvs->n++;
 }

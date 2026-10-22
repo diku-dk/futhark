@@ -46,7 +46,7 @@ module Futhark.IR.SOACS.SOAC
     SOACMapper (..),
     identitySOACMapper,
     mapSOACM,
-    traverseSOACStms,
+    traverseSOACBodies,
   )
 where
 
@@ -499,14 +499,14 @@ mapOnSOACReduce tv (Reduce comm red_lam red_nes) =
     <$> mapOnSOACLambda tv red_lam
     <*> mapM (mapOnSOACSubExp tv) red_nes
 
--- | A helper for defining 'TraverseOpStms'.
-traverseSOACStms :: (Monad m) => OpStmsTraverser m (SOAC rep) rep
-traverseSOACStms f = mapSOACM mapper
+-- | A helper for defining 'TraverseOpBodies'.
+traverseSOACBodies :: (Monad m) => OpBodyTraverser m (SOAC rep) rep
+traverseSOACBodies f = mapSOACM mapper
   where
     mapper =
       identitySOACMapper
-        { mapOnSOACLambda = traverseLambdaStms f,
-          mapOnSOACExtLambda = traverseLambdaStms f
+        { mapOnSOACLambda = traverseLambdaBodies f,
+          mapOnSOACExtLambda = traverseLambdaBodies f
         }
 
 instance (ASTRep rep) => FreeIn (Scan rep) where
@@ -802,6 +802,7 @@ instance (RepTypes rep) => ST.IndexOp (SOAC rep) where
         pure (lam, se, drop num_accs $ lambdaParams lam, arrs)
 
       arrIndex p arr = do
+        guard $ primType $ paramType p
         ST.Indexed cs pe <- ST.index' arr [i] vtable
         pure (paramName p, (pe, cs))
 

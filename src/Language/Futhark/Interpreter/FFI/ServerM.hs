@@ -35,6 +35,8 @@ module Language.Futhark.Interpreter.FFI.ServerM
     variants,
     mkSum,
     destruct,
+    -- Files
+    store,
     -- Error handling convenience
     throwNothing,
   )
@@ -272,6 +274,16 @@ getData vr = do
   s <- askServer
   n <- varName vr
   either (const Nothing) Just <$> liftIO (FS.getValue s n)
+
+-- | Write these values to this file, in the binary data format. Only values
+-- that can be represented in that format can be written; an opaque value is
+-- instead written in a form that only the same program can read back.
+store :: FilePath -> [ValueRef] -> ServerM ()
+store f vrs = do
+  s <- askServer
+  vns <- mapM varName vrs
+  liftIO (FS.cmdStore s f vns)
+    >>= throwServerJust ("cmdStore failed on file " ++ f ++ " with variables " ++ csList (map T.unpack vns) ++ ".")
 
 index :: [Int64] -> ValueRef -> ServerM ValueRef
 index is src = do

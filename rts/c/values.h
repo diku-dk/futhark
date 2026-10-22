@@ -411,7 +411,7 @@ static int write_str_u16(FILE *out, const void *src) {
   return fprintf(out, "%huu16", *(const uint16_t*)src);
 }
 
-static int write_str_i32(FILE *out, const int32_t *src) {
+static int write_str_i32(FILE *out, const void *src) {
   return fprintf(out, "%di32", *(const int32_t*)src);
 }
 
@@ -538,43 +538,43 @@ struct primtype_info_t {
 
 static const struct primtype_info_t i8_info =
   {.binname = "  i8", .type_name = "i8",   .size = 1,
-   .write_str = (writer)write_str_i8, .read_str = (str_reader)read_str_i8};
+   .write_str = write_str_i8, .read_str = read_str_i8};
 static const struct primtype_info_t i16_info =
   {.binname = " i16", .type_name = "i16",  .size = 2,
-   .write_str = (writer)write_str_i16, .read_str = (str_reader)read_str_i16};
+   .write_str = write_str_i16, .read_str = read_str_i16};
 static const struct primtype_info_t i32_info =
   {.binname = " i32", .type_name = "i32",  .size = 4,
-   .write_str = (writer)write_str_i32, .read_str = (str_reader)read_str_i32};
+   .write_str = write_str_i32, .read_str = read_str_i32};
 static const struct primtype_info_t i64_info =
   {.binname = " i64", .type_name = "i64",  .size = 8,
-   .write_str = (writer)write_str_i64, .read_str = (str_reader)read_str_i64};
+   .write_str = write_str_i64, .read_str = read_str_i64};
 static const struct primtype_info_t u8_info =
   {.binname = "  u8", .type_name = "u8",   .size = 1,
-   .write_str = (writer)write_str_u8, .read_str = (str_reader)read_str_u8};
+   .write_str = write_str_u8, .read_str = read_str_u8};
 static const struct primtype_info_t u16_info =
   {.binname = " u16", .type_name = "u16",  .size = 2,
-   .write_str = (writer)write_str_u16, .read_str = (str_reader)read_str_u16};
+   .write_str = write_str_u16, .read_str = read_str_u16};
 static const struct primtype_info_t u32_info =
   {.binname = " u32", .type_name = "u32",  .size = 4,
-   .write_str = (writer)write_str_u32, .read_str = (str_reader)read_str_u32};
+   .write_str = write_str_u32, .read_str = read_str_u32};
 static const struct primtype_info_t u64_info =
   {.binname = " u64", .type_name = "u64",  .size = 8,
-   .write_str = (writer)write_str_u64, .read_str = (str_reader)read_str_u64};
+   .write_str = write_str_u64, .read_str = read_str_u64};
 static const struct primtype_info_t f16_info =
   {.binname = " f16", .type_name = "f16",  .size = 2,
-   .write_str = (writer)write_str_f16, .read_str = (str_reader)read_str_f16};
+   .write_str = write_str_f16, .read_str = read_str_f16};
 static const struct primtype_info_t f32_info =
   {.binname = " f32", .type_name = "f32",  .size = 4,
-   .write_str = (writer)write_str_f32, .read_str = (str_reader)read_str_f32};
+   .write_str = write_str_f32, .read_str = read_str_f32};
 static const struct primtype_info_t f64_info =
   {.binname = " f64", .type_name = "f64",  .size = 8,
-   .write_str = (writer)write_str_f64, .read_str = (str_reader)read_str_f64};
+   .write_str = write_str_f64, .read_str = read_str_f64};
 static const struct primtype_info_t bool_info =
   {.binname = "bool", .type_name = "bool", .size = 1,
-   .write_str = (writer)write_str_bool, .read_str = (str_reader)read_str_bool};
+   .write_str = write_str_bool, .read_str = read_str_bool};
 static const struct primtype_info_t unit_info =
   {.binname = "bool", .type_name = "unit",   .size = 1,
-   .write_str = (writer)write_str_unit, .read_str = (str_reader)read_str_unit};
+   .write_str = write_str_unit, .read_str = read_str_unit};
 
 static const struct primtype_info_t* primtypes[] = {
   &i8_info, &i16_info, &i32_info, &i64_info,
@@ -608,7 +608,7 @@ static int read_is_binary(FILE *f) {
 }
 
 static const struct primtype_info_t* read_bin_read_type_enum(FILE *f) {
-  char read_binname[4];
+  char read_binname[5] = { 0 };
 
   int num_matched = fscanf(f, "%4c", read_binname);
   if (num_matched != 1) { futhark_panic(1, "binary-input: Couldn't read element type.\n"); }
@@ -655,14 +655,15 @@ static int read_bin_array(FILE *f,
   if (ret != 0) { futhark_panic(1, "binary-input: Couldn't get dims.\n"); }
 
   if (bin_dims != dims) {
-    futhark_panic(1, "binary-input: Expected %i dimensions, but got array with %i dimensions.\n",
-          dims, bin_dims);
+    futhark_panic(1, "binary-input: Expected %d dimensions, but got array with %d dimensions.\n",
+                  (int)dims, (int)bin_dims);
   }
 
   const struct primtype_info_t *bin_primtype = read_bin_read_type_enum(f);
   if (expected_type != bin_primtype) {
-    futhark_panic(1, "binary-input: Expected %iD-array with element type '%s' but got %iD-array with element type '%s'.\n",
-          dims, expected_type->type_name, dims, bin_primtype->type_name);
+    futhark_panic(1, "binary-input: Expected %dD-array with element type '%s' but got %dD-array with element type '%s'.\n",
+                  (int)dims, expected_type->type_name,
+                  (int)dims, bin_primtype->type_name);
   }
 
   int64_t elem_count = 1;
@@ -682,15 +683,16 @@ static int read_bin_array(FILE *f,
   int64_t elem_size = expected_type->size;
   void* tmp = realloc(*data, (size_t)(elem_count * elem_size));
   if (tmp == NULL) {
-    futhark_panic(1, "binary-input: Failed to allocate array of size %i.\n",
-          elem_count * elem_size);
+    futhark_panic(1, "binary-input: Failed to allocate array of size %lld.\n",
+                  (long long int)(elem_count * elem_size));
   }
   *data = tmp;
 
   int64_t num_elems_read = (int64_t)fread(*data, (size_t)elem_size, (size_t)elem_count, f);
   if (num_elems_read != elem_count) {
-    futhark_panic(1, "binary-input: tried to read %i elements of an array, but only got %i elements.\n",
-          elem_count, num_elems_read);
+    futhark_panic(1, "binary-input: tried to read %lld elements of an array, but only got %lld elements.\n",
+                  (long long int)elem_count,
+                  (long long int)num_elems_read);
   }
 
   // If we're on big endian platform we must change all multibyte elements
@@ -704,7 +706,7 @@ static int read_bin_array(FILE *f,
 
 static int read_array(FILE *f, const struct primtype_info_t *expected_type, void **data, int64_t *shape, int64_t dims) {
   if (!read_is_binary(f)) {
-    return read_str_array(f, expected_type->size, (str_reader)expected_type->read_str, expected_type->type_name, data, shape, dims);
+    return read_str_array(f, expected_type->size, expected_type->read_str, expected_type->type_name, data, shape, dims);
   } else {
     return read_bin_array(f, expected_type, data, shape, dims);
   }

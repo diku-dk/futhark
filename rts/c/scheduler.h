@@ -226,6 +226,8 @@ struct subtask {
 
   /* Shared variables across subtasks */
   volatile int *counter; // Counter for ongoing subtasks
+  volatile int *error;
+
   // Shared task timers and iterators
   int64_t *task_time;
   int64_t *task_iter;
@@ -514,11 +516,6 @@ struct scheduler {
   // If there is work to steal => active_work > 0
   volatile int active_work;
 
-  // Only one error can be returned at the time now.  Maybe we can
-  // provide a stack like structure for pushing errors onto if we wish
-  // to backpropagte multiple errors
-  volatile int error;
-
   // kappa time unit in nanoseconds
   double kappa;
 };
@@ -600,17 +597,11 @@ static inline int run_subtask(struct worker* worker, struct subtask* subtask)
                         subtask->id,
                         worker->tid);
   worker->nested--;
-  // Some error occured during some other subtask
-  // so we just clean-up and return
-  if (worker->scheduler->error != 0) {
-    // Even a failed task counts as finished.
-    __atomic_fetch_sub(subtask->counter, 1, __ATOMIC_RELAXED);
-    free(subtask);
-    return 0;
-  }
+
   if (err != 0) {
-    __atomic_store_n(&worker->scheduler->error, err, __ATOMIC_RELAXED);
+    __atomic_store_n(subtask->error, err, __ATOMIC_RELAXED);
   }
+
   // Total sequential time spent
   int64_t time_elapsed = total_now(worker->total, worker->timer);
 #if defined(MCPROFILE)
@@ -664,6 +655,7 @@ static inline struct subtask* create_subtask(parloop_fn fn,
                                              void* args,
                                              const char* name,
                                              volatile int* counter,
+                                             volatile int* error,
                                              int64_t *timer,
                                              int64_t *iter,
                                              int64_t start, int64_t end,
@@ -680,6 +672,7 @@ static inline struct subtask* create_subtask(parloop_fn fn,
   subtask->args       = args;
 
   subtask->counter    = counter;
+  subtask->error      = error;
   subtask->task_time  = timer;
   subtask->task_iter  = iter;
 
@@ -694,6 +687,7 @@ static inline struct subtask* create_subtask(parloop_fn fn,
 }
 
 static int dummy_counter = 0;
+static int dummy_error = 0;
 static int64_t dummy_timer = 0;
 static int64_t dummy_iter = 0;
 
@@ -716,11 +710,12 @@ static inline void wake_up_threads(struct scheduler *scheduler, int start_tid, i
 #endif
   for (int i = start_tid; i < end_tid; i++) {
     struct subtask *subtask = create_subtask(dummy_fn, NULL, "dummy_fn",
-                                            &dummy_counter,
-                                            &dummy_timer, &dummy_iter,
-                                            0, 0,
-                                            0, 0,
-                                            0);
+                                             &dummy_counter,
+                                             &dummy_error,
+                                             &dummy_timer, &dummy_iter,
+                                             0, 0,
+                                             0, 0,
+                                             0);
     CHECK_ERR(subtask_queue_enqueue(&scheduler->workers[i], subtask), "subtask_queue_enqueue");
   }
 }
@@ -797,6 +792,7 @@ static inline int scheduler_execute_parloop(struct scheduler *scheduler,
   int64_t remainder = info.remainder;
   int nsubtasks = info.nsubtasks;
   volatile int join_counter = nsubtasks;
+  volatile int error = 0;
 
   // Shared timer used to sum up all
   // sequential work from each subtask
@@ -816,11 +812,11 @@ static inline int scheduler_execute_parloop(struct scheduler *scheduler,
   int64_t end = iter_pr_subtask + (int64_t)(remainder != 0);
   for (int subtask_id = 0; subtask_id < nsubtasks; subtask_id++) {
     struct subtask *subtask = create_subtask(task->fn, task->args, task->name,
-                                              &join_counter,
-                                              &task_timer, &task_iter,
-                                              start, end,
-                                              chunkable, chunk_size,
-                                              subtask_id);
+                                             &join_counter, &error,
+                                             &task_timer, &task_iter,
+                                             start, end,
+                                             chunkable, chunk_size,
+                                             subtask_id);
     assert(subtask != NULL);
     // In most cases we will never have more subtasks than workers,
     // but there can be exceptions (e.g. the kappa tuning function).
@@ -865,9 +861,8 @@ static inline int scheduler_execute_parloop(struct scheduler *scheduler,
 
   // Write back timing results of all sequential work
   (*timer) += task_timer;
-  return scheduler->error;
+  return error;
 }
-
 
 static inline int scheduler_execute_task(struct scheduler *scheduler,
                                          struct scheduler_parloop *task)
@@ -1104,7 +1099,6 @@ static int scheduler_init(struct scheduler *scheduler,
   scheduler->kappa = kappa;
   scheduler->num_threads = num_workers;
   scheduler->active_work = 0;
-  scheduler->error = 0;
 
   scheduler->workers = calloc(num_workers, sizeof(struct worker));
 

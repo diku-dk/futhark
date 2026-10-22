@@ -427,7 +427,7 @@ failureMsgFunction failures =
       onPart ErrorVal {} = "%lld"
       onFailure i (FailureMsg emsg@(ErrorMsg parts) backtrace) =
         let msg = concatMap onPart parts ++ "\n" ++ printfEscape backtrace
-            msgargs = [[C.cexp|args[$int:j]|] | j <- [0 .. errorMsgNumArgs emsg - 1]]
+            msgargs = [[C.cexp|(long long int)args[$int:j]|] | j <- [0 .. errorMsgNumArgs emsg - 1]]
          in [C.cstm|case $int:i: {return msgprintf($string:msg, $args:msgargs); break;}|]
       failure_cases =
         zipWith onFailure [(0 :: Int) ..] failures

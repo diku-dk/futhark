@@ -75,7 +75,7 @@ allCalledBy :: Name -> CallGraph -> S.Set Name
 allCalledBy f = maybe mempty fcAllCalled . M.lookup f . cgCalledByFuns
 
 -- | Build the program's call graph.
-buildCallGraph :: (TraverseOpStms rep) => Prog rep -> CallGraph
+buildCallGraph :: (TraverseOpBodies rep) => Prog rep -> CallGraph
 buildCallGraph prog =
   CallGraph fg cg
   where
@@ -99,7 +99,7 @@ numOccurences (CallGraph funs consts) =
 
 -- | @buildCallGraph ftable fg fname@ updates @fg@ with the
 -- contributions of function @fname@.
-buildFGfun :: (TraverseOpStms rep) => FunctionTable rep -> FunGraph -> Name -> FunGraph
+buildFGfun :: (TraverseOpBodies rep) => FunctionTable rep -> FunGraph -> Name -> FunGraph
 buildFGfun ftable fg fname =
   -- Check if function is a non-builtin that we have not already
   -- processed.
@@ -111,20 +111,20 @@ buildFGfun ftable fg fname =
       foldl' (buildFGfun ftable) fg' $ fcAllCalled callees
     _ -> fg
 
-buildFGStms :: (TraverseOpStms rep) => Stms rep -> FunCalls
+buildFGStms :: (TraverseOpBodies rep) => Stms rep -> FunCalls
 buildFGStms = mconcat . map buildFGstm . stmsToList
 
-buildFGBody :: (TraverseOpStms rep) => Body rep -> FunCalls
+buildFGBody :: (TraverseOpBodies rep) => Body rep -> FunCalls
 buildFGBody = buildFGStms . bodyStms
 
-buildFGstm :: (TraverseOpStms rep) => Stm rep -> FunCalls
+buildFGstm :: (TraverseOpBodies rep) => Stm rep -> FunCalls
 buildFGstm (Let (Pat (p : _)) aux (Apply fname _ _ _)) =
   FunCalls (M.singleton (patElemName p) (stmAuxAttrs aux, fname)) (S.singleton fname)
-buildFGstm (Let _ _ (Op op)) = execWriter $ traverseOpStms onStms op
+buildFGstm (Let _ _ (Op op)) = execWriter $ traverseOpBodies onBody op
   where
-    onStms _ stms = do
-      tell $ buildFGStms stms
-      pure stms
+    onBody _ body = do
+      tell $ buildFGStms $ bodyStms body
+      pure body
 buildFGstm (Let _ _ e) = execWriter $ mapExpM folder e
   where
     folder =

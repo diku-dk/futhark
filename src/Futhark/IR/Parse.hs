@@ -255,7 +255,7 @@ lInt = lexeme L.decimal
 pPos :: Parser L.Pos
 pPos =
   L.Pos
-    <$> manyTill L.charLiteral (char ':')
+    <$> (T.unpack <$> takeWhileP (Just "file name") (/= ':') <* char ':')
     <*> lInt
     <*> (char ':' *> lInt)
     <*> pure (-1) -- Cannot recover offset.
@@ -688,7 +688,11 @@ pEntry =
   where
     pEntryPointInputs = braces (pEntryPointInput `sepBy` pComma)
     pEntryPointInput =
-      EntryParam <$> pName <* pColon <*> pDiet <*> pEntryPointType
+      EntryParam
+        <$> (nameFromText <$> pStringLiteral)
+        <* pColon
+        <*> pDiet
+        <*> pEntryPointType
     pEntryPointResult =
       EntryResult <$> pDiet <*> pEntryPointType
 
@@ -712,7 +716,7 @@ pOpaqueType =
     <$> (keyword "type" *> (nameFromText <$> pStringLiteral) <* pEqual)
     <*> ((,Nothing) <$> choice [pRecord, pSum, pRecordArray, pOpaqueArray])
   where
-    pFieldName = choice [pName, nameFromString . show <$> pInt]
+    pFieldName = choice [nameFromText <$> pStringLiteral]
     pField = (,) <$> pFieldName <* pColon <*> pEntryPointType
     pRecord = keyword "record" $> OpaqueRecord <*> braces (many pField)
 
