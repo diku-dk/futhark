@@ -222,6 +222,7 @@ library
       Futhark.CodeGen.RTS.JavaScript
       Futhark.CodeGen.ImpCode
       Futhark.CodeGen.ImpCode.GPU
+      Futhark.CodeGen.ImpCode.Kernels
       Futhark.CodeGen.ImpCode.Multicore
       Futhark.CodeGen.ImpCode.OpenCL
       Futhark.CodeGen.ImpCode.Sequential

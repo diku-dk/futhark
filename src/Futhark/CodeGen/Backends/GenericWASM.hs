@@ -10,6 +10,7 @@ module Futhark.CodeGen.Backends.GenericWASM
     JSRecordField (..),
     JSOpaqueType (..),
     emccExportNames,
+    manifestFunctions,
     javascriptWrapper,
     extToString,
     opaqueToJS,
@@ -138,6 +139,7 @@ emccExportNames manifest =
          "_futhark_context_unpause_profiling"
        ]
 
+-- | Every C function named in the manifest.
 manifestFunctions :: Manifest -> [CFuncName]
 manifestFunctions manifest =
   map entryPointCFun (M.elems $ manifestEntryPoints manifest)

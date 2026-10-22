@@ -68,7 +68,7 @@ compilePrimExp f (UnOpExp (Neg Bool) x) = do
 compilePrimExp f (UnOpExp (Neg (IntType t)) x) = do
   x' <- compilePrimExp f x
   pure [C.cexp|($ty:(intTypeToCType t))$id:(prettyString (Sub t OverflowWrap))(0, $exp:x')|]
-compilePrimExp f (UnOpExp Neg {} x) = do
+compilePrimExp f (UnOpExp (Neg (FloatType _)) x) = do
   x' <- compilePrimExp f x
   pure [C.cexp|-$exp:x'|]
 compilePrimExp f (UnOpExp op x) = do
