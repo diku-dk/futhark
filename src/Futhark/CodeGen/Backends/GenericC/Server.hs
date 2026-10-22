@@ -168,10 +168,10 @@ typeBoilerplate manifest (tname, TypeArray c_type_name et rank ops) =
               }
               int $id:array_set_wrap(struct futhark_context *ctx,
                                      const void *arr,
-                                     const void *val,
+                                     void *val,
                                      const typename int64_t *is) {
                 return $id:(arraySet ops)(ctx, (typename $id:c_type_name)arr,
-                                          *(const $ty:element_c_type*)val, $args:is_args);
+                                          *($ty:element_c_type*)val, $args:is_args);
               }
               const typename int64_t* $id:array_shape_wrap(struct futhark_context *ctx,
                                                            const void *arr) {
@@ -445,10 +445,10 @@ typeBoilerplate manifest (tname, TypeOpaque c_type_name ops extra_ops _) =
               }
               int $id:set_wrap(struct futhark_context *ctx,
                                const void *arr,
-                               const void *val,
+                               void *val,
                                const typename int64_t *is) {
                 return $id:set(ctx, (typename $id:c_type_name)arr,
-                               *(const $ty:element_c_type*)val, $args:is_args);
+                               *($ty:element_c_type*)val, $args:is_args);
               }
               const typename int64_t* $id:shape_wrap(struct futhark_context *ctx,
                                                      const void *arr) {

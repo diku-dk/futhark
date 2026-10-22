@@ -18,7 +18,7 @@ typedef int (*restore_fn)(const void*, FILE*, struct futhark_context*, void*);
 typedef void (*store_fn)(const void*, FILE*, struct futhark_context*, void*);
 typedef int (*free_fn)(const void*, struct futhark_context*, void*);
 typedef int (*array_new_fn)(struct futhark_context *, void**, const void*, const int64_t*);
-typedef int (*array_set_fn)(struct futhark_context *, const void*, const void*, const int64_t*);
+typedef int (*array_set_fn)(struct futhark_context *, const void*, void*, const int64_t*);
 typedef const int64_t* (*array_shape_fn)(struct futhark_context*, const void*);
 typedef int (*array_index_fn)(struct futhark_context*, void*, const void*, const int64_t*);
 typedef int (*array_values_fn)(struct futhark_context*, const void*, void*);
