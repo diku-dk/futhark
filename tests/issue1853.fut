@@ -1,6 +1,6 @@
 -- Test parser-related quirks.
 
-type Thing = #this [2]f64 | #that [3]f64
+type Thing = #this [2]f32 | #that [3]f32
 
 type pt [n] 't = [n]t
 

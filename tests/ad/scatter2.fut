@@ -4,13 +4,13 @@
 -- (with overwritten positions zeroed) to the input accumulator.
 -- ==
 -- tags { autodiff }
--- input { [1.0] }
--- output { [1.0] }
+-- input { [1.0f32] }
+-- output { [1.0f32] }
 
-def f [n] (xs: [n]f64) =
+def f [n] (xs: [n]f32) =
   let is = iota n ++ replicate n (-1)
   let res = scatter (replicate n 0.0) is (xs ++ xs)
-  in f64.sum res
+  in f32.sum res
 
-entry main (xs: [1]f64) =
+entry main (xs: [1]f32) =
   vjp f xs 1.0

@@ -13,24 +13,24 @@ module compose = \(F: operation) ->
       def f (x: a) = G.f (F.f x)
     }
 
-module i32_to_f64 : operation with a = i32 with b = f64 = {
+module i32_to_f32 : operation with a = i32 with b = f32 = {
   type a = i32
-  type b = f64
-  def f (x: a) = f64.i32 x
+  type b = f32
+  def f (x: a) = f32.i32 x
 }
 
-module f64_to_i32 : operation with a = f64 with b = i32 = {
-  type a = f64
+module f32_to_i32 : operation with a = f32 with b = i32 = {
+  type a = f32
   type b = i32
-  def f (x: a) = i32.f64 x
+  def f (x: a) = i32.f32 x
 }
 
-module f64_sqrt : operation with a = f64 with b = f64 = {
-  type a = f64
-  type b = f64
-  def f (x: a) = f64.sqrt x
+module f32_sqrt : operation with a = f32 with b = f32 = {
+  type a = f32
+  type b = f32
+  def f (x: a) = f32.sqrt x
 }
 
-module i32_sqrt = compose (compose i32_to_f64 f64_sqrt) f64_to_i32
+module i32_sqrt = compose (compose i32_to_f32 f32_sqrt) f32_to_i32
 
 def main (x: i32) = i32_sqrt.f x

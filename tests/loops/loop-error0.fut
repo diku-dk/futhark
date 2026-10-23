@@ -1,6 +1,6 @@
 -- ==
 -- error: aliases another returned value
-def main () : ([]f64, [][]f64) =
+def main () : ([]f32, [][]f32) =
   let e_rows = []
   let arr = copy (e_rows)
   let acc = copy ([1.0])

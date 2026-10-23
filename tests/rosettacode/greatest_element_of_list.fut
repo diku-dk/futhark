@@ -1,1 +1,1 @@
-def main (xs: []f64) = reduce f64.max (-f64.inf) xs
+def main (xs: []f32) = reduce f32.max (-f32.inf) xs

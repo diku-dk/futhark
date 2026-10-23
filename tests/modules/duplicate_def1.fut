@@ -2,7 +2,7 @@
 -- in a previous scope.
 -- ==
 -- input { }
--- output { 1 2.0 }
+-- output { 1 2.0f32 }
 
 type foo = i32
 
@@ -10,7 +10,7 @@ module Foo = {
   def foo () : i32 = 1
 
   module Foo = {
-    type foo = f64
+    type foo = f32
     def foo () : foo = 2.0
   }
 }

@@ -8,7 +8,7 @@
 -- produced.
 
 module loess_m = {
-  module T = f64
+  module T = f32
 
   type t = T.t
 
@@ -190,13 +190,13 @@ module loess_m = {
     in (l_idx, lambda)
 }
 
-entry main [m] [n] (Y: [m][n]f64) (q: i64) (jump: i64) =
+entry main [m] [n] (Y: [m][n]f32) (q: i64) (jump: i64) =
   -- set up parameters for the low-pass filter smoothing
   let n_m = if jump == 1 then n else n / jump + 1
   let m_fun (x: i64): i64 = i64.min (x * jump) (n - 1)
   -- filter nans and pad non-nan indices
   let (nn_y_l, nn_idx_l, n_nn_l) =
-    map (loess_m.filterPadWithKeys (\i -> !(f64.isnan i)) 0) Y |> unzip3
+    map (loess_m.filterPadWithKeys (\i -> !(f32.isnan i)) 0) Y |> unzip3
   -- calculate invariant arrays for the low-pass filter smoothing
   let (l_idx_l, lambda_l) =
     map2 (\nn_idx n_nn ->
@@ -204,7 +204,7 @@ entry main [m] [n] (Y: [m][n]f64) (q: i64) (jump: i64) =
          nn_idx_l
          n_nn_l
     |> unzip
-  let weights_l = replicate (m * n) 1f64 |> unflatten
+  let weights_l = replicate (m * n) 1f32 |> unflatten
   in loess_m.loess_outer_l nn_idx_l
                            nn_y_l
                            q

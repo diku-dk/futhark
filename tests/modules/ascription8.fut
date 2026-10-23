@@ -1,7 +1,7 @@
 -- Ascription of a module containing a parametric module whose
 -- parameter contains an abstract type.
 -- ==
--- input {} output {0.0}
+-- input {} output {0.0f32}
 -- warning: ^$
 
 module type sobol = {
@@ -24,8 +24,8 @@ module Sobol : sobol = {
 }
 
 module R = Sobol.Reduce {
-  type t = f64
-  def ne = 0f64
+  type t = f32
+  def ne = 0f32
 }
 
-def main : f64 = R.run 100000
+def main : f32 = R.run 100000

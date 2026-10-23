@@ -1,11 +1,11 @@
--- Test that negation works for both integers and f64s.
+-- Test that negation works for both integers and f32s.
 -- ==
 -- input {
 --   [1,2,3]
 -- }
 -- output {
 --   [-1, -2, -3]
---   [-1.000000, -2.000000, -3.000000]
+--   [-1.000000f32, -2.000000f32, -3.000000f32]
 -- }
-def main (a: []i32) : ([]i32, []f64) =
-  (map (0 -) a, map (0.0 -) (map f64.i32 a))
+def main (a: []i32) : ([]i32, []f32) =
+  (map (0 -) a, map (0.0 -) (map f32.i32 a))

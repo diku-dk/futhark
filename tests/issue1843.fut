@@ -5,12 +5,12 @@ type coating =
     #AntiReflective
   | #Mirror
   | #Absorbing
-  | #PhaseGradient_IdealFocus {lam: f64, f: f64}
-  | #PhaseGradient_RotSym_Dispersive {lam_d: f64, phi0: [N_coating_coefs]f64, GD: [N_coating_coefs]f64, GDD: [N_coating_coefs]f64}
+  | #PhaseGradient_IdealFocus {lam: f32, f: f32}
+  | #PhaseGradient_RotSym_Dispersive {lam_d: f32, phi0: [N_coating_coefs]f32, GD: [N_coating_coefs]f32, GDD: [N_coating_coefs]f32}
 
-def parse_coatings (coating_list_array: [][N_coating_specs]f64) : []coating =
-  let parse (specs: [N_coating_specs]f64): coating =
-    let enum = i64.f64 specs[0]
+def parse_coatings (coating_list_array: [][N_coating_specs]f32) : []coating =
+  let parse (specs: [N_coating_specs]f32): coating =
+    let enum = i64.f32 specs[0]
     in match enum
        case 0 ->
          -- AntiReflective
@@ -19,6 +19,6 @@ def parse_coatings (coating_list_array: [][N_coating_specs]f64) : []coating =
          #AntiReflective
   in map parse coating_list_array
 
-entry RayTrace (coating_list_array: [][N_coating_specs]f64) : []coating =
+entry RayTrace (coating_list_array: [][N_coating_specs]f32) : []coating =
   let coatings = parse_coatings coating_list_array
   in coatings

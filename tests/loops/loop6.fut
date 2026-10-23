@@ -9,7 +9,7 @@
 -- propagation).
 -- ==
 
-def main [n] (a: *[n][]f64, u: *[][]f64) : ([][]f64, [][]f64) =
+def main [n] (a: *[n][]f32, u: *[][]f32) : ([][]f32, [][]f32) =
   loop ((a, u)) for k < n do
     let u[k, k] = a[k, k]
     let a = loop (a) for i < n - k do a

@@ -6,10 +6,10 @@
 -- ==
 -- tags { autodiff }
 -- entry: main
--- input { [3.0] }
--- output { [[1.0], [2.0]] }
+-- input { [3.0f32] }
+-- output { [[1.0f32], [2.0f32]] }
 
-def f (xs: [1]f64) : f64 =
-  f64.sum (scatter (replicate 1 0.0) [0i64] xs)
+def f (xs: [1]f32) : f32 =
+  f32.sum (scatter (replicate 1 0.0) [0i64] xs)
 
-entry main (xs: [1]f64) = mjp f xs [1.0, 2.0]
+entry main (xs: [1]f32) = mjp f xs [1.0, 2.0]

@@ -1,9 +1,9 @@
 -- Test inspired from Option Pricing's brownian bridge
 -- ==
--- input { [ [1.0, 3.0, 5.0, 7.0, 9.0, 11.0], [0.0, 2.0, 4.0, 6.0, 8.0, 10.0] ] }
--- output { [[3.0f64, 2.0f64, 2.0f64, 2.0f64, 2.75f64, -11.25f64], [2.0f64, 2.0f64, 2.0f64, 2.0f64, 2.0f64, -10.0f64]] }
+-- input { [ [1.0f32, 3.0f32, 5.0f32, 7.0f32, 9.0f32, 11.0f32], [0.0f32, 2.0f32, 4.0f32, 6.0f32, 8.0f32, 10.0f32] ] }
+-- output { [[3.0f32, 2.0f32, 2.0f32, 2.0f32, 2.75f32, -11.25f32], [2.0f32, 2.0f32, 2.0f32, 2.0f32, 2.0f32, -10.0f32]] }
 
-def brownian_bridge [num_dates] (gauss: [num_dates]f64) : [num_dates]f64 =
+def brownian_bridge [num_dates] (gauss: [num_dates]f32) : [num_dates]f32 =
   let bbrow = replicate num_dates 0.0
   let bbrow[num_dates - 1] = 0.5 * gauss[0]
   let bbrow =
@@ -20,5 +20,5 @@ def brownian_bridge [num_dates] (gauss: [num_dates]f64) : [num_dates]f64 =
       in bbrow
   in bbrow
 
-def main [m] [num_dates] (gausses: [m][num_dates]f64) : [m][num_dates]f64 =
+def main [m] [num_dates] (gausses: [m][num_dates]f32) : [m][num_dates]f32 =
   map brownian_bridge gausses
