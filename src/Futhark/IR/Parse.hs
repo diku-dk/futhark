@@ -871,7 +871,7 @@ pSOAC pr =
           <*> pLambda pr
     pVJP =
       parens $
-        SOAC.VJP
+        SOAC.VJP SOAC.DiffAD
           <$> pShape
           <* pComma
           <*> braces (pSubExp `sepBy` pComma)
@@ -881,7 +881,7 @@ pSOAC pr =
           <*> pLambda pr
     pJVP =
       parens $
-        SOAC.JVP
+        SOAC.JVP SOAC.DiffAD
           <$> pShape
           <* pComma
           <*> braces (pSubExp `sepBy` pComma)

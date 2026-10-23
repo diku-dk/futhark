@@ -28,6 +28,7 @@ module Futhark.IR.Prop.Types
     arraySize,
     arraysSize,
     elemType,
+    setElemType,
     rowType,
     transposeType,
     rearrangeType,
@@ -292,6 +293,13 @@ elemType (Array t _ _) = t
 elemType (Prim t) = t
 elemType Acc {} = error "elemType Acc"
 elemType Mem {} = error "elemType Mem"
+
+-- | Set the element type of an array. On non-arrays, just returns the new type.
+setElemType :: TypeBase shape o -> PrimType -> TypeBase shape o
+setElemType (Array _ shape o) pt = Array pt shape o
+setElemType (Prim _) pt = Prim pt
+setElemType Acc {} _ = error "setElemType Acc"
+setElemType Mem {} _ = error "setElemType Mem"
 
 -- | Swap the two outer dimensions of the type.
 transposeType :: Type -> Type

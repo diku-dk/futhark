@@ -202,3 +202,15 @@ def with_vjp 'a 'b (f: a -> b) (f': (res: b) -> (b_adj: b) -> a) (x: a) : b =
 -- adjoint (`c`) is explicitly separated from the primal result (`b`).
 def with_vjp_tape 'a 'b 'c (f: a -> (c, b)) (f': (c, b) -> a) (x: a) : b =
   (with_vjp f (\(tape, _) (_, adj) -> f' (tape, adj)) x).1
+
+def jvp2_dep [n] [m] 'a 'b (f: [n]a -> [m]b) (x: [n]a) (x': [n]u64) : (*[m]b, *[m]u64) =
+  intrinsics.jvp2_dep f x x'
+
+def vjp2_dep [n] [m] 'a 'b (f: [n]a -> [m]b) (x: [n]a) (y': [m]u64) : (*[m]b, *[n]u64) =
+  intrinsics.vjp2_dep f x y'
+
+def jvp_dep [n] [m] 'a 'b (f: [n]a -> [m]b) (x: [n]a) (x': [n]u64) : [m]u64 =
+  (jvp2_dep f x x').1
+
+def vjp_dep [n] [m] 'a 'b (f: [n]a -> [m]b) (x: [n]a) (y': [m]u64) : *[n]u64 =
+  (vjp2_dep f x y').1

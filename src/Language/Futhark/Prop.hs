@@ -1005,6 +1005,66 @@ intrinsics =
                       array_a Fresh $ shape [n]
                     ]
               ),
+              ( "jvp2_dep",
+                IntrinsicPolyFun
+                  [tp_a, tp_b, sp_n, sp_m]
+                  [ Array NoMode (shape [n]) (t_a NoMode)
+                      `arr` Array Nonfresh (shape [m]) (t_b NoMode),
+                    Array Observe (shape [n]) (t_a NoMode),
+                    Array Observe (shape [n]) (Prim (Unsigned Int64))
+                  ]
+                  $ RetType []
+                  $ Scalar
+                  $ tupleRecord
+                    [ Array Fresh (shape [m]) $ t_b NoMode,
+                      Array Fresh (shape [m]) (Prim (Unsigned Int64))
+                    ]
+              ),
+              ( "vjp2_dep",
+                IntrinsicPolyFun
+                  [tp_a, tp_b, sp_n, sp_m]
+                  [ Array NoMode (shape [n]) (t_a mempty)
+                      `arr` Array Nonfresh (shape [m]) (t_b NoMode),
+                    Array Observe (shape [n]) (t_a NoMode),
+                    Array Observe (shape [m]) (Prim (Unsigned Int64))
+                  ]
+                  $ RetType []
+                  $ Scalar
+                  $ tupleRecord
+                    [ Array Fresh (shape [m]) $ t_b NoMode,
+                      Array Fresh (shape [n]) $ Prim (Unsigned Int64)
+                    ]
+              ),
+              ( "jmp2_dep",
+                IntrinsicPolyFun
+                  [tp_a, tp_b, sp_n, sp_m, sp_k]
+                  [ Array NoMode (shape [n]) (t_a mempty)
+                      `arr` Array Nonfresh (shape [m]) (t_b NoMode),
+                    Array Observe (shape [n]) (t_a NoMode),
+                    Array Observe (shape [k, n]) (Prim $ Unsigned Int64)
+                  ]
+                  $ RetType []
+                  $ Scalar
+                  $ tupleRecord
+                    [ Array Fresh (shape [m]) $ t_b NoMode,
+                      Array Fresh (shape [m, k]) (Prim $ Unsigned Int64)
+                    ]
+              ),
+              ( "mjp2_dep",
+                IntrinsicPolyFun
+                  [tp_a, tp_b, sp_n, sp_m, sp_k]
+                  [ Array NoMode (shape [n]) (t_a mempty)
+                      `arr` Array Nonfresh (shape [m]) (t_b NoMode),
+                    Array Observe (shape [n]) (t_a NoMode),
+                    Array Observe (shape [k, m]) (Prim $ Unsigned Int64)
+                  ]
+                  $ RetType []
+                  $ Scalar
+                  $ tupleRecord
+                    [ Array Fresh (shape [m]) $ t_b NoMode,
+                      Array Fresh (shape [n, k]) (Prim $ Unsigned Int64)
+                    ]
+              ),
               ( "with_vjp",
                 IntrinsicPolyFun
                   [tp_a, tp_b]

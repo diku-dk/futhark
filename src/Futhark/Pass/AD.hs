@@ -36,7 +36,7 @@ bindLambda pat aux (Lambda params _ body) args = do
     certifying cs $ letBindNames [v] $ BasicOp $ SubExp se
 
 onStm :: Bool -> Mode -> Scope SOACS -> Stm SOACS -> PassM (Stms SOACS)
-onStm _ mode scope (Let pat aux (Op (VJP shape args vec lam))) = do
+onStm _ mode scope (Let pat aux (Op (VJP DiffAD shape args vec lam))) = do
   lam' <- onLambda True mode scope lam
   if mode == All || lam == lam'
     then do
@@ -44,14 +44,14 @@ onStm _ mode scope (Let pat aux (Op (VJP shape args vec lam))) = do
         (`runReaderT` scope) . simplifyLambda
           =<< revVJP scope shape (stmAuxAttrs aux) lam'
       runBuilderT_ (bindLambda pat aux lam'' $ args ++ vec) scope
-    else pure $ oneStm $ Let pat aux $ Op $ VJP shape args vec lam'
-onStm _ mode scope (Let pat aux (Op (JVP shape args vec lam))) = do
+    else pure $ oneStm $ Let pat aux $ Op $ VJP DiffAD shape args vec lam'
+onStm _ mode scope (Let pat aux (Op (JVP DiffAD shape args vec lam))) = do
   lam' <- onLambda True mode scope lam
   if mode == All || lam == lam'
     then do
       lam'' <- fwdJVP scope shape (stmAuxAttrs aux) lam'
       runBuilderT_ (bindLambda pat aux lam'' $ args ++ vec) scope
-    else pure $ oneStm $ Let pat aux $ Op $ JVP shape args vec lam'
+    else pure $ oneStm $ Let pat aux $ Op $ JVP DiffAD shape args vec lam'
 --
 -- This corresponds to a WithVJP that is not inside of a differential operator.
 -- FIXME: this assumption will go bad when we don't inline so much.
