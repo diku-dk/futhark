@@ -178,7 +178,7 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
             pure $ IndexResult cs arr $ Slice $ ds_inds' ++ rest_inds
       where
         index DimFix {} = Nothing
-        index (DimSlice _ n s) = Just (n, DimSlice (constant (0 :: Int64)) n s)
+        index (DimSlice _ n _) = Just (n, DimSlice (constant (0 :: Int64)) n (constant (1 :: Int64)))
     Just (Replicate (Shape []) (Var src), cs)
       | Just dims <- arrayDims <$> seType (Var src),
         length inds == length dims,
