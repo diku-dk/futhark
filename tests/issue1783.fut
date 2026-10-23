@@ -2,10 +2,10 @@
 -- error: differ in arity
 
 type surface =
-    #asphere {curvature: f64}
-  | #sphere {curvature: f64}
+    #asphere {curvature: f32}
+  | #sphere {curvature: f32}
 
-entry sag (surf: surface) : f64 =
+entry sag (surf: surface) : f32 =
   match surf
   case #asphere ->
     1

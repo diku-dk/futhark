@@ -1,7 +1,7 @@
 -- ==
 -- input {0} error:
 
-def predict (a: [10]f64) : i64 =
+def predict (a: [10]f32) : i64 =
   let (m, i) =
     reduce (\(a, i) (b, j) -> if a > b then (a, i) else (b, j))
            (a[9], 9)

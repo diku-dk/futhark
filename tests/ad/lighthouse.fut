@@ -2,14 +2,14 @@
 -- ==
 -- tags { autodiff }
 -- entry: lighthouse_jvp lighthouse_vjp
--- input { 2.0 1.5 0.4 2.1 }
--- output { 2.902513633461043f64 -15.102798701184362f64 95.71780341846966f64 18.23196255589898f64
---          4.353770450191565f64 -16.849170784854458f64 143.57670512770449f64 27.347943833848472f64
+-- input { 2.0f32 1.5f32 0.4f32 2.1f32 }
+-- output { 2.902513633461043f32 -15.102798701184362f32 95.71780341846966f32 18.23196255589898f32
+--          4.353770450191565f32 -16.849170784854458f32 143.57670512770449f32 27.347943833848472f32
 --        }
 
 def lighthouse (nu, gamma, omega, t) =
-  let y1 = (nu * f64.tan (omega * t)) / (gamma - f64.tan (omega * t))
-  let y2 = (gamma * nu * f64.tan (omega * t)) / (gamma - f64.tan (omega * t))
+  let y1 = (nu * f32.tan (omega * t)) / (gamma - f32.tan (omega * t))
+  let y2 = (gamma * nu * f32.tan (omega * t)) / (gamma - f32.tan (omega * t))
   in (y1, y2)
 
 entry lighthouse_jvp nu gamma omega t =

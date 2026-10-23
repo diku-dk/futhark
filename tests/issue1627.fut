@@ -1,7 +1,7 @@
-type isoCoordinates = {xi: f64, eta: f64, zeta: f64}
+type isoCoordinates = {xi: f32, eta: f32, zeta: f32}
 type index = {x: i64, y: i64, z: i64}
 
-def pt : f64 = 1f64 / f64.sqrt (3f64)
+def pt : f32 = 1f32 / f32.sqrt (3f32)
 
 def quadpoints : [8]isoCoordinates =
   [ {xi = pt, eta = pt, zeta = pt}
@@ -14,16 +14,16 @@ def quadpoints : [8]isoCoordinates =
   , {xi = (-pt), eta = (-pt), zeta = (-pt)}
   ]
 
-def matmul_f64 [n] [m] [p] (A: [n][m]f64) (B: [m][p]f64) : [n][p]f64 =
+def matmul_f32 [n] [m] [p] (A: [n][m]f32) (B: [m][p]f32) : [n][p]f32 =
   map (\A_row ->
          map (\B_col ->
-                f64.sum (map2 (*) A_row B_col))
+                f32.sum (map2 (*) A_row B_col))
              (transpose B))
       A
 
-def Cmat : [6][6]f64 = [[0.35e2 / 0.26e2, 0.15e2 / 0.26e2, 0.15e2 / 0.26e2, 0, 0, 0], [0.15e2 / 0.26e2, 0.35e2 / 0.26e2, 0.15e2 / 0.26e2, 0, 0, 0], [0.15e2 / 0.26e2, 0.15e2 / 0.26e2, 0.35e2 / 0.26e2, 0, 0, 0], [0, 0, 0, 0.5e1 / 0.13e2, 0, 0], [0, 0, 0, 0, 0.5e1 / 0.13e2, 0], [0, 0, 0, 0, 0, 0.5e1 / 0.13e2]]
+def Cmat : [6][6]f32 = [[0.35e2 / 0.26e2, 0.15e2 / 0.26e2, 0.15e2 / 0.26e2, 0, 0, 0], [0.15e2 / 0.26e2, 0.35e2 / 0.26e2, 0.15e2 / 0.26e2, 0, 0, 0], [0.15e2 / 0.26e2, 0.15e2 / 0.26e2, 0.35e2 / 0.26e2, 0, 0, 0], [0, 0, 0, 0.5e1 / 0.13e2, 0, 0], [0, 0, 0, 0, 0.5e1 / 0.13e2, 0], [0, 0, 0, 0, 0, 0.5e1 / 0.13e2]]
 
-def getB0 (iso: isoCoordinates) : [6][24]f64 =
+def getB0 (iso: isoCoordinates) : [6][24]f32 =
   let t1 = 1 - iso.zeta
   let t2 = 1 + iso.zeta
   let t3 = 0.1e1 / 0.4e1 - iso.eta / 4
@@ -52,20 +52,20 @@ def getB0 (iso: isoCoordinates) : [6][24]f64 =
      , [-t3, 0, -t4, -t11, 0, t4, -t10, 0, t7, -t6, 0, -t7, t3, 0, -t5, t11, 0, t5, t10, 0, t8, t6, 0, -t8]
      ]
 
-def getQuadraturePointStiffnessMatrix (youngsModule: f64) (iso: isoCoordinates) : [24][24]f64 =
+def getQuadraturePointStiffnessMatrix (youngsModule: f32) (iso: isoCoordinates) : [24][24]f32 =
   let B0 = getB0 iso
   let C = map (map (* youngsModule)) (copy Cmat)
-  let inter_geom = matmul_f64 (transpose B0) C
-  in matmul_f64 inter_geom B0
+  let inter_geom = matmul_f32 (transpose B0) C
+  in matmul_f32 inter_geom B0
 
-def assembleElementNonlinearStiffnessMatrix (youngsModule: f64) : [24][24]f64 =
+def assembleElementNonlinearStiffnessMatrix (youngsModule: f32) : [24][24]f32 =
   map (getQuadraturePointStiffnessMatrix youngsModule) quadpoints
   |> transpose
   |> map transpose
-  |> map (map f64.sum)
+  |> map (map f32.sum)
 
 def getElementStiffnessDiagonal [nelx] [nely] [nelz] (x: [nelx][nely][nelz]f32) (elementIndex: index) =
-  let xloc = f64.f32 (x[elementIndex.x, elementIndex.y, elementIndex.z])
+  let xloc = x[elementIndex.x, elementIndex.y, elementIndex.z]
   let kt = assembleElementNonlinearStiffnessMatrix xloc
   in kt[8, 8]
 

@@ -1,10 +1,10 @@
 -- ==
 -- tags { autodiff }
 -- entry: f_jvp f_vjp
--- input { 5.0 7.0 }
--- output { 1.0 1.0 }
+-- input { 5.0f32 7.0f32 }
+-- output { 1.0f32 1.0f32 }
 
-def f (x, y) = x + y : f64
+def f (x, y) = x + y : f32
 
 entry f_jvp x y =
   ( jvp f (x, y) (1, 0)

@@ -1,12 +1,12 @@
 -- We must maintain the dependent size in the function returned by mkhassum.
 -- ==
 -- input { 0i32 }
--- output { 6.0 }
+-- output { 6.0f32 }
 
-type^ hassum = {sum: (k: i64) -> [k]f64 -> f64}
+type^ hassum = {sum: (k: i64) -> [k]f32 -> f32}
 
 def mkhassum (x: bool) : (hassum, i32) =
-  ( {sum = \(k: i64) (xs: [k]f64) -> f64.sum xs}
+  ( {sum = \(k: i64) (xs: [k]f32) -> f32.sum xs}
   , 0
   )
 

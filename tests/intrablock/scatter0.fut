@@ -2,7 +2,7 @@
 -- ==
 -- structure gpu { /SegMap 1 /SegMap/WithAcc/SegMap 1 }
 
-def main (is: []i64) (vs: [][]f64) =
+def main (is: []i64) (vs: [][]f32) =
   map (\xsss ->
          #[flattening(only_intra)]
          map (\xss ->

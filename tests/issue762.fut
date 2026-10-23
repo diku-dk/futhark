@@ -1,4 +1,4 @@
-def main [N] [D] [K] [triD] (x: [N][D]f64) (means: [K][D]f64) (qs: [K][D]f64) (ls: [K][triD]f64) =
+def main [N] [D] [K] [triD] (x: [N][D]f32) (means: [K][D]f32) (qs: [K][D]f32) (ls: [K][triD]f32) =
   let xs =
     map (\x' ->
            unzip3 (tabulate K (\k ->

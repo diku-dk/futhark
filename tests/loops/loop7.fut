@@ -3,7 +3,7 @@
 -- ordering.
 -- ==
 
-def main (n: i64, i: i32, x: f64) : [][]f64 =
+def main (n: i64, i: i32, x: f32) : [][]f32 =
   let res = replicate n (replicate n 0.0)
   let (u, uu) =
     ( replicate n 0.0

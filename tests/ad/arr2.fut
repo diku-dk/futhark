@@ -1,10 +1,10 @@
-def f (x, y) : [2][1]f64 = [x, y]
+def f (x, y) : [2][1]f32 = [x, y]
 
 -- ==
 -- tags { autodiff }
 -- entry: f_vjp f_jvp
--- input { [5.0] [7.0] }
--- output { [[1.0],[0.0]] [[0.0], [1.0]] }
+-- input { [5.0f32] [7.0f32] }
+-- output { [[1.0f32],[0.0f32]] [[0.0f32], [1.0f32]] }
 
 entry f_jvp x y =
   ( jvp f (x, y) ([1], [0])

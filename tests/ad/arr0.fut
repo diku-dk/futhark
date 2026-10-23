@@ -1,12 +1,12 @@
 -- ==
 -- tags { autodiff }
 
-def primal (xs: [2]f64) = xs[0] * xs[1]
+def primal (xs: [2]f32) = xs[0] * xs[1]
 
 -- ==
 -- entry: fwd fwd_vec
--- input { [5.0, 7.0] }
--- output { [7.0, 5.0] }
+-- input { [5.0f32, 7.0f32] }
+-- output { [7.0f32, 5.0f32] }
 
 entry fwd xs =
   [ jvp primal xs [1, 0]
@@ -18,8 +18,8 @@ entry fwd_vec xs =
 
 -- ==
 -- entry: rev
--- input { [5.0, 7.0] }
--- output { [7.0, 5.0] }
+-- input { [5.0f32, 7.0f32] }
+-- output { [7.0f32, 5.0f32] }
 
 entry rev xs =
   vjp primal xs 1

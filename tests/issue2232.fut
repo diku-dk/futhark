@@ -90,9 +90,9 @@ module fft (r: real) = {
     in A'''
 }
 
-module fft32 = fft f64
+module fft32 = fft f32
 
-entry bench3d32 (A: [][][]f64) =
+entry bench3d32 (A: [][][]f32) =
   #[unsafe]
   map (map (map fft32.real)) A
   |> fft32.gfft3 false
