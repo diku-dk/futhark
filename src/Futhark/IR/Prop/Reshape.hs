@@ -372,8 +372,8 @@ move (_, DimSplice i1 n1 (Shape [_])) (DimSplice i2 1 s2 : ss)
 move (shape, DimSplice i1 n1 s1) (DimSplice i2 n2 s2 : ss)
   | i1 > i2 + n2 =
       next shape (DimSplice i2 n2 s2) (DimSplice (i1 - n2 + length s2) n1 s1) ss
-  | i2 > i1 + n1 =
-      next shape (DimSplice (i2 - n1 + length s1) n2 s2) (DimSplice i1 n2 s1) ss
+  | i2 > i1 + length s1 =
+      next shape (DimSplice (i2 - length s1 + n1) n2 s2) (DimSplice i1 n1 s1) ss
   | otherwise = Nothing
 
 -- This is a quadratic-time function that looks for a DimSplice that can be
