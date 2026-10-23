@@ -1,3 +1,6 @@
+-- ==
+-- tags { no_metal }
+
 module complex (n: real) = {
   type t = {r: n.t, i: n.t}
   def complex r i : t = {r, i}

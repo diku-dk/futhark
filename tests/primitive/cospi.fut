@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_metal }
 -- entry: cospi64
 -- input { [0f64, 0.5f64, 1f64, 2f64, -1f64 ] }
 -- output { [1.0, 0f64, -1.0, 1.0, -1.0] }

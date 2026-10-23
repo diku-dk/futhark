@@ -1,5 +1,6 @@
 -- Careful not to fuse excessively.
 -- ==
+-- tags { no_metal }
 -- structure { /Screma 2 }
 
 def matmul_diag_full [n] [m] (ds: [n]f64) (A: [n][m]f64) : [n][m]f64 =

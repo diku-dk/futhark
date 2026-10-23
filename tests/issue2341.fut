@@ -16,6 +16,7 @@ def f (i: i64) =
   in x * x * x * x * x * x * x * x * x * x * x * x
 
 -- ==
+-- tags { no_metal }
 -- entry: main
 -- input { [0i64, 5i64, 6i64] }
 -- output { [0.0, 0.6045216932648491, 2.264675222032749e-7] }

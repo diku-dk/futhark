@@ -1,3 +1,6 @@
+-- ==
+-- tags { no_metal }
+
 -- #2474
 
 entry main [n] (xss: [n][n]f64) (ys: [n]f64) =

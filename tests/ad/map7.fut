@@ -1,7 +1,7 @@
 -- #1878.  The interesting thing here is that the sparse adjoint also
 -- has active free variables.
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_metal }
 -- entry: fwd_map fwd_vec rev_map rev_vec
 -- input { [1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0] }
 -- output { [[0.0, 2.0, 3.0, 4.0],

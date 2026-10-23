@@ -1,11 +1,12 @@
 {-# LANGUAGE QuasiQuotes #-}
 
 -- | This module defines a translation from imperative code with
--- kernels to imperative code with OpenCL or CUDA calls.
+-- kernels to imperative code with OpenCL, CUDA, HIP, or Metal calls.
 module Futhark.CodeGen.ImpGen.GPU.ToOpenCL
   ( kernelsToOpenCL,
     kernelsToCUDA,
     kernelsToHIP,
+    kernelsToMetal,
   )
 where
 
@@ -27,8 +28,10 @@ import Futhark.CodeGen.ImpCode.GPU qualified as ImpGPU
 import Futhark.CodeGen.ImpCode.Kernels qualified as ImpKernels
 import Futhark.CodeGen.ImpCode.OpenCL hiding (Program)
 import Futhark.CodeGen.ImpCode.OpenCL qualified as ImpOpenCL
+import Futhark.CodeGen.ImpGen.GPU.ToOpenCL.Metal
 import Futhark.CodeGen.RTS.C (atomicsH, halfH)
 import Futhark.CodeGen.RTS.CUDA (preludeCU)
+import Futhark.CodeGen.RTS.Metal (preludeMetal)
 import Futhark.CodeGen.RTS.OpenCL (copyCL, preludeCL, transposeCL)
 import Futhark.Error (compilerLimitationS)
 import Futhark.MonadFreshNames
@@ -51,13 +54,22 @@ kernelsToCUDA = translateGPU TargetCUDA
 kernelsToOpenCL :: ImpGPU.Program -> ImpOpenCL.Program
 kernelsToOpenCL = translateGPU TargetOpenCL
 
+-- | Generate Metal host and device code.
+kernelsToMetal :: ImpGPU.Program -> ImpOpenCL.Program
+kernelsToMetal prog
+  | FloatType Float64 `elem` openClUsedTypes prog' =
+      compilerLimitationS "Metal does not support double precision (f64) in GPU code."
+  | otherwise = prog'
+  where
+    prog' = translateGPU TargetMetal prog
+
 -- | Translate a kernels-program to an OpenCL-program.
 translateGPU ::
   KernelTarget ->
   ImpGPU.Program ->
   ImpOpenCL.Program
 translateGPU target prog =
-  let env = envFromProg prog
+  let env = envFromProg target prog
       ( prog',
         ToOpenCL kernels device_funs used_types failures constants
         ) =
@@ -101,6 +113,7 @@ translateGPU target prog =
     genPrelude TargetOpenCL = genOpenClPrelude
     genPrelude TargetCUDA = const genCUDAPrelude
     genPrelude TargetHIP = const genHIPPrelude
+    genPrelude TargetMetal = const genMetalPrelude
 
 -- | Due to simplifications after kernel extraction, some threshold
 -- parameters may contain KernelPaths that reference threshold
@@ -183,7 +196,8 @@ initialOpenCL :: ToOpenCL
 initialOpenCL = ToOpenCL mempty mempty mempty mempty mempty
 
 data Env = Env
-  { envFuns :: ImpGPU.Functions ImpGPU.HostOp,
+  { envTarget :: KernelTarget,
+    envFuns :: ImpGPU.Functions ImpGPU.HostOp,
     envFunsMayFail :: S.Set Name,
     envCallGraph :: M.Map Name (S.Set Name)
   }
@@ -213,8 +227,8 @@ funsMayFail cg (Functions funs) =
     mayFail (fname, _) =
       any (`elem` base_mayfail) $ fname : S.toList (M.findWithDefault mempty fname cg)
 
-envFromProg :: ImpGPU.Program -> Env
-envFromProg prog = Env funs (funsMayFail cg funs) cg
+envFromProg :: KernelTarget -> ImpGPU.Program -> Env
+envFromProg target prog = Env target funs (funsMayFail cg funs) cg
   where
     funs = defFuns prog
     cg = ImpGPU.callGraph calledInHostOp funs
@@ -275,10 +289,14 @@ generateDeviceFun fname device_func = do
                     GC.compileVoidFun mempty (fname, device_func)
              in (f, GC.compUserState cstate)
 
+  let func'
+        | envTarget env == TargetMetal = metalDeviceFun func
+        | otherwise = func
+
   modify $ \s ->
     s
       { clUsedTypes = typesInCode (functionBody device_func) <> clUsedTypes s,
-        clDevFuns = M.insert fname (second funcText func) $ clDevFuns s,
+        clDevFuns = M.insert fname (second funcText func') $ clDevFuns s,
         clFailures = kernelFailures kstate
       }
 
@@ -415,6 +433,11 @@ onKernel target kernel = do
             )
           TargetCUDA -> (mempty, mempty)
           TargetHIP -> (mempty, mempty)
+          -- The parameter is part of FUTHARK_KERNEL_PARAMS.
+          TargetMetal ->
+            ( mempty,
+              [C.citems|__local unsigned char* shared_mem = (__local unsigned char*)shared_mem_aligned;|]
+            )
 
       params =
         shared_memory_param
@@ -446,21 +469,21 @@ onKernel target kernel = do
               xv = nameFromText $ zEncodeText $ nameToText name <> "_dim1"
           _ -> (mempty, "FUTHARK_KERNEL\n")
 
-      kernel_fun =
-        attribute
-          <> funcText
-            [C.cfun|void $id:name ($params:params) {
-                    $items:(mconcat unpack_params)
-                    $items:const_defs
-                    $items:prepare_shared_memory
-                    $items:(mconcat shared_memory_init)
-                    $items:error_init
-                    $items:kernel_body
+      body_items =
+        [C.citems|$items:(mconcat unpack_params)
+                  $items:const_defs
+                  $items:prepare_shared_memory
+                  $items:(mconcat shared_memory_init)
+                  $items:error_init
+                  $items:kernel_body
 
-                    $id:(errorLabel kstate): return;
+                  $id:(errorLabel kstate): return;
 
-                    $items:const_undefs
-                }|]
+                  $items:const_undefs|]
+
+      kernel_fun = case target of
+        TargetMetal -> metalKernel name attribute params body_items
+        _ -> attribute <> funcText [C.cfun|void $id:name ($params:params) { $items:body_items }|]
   modify $ \s ->
     s
       { clGPU = M.insert name (safety, kernel_fun) $ clGPU s,
@@ -556,6 +579,12 @@ genHIPPrelude :: T.Text
 genHIPPrelude =
   "#define FUTHARK_HIP\n"
     <> preludeCU
+    <> commonPrelude
+
+genMetalPrelude :: T.Text
+genMetalPrelude =
+  "#define FUTHARK_METAL\n"
+    <> preludeMetal
     <> commonPrelude
 
 kernelArgs :: Kernel -> [KernelArg]

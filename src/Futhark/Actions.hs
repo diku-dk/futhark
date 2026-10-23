@@ -20,6 +20,7 @@ module Futhark.Actions
     compileOpenCLAction,
     compileCUDAAction,
     compileHIPAction,
+    compileMetalAction,
     compileMulticoreAction,
     compileMulticoreToISPCAction,
     compileMulticoreToWASMAction,
@@ -50,6 +51,7 @@ import Futhark.Analysis.Metrics
 import Futhark.CodeGen.Backends.CCUDA qualified as CCUDA
 import Futhark.CodeGen.Backends.COpenCL qualified as COpenCL
 import Futhark.CodeGen.Backends.HIP qualified as HIP
+import Futhark.CodeGen.Backends.Metal qualified as Metal
 import Futhark.CodeGen.Backends.MulticoreC qualified as MulticoreC
 import Futhark.CodeGen.Backends.MulticoreISPC qualified as MulticoreISPC
 import Futhark.CodeGen.Backends.MulticoreWASM qualified as MulticoreWASM
@@ -427,6 +429,44 @@ compileHIPAction fcfg mode outpath =
           runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
         ToServer -> do
           liftIO $ T.writeFile cpath $ cPrependHeader $ HIP.asServer cprog
+          runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
+
+-- | The @futhark metal@ action.
+compileMetalAction :: FutharkConfig -> CompilerMode -> FilePath -> Action GPUMem
+compileMetalAction fcfg mode outpath =
+  Action
+    { actionName = "Compile to Metal",
+      actionDescription = "Compile to Metal",
+      actionProcedure = helper
+    }
+  where
+    helper prog = do
+      cprog <- handleWarnings fcfg $ Metal.compileProg versionString prog
+      let cpath = outpath `addExtension` "c"
+          hpath = outpath `addExtension` "h"
+          jsonpath = outpath `addExtension` "json"
+          -- The runtime system is written in Objective-C without
+          -- ARC.  These options are not part of CFLAGS, as they are
+          -- always necessary.
+          extra_options =
+            [ "-ObjC",
+              "-fno-objc-arc",
+              "-framework",
+              "Metal",
+              "-framework",
+              "Foundation"
+            ]
+      case mode of
+        ToLibrary -> do
+          let (header, impl, manifest) = Metal.asLibrary cprog
+          liftIO $ T.writeFile hpath $ cPrependHeader header
+          liftIO $ T.writeFile cpath $ cPrependHeader impl
+          liftIO $ T.writeFile jsonpath manifest
+        ToExecutable -> do
+          liftIO $ T.writeFile cpath $ cPrependHeader $ Metal.asExecutable cprog
+          runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
+        ToServer -> do
+          liftIO $ T.writeFile cpath $ cPrependHeader $ Metal.asServer cprog
           runCC cpath outpath ["-O", "-std=c99"] ("-lm" : extra_options)
 
 -- | The @futhark multicore@ action.

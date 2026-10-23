@@ -1,5 +1,5 @@
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_metal }
 -- entry: fwd rev fwd_vec
 -- input { [1.0, 2.0, 3.0, 4.0, 5.0, 6.0] }
 -- output { [5040.0, 2521.0, 1684.0, 1278.0, 1104.0, 1440.0] }

@@ -1,6 +1,7 @@
 -- Can we do operations on f64s, even though these are not always
 -- natively supported?
 -- ==
+-- tags { no_metal }
 --
 -- input  {
 --   [0f64, 0f64, 0f64, 0f64, 0f64]

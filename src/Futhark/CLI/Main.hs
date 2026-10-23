@@ -22,6 +22,7 @@ import Futhark.CLI.Fmt qualified as Fmt
 import Futhark.CLI.HIP qualified as HIP
 import Futhark.CLI.LSP qualified as LSP
 import Futhark.CLI.Literate qualified as Literate
+import Futhark.CLI.Metal qualified as Metal
 import Futhark.CLI.Misc qualified as Misc
 import Futhark.CLI.Multicore qualified as Multicore
 import Futhark.CLI.MulticoreISPC qualified as MulticoreISPC
@@ -62,6 +63,7 @@ commands =
       ("opencl", (OpenCL.main, "Compile to C calling OpenCL.")),
       ("cuda", (CCUDA.main, "Compile to C calling CUDA.")),
       ("hip", (HIP.main, "Compile to C calling HIP.")),
+      ("metal", (Metal.main, "Compile to Objective-C calling Metal.")),
       ("multicore", (Multicore.main, "Compile to multicore C.")),
       ("python", (Python.main, "Compile to sequential Python.")),
       ("pyopencl", (PyOpenCL.main, "Compile to Python calling PyOpenCL.")),

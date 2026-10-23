@@ -502,6 +502,32 @@ jobs:
              --tuning=tuning_gpu
         slurm-options: -p gpu --time=0-02:00:00 --gres=gpu:a100:1 --job-name=fut-pyopencl-test
 
+  test-metal:
+    runs-on: macos-latest
+    needs: [build-mac-cabal]
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - uses: actions/download-artifact@v4
+      with:
+        name: futhark-nightly-macos-arm64.tar.xz
+
+    - name: Install from nightly tarball
+      run: |
+        tar xvf futhark-nightly-macos-arm64.tar.xz
+        echo "$PWD/futhark-nightly-macos-arm64/bin" >> $GITHUB_PATH
+
+    - name: Show GPU
+      run: system_profiler SPDisplaysDataType
+
+    - run: |
+        python3 -m venv virtualenv
+        source virtualenv/bin/activate
+        pip install jsonschema
+        futhark test tests --no-terminal --backend=metal --exclude=no_metal
+        FUTHARK_BACKEND=metal make -C tests_lib/c -j
+
   test-cuda:
     runs-on: cuda
     needs: [build-linux-nix]

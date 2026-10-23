@@ -28,6 +28,8 @@ SCALAR_FUN_ATTR int32_t atomic_xor_i32_shared(volatile __local int32_t *p, int32
 SCALAR_FUN_ATTR int32_t atomic_xchg_i32_global(volatile __global int32_t *p, int32_t x) {
 #if defined(FUTHARK_CUDA) || defined(FUTHARK_HIP)
   return atomicExch((int32_t*)p, x);
+#elif defined(FUTHARK_METAL)
+  return atomic_exchange_explicit((volatile __global atomic_int*)p, x, memory_order_relaxed);
 #elif defined(FUTHARK_OPENCL_DEVICE_ATOMICS)
   return atomic_exchange_explicit((volatile atomic_int*)p, x,
                                   memory_order_acq_rel,
@@ -40,6 +42,8 @@ SCALAR_FUN_ATTR int32_t atomic_xchg_i32_global(volatile __global int32_t *p, int
 SCALAR_FUN_ATTR int32_t atomic_xchg_i32_shared(volatile __local int32_t *p, int32_t x) {
 #if defined(FUTHARK_CUDA) || defined(FUTHARK_HIP)
   return atomicExch((int32_t*)p, x);
+#elif defined(FUTHARK_METAL)
+  return atomic_exchange_explicit((volatile __local atomic_int*)p, x, memory_order_relaxed);
 #else
   return atomic_xor(p, x);
 #endif
@@ -49,6 +53,19 @@ SCALAR_FUN_ATTR int32_t atomic_cmpxchg_i32_global(volatile __global int32_t *p,
                                                   int32_t cmp, int32_t val) {
 #if defined(FUTHARK_CUDA) || defined(FUTHARK_HIP)
   return atomicCAS((int32_t*)p, cmp, val);
+#elif defined(FUTHARK_METAL)
+  // Metal only has a weak compare-and-exchange.
+  int32_t expected = cmp;
+  while (!atomic_compare_exchange_weak_explicit((volatile __global atomic_int*)p,
+                                                &expected, val,
+                                                memory_order_relaxed,
+                                                memory_order_relaxed)) {
+    if (expected != cmp) {
+      break;
+    }
+    expected = cmp;
+  }
+  return expected;
 #elif defined(FUTHARK_OPENCL_DEVICE_ATOMICS)
   atomic_compare_exchange_strong_explicit(
     (volatile atomic_int*)p, &cmp, val,
@@ -63,6 +80,19 @@ SCALAR_FUN_ATTR int32_t atomic_cmpxchg_i32_shared(volatile __local int32_t *p,
                                                   int32_t cmp, int32_t val) {
 #if defined(FUTHARK_CUDA) || defined(FUTHARK_HIP)
   return atomicCAS((int32_t*)p, cmp, val);
+#elif defined(FUTHARK_METAL)
+  // Metal only has a weak compare-and-exchange.
+  int32_t expected = cmp;
+  while (!atomic_compare_exchange_weak_explicit((volatile __local atomic_int*)p,
+                                                &expected, val,
+                                                memory_order_relaxed,
+                                                memory_order_relaxed)) {
+    if (expected != cmp) {
+      break;
+    }
+    expected = cmp;
+  }
+  return expected;
 #else
   return atomic_cmpxchg(p, cmp, val);
 #endif
@@ -71,6 +101,8 @@ SCALAR_FUN_ATTR int32_t atomic_cmpxchg_i32_shared(volatile __local int32_t *p,
 SCALAR_FUN_ATTR int32_t atomic_add_i32_global(volatile __global int32_t *p, int32_t x) {
 #if defined(FUTHARK_CUDA) || defined(FUTHARK_HIP)
   return atomicAdd((int32_t*)p, x);
+#elif defined(FUTHARK_METAL)
+  return atomic_fetch_add_explicit((volatile __global atomic_int*)p, x, memory_order_relaxed);
 #elif defined(FUTHARK_OPENCL_DEVICE_ATOMICS)
   return atomic_fetch_add_explicit((volatile atomic_int*)p, x,
                                    memory_order_acq_rel,
@@ -83,6 +115,8 @@ SCALAR_FUN_ATTR int32_t atomic_add_i32_global(volatile __global int32_t *p, int3
 SCALAR_FUN_ATTR int32_t atomic_add_i32_shared(volatile __local int32_t *p, int32_t x) {
 #if defined(FUTHARK_CUDA) || defined(FUTHARK_HIP)
   return atomicAdd((int32_t*)p, x);
+#elif defined(FUTHARK_METAL)
+  return atomic_fetch_add_explicit((volatile __local atomic_int*)p, x, memory_order_relaxed);
 #else
   return atomic_add(p, x);
 #endif
@@ -91,6 +125,9 @@ SCALAR_FUN_ATTR int32_t atomic_add_i32_shared(volatile __local int32_t *p, int32
 SCALAR_FUN_ATTR float atomic_fadd_f32_global(volatile __global float *p, float x) {
 #if defined(FUTHARK_CUDA) || defined(FUTHARK_HIP)
   return atomicAdd((float*)p, x);
+#elif defined(FUTHARK_METAL)
+  return atomic_fetch_add_explicit((volatile __global atomic_float*)p, x,
+                                   memory_order_relaxed);
   // On OpenCL, use technique from
   // https://pipinspace.github.io/blog/atomic-float-addition-in-opencl.html
 #elif defined(cl_nv_pragma_unroll)
@@ -136,6 +173,8 @@ SCALAR_FUN_ATTR float atomic_fadd_f32_shared(volatile __local float *p, float x)
 SCALAR_FUN_ATTR int32_t atomic_smax_i32_global(volatile __global int32_t *p, int32_t x) {
 #if defined(FUTHARK_CUDA) || defined(FUTHARK_HIP)
   return atomicMax((int32_t*)p, x);
+#elif defined(FUTHARK_METAL)
+  return atomic_fetch_max_explicit((volatile __global atomic_int*)p, x, memory_order_relaxed);
 #elif defined(FUTHARK_OPENCL_DEVICE_ATOMICS)
   return atomic_fetch_max_explicit((volatile atomic_int*)p, x,
                                   memory_order_acq_rel,
@@ -148,6 +187,8 @@ SCALAR_FUN_ATTR int32_t atomic_smax_i32_global(volatile __global int32_t *p, int
 SCALAR_FUN_ATTR int32_t atomic_smax_i32_shared(volatile __local int32_t *p, int32_t x) {
 #if defined(FUTHARK_CUDA) || defined(FUTHARK_HIP)
   return atomicMax((int32_t*)p, x);
+#elif defined(FUTHARK_METAL)
+  return atomic_fetch_max_explicit((volatile __local atomic_int*)p, x, memory_order_relaxed);
 #else
   return atomic_max(p, x);
 #endif
@@ -156,6 +197,8 @@ SCALAR_FUN_ATTR int32_t atomic_smax_i32_shared(volatile __local int32_t *p, int3
 SCALAR_FUN_ATTR int32_t atomic_smin_i32_global(volatile __global int32_t *p, int32_t x) {
 #if defined(FUTHARK_CUDA) || defined(FUTHARK_HIP)
   return atomicMin((int32_t*)p, x);
+#elif defined(FUTHARK_METAL)
+  return atomic_fetch_min_explicit((volatile __global atomic_int*)p, x, memory_order_relaxed);
 #elif defined(FUTHARK_OPENCL_DEVICE_ATOMICS)
   return atomic_fetch_min_explicit((volatile atomic_int*)p, x,
                                   memory_order_acq_rel,
@@ -168,6 +211,8 @@ SCALAR_FUN_ATTR int32_t atomic_smin_i32_global(volatile __global int32_t *p, int
 SCALAR_FUN_ATTR int32_t atomic_smin_i32_shared(volatile __local int32_t *p, int32_t x) {
 #if defined(FUTHARK_CUDA) || defined(FUTHARK_HIP)
   return atomicMin((int32_t*)p, x);
+#elif defined(FUTHARK_METAL)
+  return atomic_fetch_min_explicit((volatile __local atomic_int*)p, x, memory_order_relaxed);
 #else
   return atomic_min(p, x);
 #endif
@@ -176,6 +221,8 @@ SCALAR_FUN_ATTR int32_t atomic_smin_i32_shared(volatile __local int32_t *p, int3
 SCALAR_FUN_ATTR uint32_t atomic_umax_i32_global(volatile __global uint32_t *p, uint32_t x) {
 #if defined(FUTHARK_CUDA) || defined(FUTHARK_HIP)
   return atomicMax((uint32_t*)p, x);
+#elif defined(FUTHARK_METAL)
+  return atomic_fetch_max_explicit((volatile __global atomic_uint*)p, x, memory_order_relaxed);
 #elif defined(FUTHARK_OPENCL_DEVICE_ATOMICS)
   return atomic_fetch_max_explicit((volatile atomic_uint*)p, x,
                                   memory_order_acq_rel,
@@ -188,6 +235,8 @@ SCALAR_FUN_ATTR uint32_t atomic_umax_i32_global(volatile __global uint32_t *p, u
 SCALAR_FUN_ATTR uint32_t atomic_umax_i32_shared(volatile __local uint32_t *p, uint32_t x) {
 #if defined(FUTHARK_CUDA) || defined(FUTHARK_HIP)
   return atomicMax((uint32_t*)p, x);
+#elif defined(FUTHARK_METAL)
+  return atomic_fetch_max_explicit((volatile __local atomic_uint*)p, x, memory_order_relaxed);
 #else
   return atomic_max(p, x);
 #endif
@@ -196,6 +245,8 @@ SCALAR_FUN_ATTR uint32_t atomic_umax_i32_shared(volatile __local uint32_t *p, ui
 SCALAR_FUN_ATTR uint32_t atomic_umin_i32_global(volatile __global uint32_t *p, uint32_t x) {
 #if defined(FUTHARK_CUDA) || defined(FUTHARK_HIP)
   return atomicMin((uint32_t*)p, x);
+#elif defined(FUTHARK_METAL)
+  return atomic_fetch_min_explicit((volatile __global atomic_uint*)p, x, memory_order_relaxed);
 #elif defined(FUTHARK_OPENCL_DEVICE_ATOMICS)
   return atomic_fetch_min_explicit((volatile atomic_uint*)p, x,
                                   memory_order_acq_rel,
@@ -208,6 +259,8 @@ SCALAR_FUN_ATTR uint32_t atomic_umin_i32_global(volatile __global uint32_t *p, u
 SCALAR_FUN_ATTR uint32_t atomic_umin_i32_shared(volatile __local uint32_t *p, uint32_t x) {
 #if defined(FUTHARK_CUDA) || defined(FUTHARK_HIP)
   return atomicMin((uint32_t*)p, x);
+#elif defined(FUTHARK_METAL)
+  return atomic_fetch_min_explicit((volatile __local atomic_uint*)p, x, memory_order_relaxed);
 #else
   return atomic_min(p, x);
 #endif
@@ -216,6 +269,8 @@ SCALAR_FUN_ATTR uint32_t atomic_umin_i32_shared(volatile __local uint32_t *p, ui
 SCALAR_FUN_ATTR int32_t atomic_and_i32_global(volatile __global int32_t *p, int32_t x) {
 #if defined(FUTHARK_CUDA) || defined(FUTHARK_HIP)
   return atomicAnd((int32_t*)p, x);
+#elif defined(FUTHARK_METAL)
+  return atomic_fetch_and_explicit((volatile __global atomic_int*)p, x, memory_order_relaxed);
 #elif defined(FUTHARK_OPENCL_DEVICE_ATOMICS)
   return atomic_fetch_and_explicit((volatile atomic_int*)p, x,
                                   memory_order_acq_rel,
@@ -228,6 +283,8 @@ SCALAR_FUN_ATTR int32_t atomic_and_i32_global(volatile __global int32_t *p, int3
 SCALAR_FUN_ATTR int32_t atomic_and_i32_shared(volatile __local int32_t *p, int32_t x) {
 #if defined(FUTHARK_CUDA) || defined(FUTHARK_HIP)
   return atomicAnd((int32_t*)p, x);
+#elif defined(FUTHARK_METAL)
+  return atomic_fetch_and_explicit((volatile __local atomic_int*)p, x, memory_order_relaxed);
 #else
   return atomic_and(p, x);
 #endif
@@ -236,6 +293,8 @@ SCALAR_FUN_ATTR int32_t atomic_and_i32_shared(volatile __local int32_t *p, int32
 SCALAR_FUN_ATTR int32_t atomic_or_i32_global(volatile __global int32_t *p, int32_t x) {
 #if defined(FUTHARK_CUDA) || defined(FUTHARK_HIP)
   return atomicOr((int32_t*)p, x);
+#elif defined(FUTHARK_METAL)
+  return atomic_fetch_or_explicit((volatile __global atomic_int*)p, x, memory_order_relaxed);
 #elif defined(FUTHARK_OPENCL_DEVICE_ATOMICS)
   return atomic_fetch_or_explicit((volatile atomic_int*)p, x,
                                  memory_order_acq_rel,
@@ -248,6 +307,8 @@ SCALAR_FUN_ATTR int32_t atomic_or_i32_global(volatile __global int32_t *p, int32
 SCALAR_FUN_ATTR int32_t atomic_or_i32_shared(volatile __local int32_t *p, int32_t x) {
 #if defined(FUTHARK_CUDA) || defined(FUTHARK_HIP)
   return atomicOr((int32_t*)p, x);
+#elif defined(FUTHARK_METAL)
+  return atomic_fetch_or_explicit((volatile __local atomic_int*)p, x, memory_order_relaxed);
 #else
   return atomic_or(p, x);
 #endif
@@ -256,6 +317,8 @@ SCALAR_FUN_ATTR int32_t atomic_or_i32_shared(volatile __local int32_t *p, int32_
 SCALAR_FUN_ATTR int32_t atomic_xor_i32_global(volatile __global int32_t *p, int32_t x) {
 #if defined(FUTHARK_CUDA) || defined(FUTHARK_HIP)
   return atomicXor((int32_t*)p, x);
+#elif defined(FUTHARK_METAL)
+  return atomic_fetch_xor_explicit((volatile __global atomic_int*)p, x, memory_order_relaxed);
 #elif defined(FUTHARK_OPENCL_DEVICE_ATOMICS)
   return atomic_fetch_xor_explicit((volatile atomic_int*)p, x,
                                   memory_order_acq_rel,
@@ -268,6 +331,8 @@ SCALAR_FUN_ATTR int32_t atomic_xor_i32_global(volatile __global int32_t *p, int3
 SCALAR_FUN_ATTR int32_t atomic_xor_i32_shared(volatile __local int32_t *p, int32_t x) {
 #if defined(FUTHARK_CUDA) || defined(FUTHARK_HIP)
   return atomicXor((int32_t*)p, x);
+#elif defined(FUTHARK_METAL)
+  return atomic_fetch_xor_explicit((volatile __local atomic_int*)p, x, memory_order_relaxed);
 #else
   return atomic_xor(p, x);
 #endif

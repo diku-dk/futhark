@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_metal }
 -- entry: test_f32
 -- input { [0f32, 10f32, -10f32, f32.inf, -f32.inf, f32.nan] }
 -- output { [0f32, 1f32, -1f32, 1f32, -1f32, f32.nan] }

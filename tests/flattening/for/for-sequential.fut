@@ -1,4 +1,7 @@
+-- Crashes the Metal shader compiler (64-bit loop accumulating its
+-- counter).
 -- ==
+-- tags { no_metal }
 -- input { [0i64, 1i64, 5i64, 10i64] }
 -- auto output
 -- structure gpu { /SegMap/Loop/ForLoop 2 }

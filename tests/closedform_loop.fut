@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_metal }
 -- structure { Screma 1 }
 -- structure gpu { SegRed 1 }
 

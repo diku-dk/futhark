@@ -1,5 +1,5 @@
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_metal }
 -- input { [0.0, 0.0, 0.0] }
 -- output { [[0.0, 0.0, 0.0],
 --           [0.0, 2.0, 0.0],

@@ -1,5 +1,5 @@
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_metal }
 --  input {
 --    [0i64,1i64,2i64,3i64,2i64,1i64,0i64,1i64,2i64]
 --    [0f64,1f64,2f64,3f64]

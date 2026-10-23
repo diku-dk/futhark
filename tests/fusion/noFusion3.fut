@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_metal }
 -- structure { Screma 3 }
 
 def f (a: f64) : f64 = a + 3.0

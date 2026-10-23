@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_metal }
 -- entry: cbrt64
 -- input { [0f64, 8f64] }
 -- output { [0f64, 2f64] }

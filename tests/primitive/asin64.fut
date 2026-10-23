@@ -1,5 +1,6 @@
 -- Does the sin64 function work?
 -- ==
+-- tags { no_metal }
 -- input { [0.0, -0.84147096, -8.742278e-8, 8.742278e-8] }
 -- output { [0.0, -1.0, -8.742278e-8, 8.742278e-8] }
 

@@ -1,5 +1,5 @@
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_metal }
 -- entry: fwd_J rev_J fwd_vec_J rev_vec_J
 -- input
 -- {

@@ -1,6 +1,6 @@
 -- Rank-two results. Expected derivatives are componentwise suffix sums.
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_metal }
 -- entry: main
 -- input { [[[1f64, 2], [3f64, 4]], [[5f64, 6], [7f64, 8]],
 --          [[9f64, 10], [11f64, 12]]]
