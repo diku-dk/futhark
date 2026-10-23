@@ -729,8 +729,11 @@ simplifyClosedFormReduce :: TopDownRuleOp (Wise SOACS)
 simplifyClosedFormReduce _ pat _ (Screma (Constant w) _ form)
   | Just nes <- concatMap redNeutral . fst <$> isRedomapSOAC form,
     zeroIsh w =
-      Simplify . forM_ (zip (patNames pat) nes) $ \(v, ne) ->
-        letBindNames [v] $ BasicOp $ SubExp ne
+      Simplify . forM_ (zip (patElems pat) nes) $ \(pe, ne) ->
+        letBindNames [patElemName pe] . BasicOp $
+          case patElemType pe of
+            Array {} -> Replicate mempty ne
+            _ -> SubExp ne
 simplifyClosedFormReduce vtable pat _ (Screma _ arrs form)
   | Just [Reduce _ red_fun nes] <- isReduceSOAC form =
       Simplify $ foldClosedForm (`ST.lookupExp` vtable) pat red_fun nes arrs
@@ -761,6 +764,11 @@ simplifyKnownIterationSOAC _ pat _ op
                     patElemType pe
           bindResult name (SubExpRes cs se) =
             certifying cs $ letBindNames [name] $ BasicOp $ SubExp se
+          bindRedResult pe (SubExpRes cs se) =
+            certifying cs . letBindNames [patElemName pe] . BasicOp $
+              case patElemType pe of
+                Array {} -> Replicate mempty se
+                _ -> SubExp se
 
       zipWithM_ bindMapParam (lambdaParams map_lam) arrs
       (to_scan, to_red, map_res) <-
@@ -769,7 +777,7 @@ simplifyKnownIterationSOAC _ pat _ op
       scan_res <- eLambda scan_lam $ map eSubExp $ scan_nes ++ map resSubExp to_scan
       red_res <- eLambda red_lam $ map eSubExp $ red_nes ++ map resSubExp to_red
 
-      zipWithM_ bindResult (patElemName <$> red_pes) red_res
+      zipWithM_ bindRedResult red_pes red_res
 
       let par_names = paramName <$> lambdaParams post_lam
       zipWithM_ bindResult par_names (scan_res <> map_res)
