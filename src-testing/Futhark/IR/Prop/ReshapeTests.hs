@@ -138,6 +138,14 @@ simplifyTests =
           ["A", "B", "C"]
           [dimSplice 0 2 ["AB", "1"], dimUnflatten 0 ["A", "B"]]
           @?= Nothing,
+      testCase "Move unflatten past later flatten" $
+        lhs
+          ["AB", "C", "D", "E"]
+          [ dimUnflatten 0 ["A", "B"],
+            dimFlatten 3 2 "DE",
+            dimFlatten 0 2 "AB"
+          ]
+          @?= Just [dimFlatten 2 2 "DE"],
       testCase "Inverse flatten and unflatten - simple case" $
         lhs
           ["A", "B"]
