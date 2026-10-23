@@ -9,6 +9,7 @@ module Futhark.CodeGen.Backends.GenericC.Pretty
     idText,
     funcText,
     funcsText,
+    stmText,
   )
 where
 
@@ -44,3 +45,7 @@ funcText = T.pack . render . MPP.ppr
 -- | Prettyprint a list of functions.
 funcsText :: [C.Func] -> T.Text
 funcsText = T.unlines . map funcText
+
+-- | Prettyprint a single statement.
+stmText :: C.Stm -> T.Text
+stmText = T.pack . render . MPP.ppr
