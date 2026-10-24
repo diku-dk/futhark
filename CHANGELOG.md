@@ -39,6 +39,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Various cases where generated C code might exhibit undefined behaviour.
 
+* Various compiler crashes (#2588, #2587, #2586).
+
+* An invalid simplification that could lead to incorrect results (#2585).
+
 ## [0.28.1]
 
 ### Added
