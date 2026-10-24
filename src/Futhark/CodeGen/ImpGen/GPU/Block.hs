@@ -409,6 +409,9 @@ compileBlockOp pat (Inner (SegOp (SegScan lvl space _ body scans post_op))) = do
   let segment_size = last dims'
       crossesSegment from to =
         (sExt64 to - sExt64 from) .>. (sExt64 to `rem` segment_size)
+      seg_flag = case dims' of
+        [_] -> Nothing -- Nonsegmented.
+        _ -> Just crossesSegment
 
   -- blockScan needs to treat the scan output as a one-dimensional
   -- array of scan elements, so we invent some new flattened arrays
@@ -420,13 +423,13 @@ compileBlockOp pat (Inner (SegOp (SegScan lvl space _ body scans post_op))) = do
   case segVirt lvl of
     SegVirt ->
       virtualisedBlockScan
-        (Just crossesSegment)
+        seg_flag
         (sExt32 $ tvExp dims_flat)
         (segBinOpLambda scan)
         arrs_flat
     _ ->
       blockScan
-        (Just crossesSegment)
+        seg_flag
         (product dims')
         (product dims')
         (segBinOpLambda scan)
