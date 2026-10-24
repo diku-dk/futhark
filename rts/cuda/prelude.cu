@@ -111,6 +111,18 @@ static inline __device__ void barrier_local() {
   __syncthreads();
 }
 
+// Make the memory effects of each thread in the warp visible to the
+// others. Must be executed by all threads of the warp.
+static inline __device__ void warp_sync() {
+#ifdef FUTHARK_HIP
+  __builtin_amdgcn_fence(__ATOMIC_RELEASE, "wavefront");
+  __builtin_amdgcn_wave_barrier();
+  __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "wavefront");
+#else
+  __syncwarp();
+#endif
+}
+
 #if defined(__CUDACC_RTC__) || defined(__HIPCC_RTC__)
 #define NAN (0.0/0.0)
 #define INFINITY (1.0/0.0)
