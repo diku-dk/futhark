@@ -613,7 +613,7 @@ static inline uniform bool sle64(uniform int64_t x, uniform int64_t y) {
   return x <= y;
 }
 
-static inline uniform uint8_t pow8(uniform uint8_t x, uniform uint8_t y) {
+static inline uniform uint8_t upow8(uniform uint8_t x, uniform uint8_t y) {
   uniform uint8_t res = 1, rem = y;
 
   while (rem != 0) {
@@ -625,7 +625,7 @@ static inline uniform uint8_t pow8(uniform uint8_t x, uniform uint8_t y) {
   return res;
 }
 
-static inline uniform uint16_t pow16(uniform uint16_t x, uniform uint16_t y) {
+static inline uniform uint16_t upow16(uniform uint16_t x, uniform uint16_t y) {
   uniform uint16_t res = 1, rem = y;
 
   while (rem != 0) {
@@ -637,7 +637,7 @@ static inline uniform uint16_t pow16(uniform uint16_t x, uniform uint16_t y) {
   return res;
 }
 
-static inline uniform uint32_t pow32(uniform uint32_t x, uniform uint32_t y) {
+static inline uniform uint32_t upow32(uniform uint32_t x, uniform uint32_t y) {
   uniform uint32_t res = 1, rem = y;
 
   while (rem != 0) {
@@ -649,7 +649,7 @@ static inline uniform uint32_t pow32(uniform uint32_t x, uniform uint32_t y) {
   return res;
 }
 
-static inline uniform uint64_t pow64(uniform uint64_t x, uniform uint64_t y) {
+static inline uniform uint64_t upow64(uniform uint64_t x, uniform uint64_t y) {
   uniform uint64_t res = 1, rem = y;
 
   while (rem != 0) {
@@ -659,6 +659,22 @@ static inline uniform uint64_t pow64(uniform uint64_t x, uniform uint64_t y) {
     x *= x;
   }
   return res;
+}
+
+static inline uniform int8_t spow8(uniform int8_t x, uniform int8_t y) {
+  return (uniform int8_t)upow8((uniform uint8_t)x, (uniform uint8_t)y);
+}
+
+static inline uniform int16_t spow16(uniform int16_t x, uniform int16_t y) {
+  return (uniform int16_t)upow16((uniform uint16_t)x, (uniform uint16_t)y);
+}
+
+static inline uniform int32_t spow32(uniform int32_t x, uniform int32_t y) {
+  return (uniform int32_t)upow32((uniform uint32_t)x, (uniform uint32_t)y);
+}
+
+static inline uniform int64_t spow64(uniform int64_t x, uniform int64_t y) {
+  return (uniform int64_t)upow64((uniform uint64_t)x, (uniform uint64_t)y);
 }
 
 static inline uniform bool itob_i8_bool(uniform int8_t x) {

@@ -1708,12 +1708,6 @@ initialCtx =
       ]
     arithOp f g = Just $ bopDef $ intOp f ++ floatOp g
 
-    -- The core language exponentiation treats the exponent as
-    -- unsigned, but a negative exponent is an error in the source
-    -- language.
-    nonnegativeExponent (g, p, f, ad) =
-      (g, p, \x y -> if P.negativeIsh y then Nothing else f x y, ad)
-
     flipCmps = map (\(f, g, h, o) -> (f, g, flip h, flip o))
     sintCmp f =
       [ (getS, Just . BoolValue, P.doCmpOp (f Int8), adBinOp $ AD.OpCmp (f Int8)),
@@ -1933,8 +1927,8 @@ initialCtx =
     def "**" =
       Just $
         bopDef $
-          map nonnegativeExponent (sintOp P.Pow)
-            ++ uintOp P.Pow
+          sintOp P.SPow
+            ++ uintOp P.UPow
             ++ floatOp P.FPow
     def "/" =
       Just $

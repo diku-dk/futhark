@@ -676,7 +676,7 @@ SCALAR_FUN_ATTR bool sle16(int16_t x, int16_t y) { return x <= y; }
 SCALAR_FUN_ATTR bool sle32(int32_t x, int32_t y) { return x <= y; }
 SCALAR_FUN_ATTR bool sle64(int64_t x, int64_t y) { return x <= y; }
 
-SCALAR_FUN_ATTR uint8_t pow8(uint8_t x, uint8_t y) {
+SCALAR_FUN_ATTR uint8_t upow8(uint8_t x, uint8_t y) {
   uint8_t res = 1, rem = y;
   while (rem != 0) {
     if (rem & 1)
@@ -687,7 +687,7 @@ SCALAR_FUN_ATTR uint8_t pow8(uint8_t x, uint8_t y) {
   return res;
 }
 
-SCALAR_FUN_ATTR uint16_t pow16(uint16_t x, uint16_t y) {
+SCALAR_FUN_ATTR uint16_t upow16(uint16_t x, uint16_t y) {
   uint16_t res = 1, rem = y;
   while (rem != 0) {
     if (rem & 1)
@@ -698,7 +698,7 @@ SCALAR_FUN_ATTR uint16_t pow16(uint16_t x, uint16_t y) {
   return res;
 }
 
-SCALAR_FUN_ATTR uint32_t pow32(uint32_t x, uint32_t y) {
+SCALAR_FUN_ATTR uint32_t upow32(uint32_t x, uint32_t y) {
   uint32_t res = 1, rem = y;
   while (rem != 0) {
     if (rem & 1)
@@ -709,7 +709,7 @@ SCALAR_FUN_ATTR uint32_t pow32(uint32_t x, uint32_t y) {
   return res;
 }
 
-SCALAR_FUN_ATTR uint64_t pow64(uint64_t x, uint64_t y) {
+SCALAR_FUN_ATTR uint64_t upow64(uint64_t x, uint64_t y) {
   uint64_t res = 1, rem = y;
   while (rem != 0) {
     if (rem & 1)
@@ -719,6 +719,11 @@ SCALAR_FUN_ATTR uint64_t pow64(uint64_t x, uint64_t y) {
   }
   return res;
 }
+
+SCALAR_FUN_ATTR int8_t  spow8(int8_t x, int8_t y) { return (int8_t)upow8((uint8_t)x, (uint8_t)y); }
+SCALAR_FUN_ATTR int16_t spow16(int16_t x, int16_t y) { return (int16_t)upow16((uint16_t)x, (uint16_t)y); }
+SCALAR_FUN_ATTR int32_t spow32(int32_t x, int32_t y) { return (int32_t)upow32((uint32_t)x, (uint32_t)y); }
+SCALAR_FUN_ATTR int64_t spow64(int64_t x, int64_t y) { return (int64_t)upow64((uint64_t)x, (uint64_t)y); }
 
 SCALAR_FUN_ATTR bool  itob_i8_bool(int8_t x)  { return x != 0; }
 SCALAR_FUN_ATTR bool itob_i16_bool(int16_t x) { return x != 0; }

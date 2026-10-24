@@ -266,7 +266,8 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
     worthInlining e
       | primExpSizeAtLeast 20 e = False -- totally ad-hoc.
       | otherwise = worthInlining' e
-    worthInlining' (BinOpExp Pow {} _ _) = False
+    worthInlining' (BinOpExp SPow {} _ _) = False
+    worthInlining' (BinOpExp UPow {} _ _) = False
     worthInlining' (BinOpExp FPow {} _ _) = False
     worthInlining' (BinOpExp _ x y) = worthInlining' x && worthInlining' y
     worthInlining' (CmpOpExp _ x y) = worthInlining' x && worthInlining' y

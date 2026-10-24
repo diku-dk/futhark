@@ -321,7 +321,8 @@ smax8 = smax16 = smax32 = smax64 = smaxN
 smin8 = smin16 = smin32 = smin64 = sminN
 umax8 = umax16 = umax32 = umax64 = umaxN
 umin8 = umin16 = umin32 = umin64 = uminN
-pow8 = pow16 = pow32 = pow64 = powN
+spow8 = spow16 = spow32 = spow64 = powN
+upow8 = upow16 = upow32 = upow64 = powN
 fpow16 = fpow32 = fpow64 = fpowN
 fmax16 = fmax32 = fmax64 = fmaxN
 fmin16 = fmin32 = fmin64 = fminN

@@ -60,7 +60,8 @@ module Language.Futhark.Primitive
     doMul,
     doSDiv,
     doSMod,
-    doPow,
+    doSPow,
+    doUPow,
 
     -- ** Conversion Operations
     doConvOp,
@@ -504,8 +505,11 @@ data BinOp
     Or IntType
   | -- | Bitwise exclusive-or.
     Xor IntType
-  | -- | Integer exponentiation. Note that the exponent is treated as unsigned.
-    Pow IntType
+  | -- | Signed integer exponentiation.  Undefined for negative
+    -- exponents.
+    SPow IntType
+  | -- | Unsigned integer exponentiation.
+    UPow IntType
   | -- | Floating-point exponentiation.
     FPow FloatType
   | -- | Boolean and - not short-circuiting.
@@ -629,7 +633,8 @@ allBinOps =
       map And allIntTypes,
       map Or allIntTypes,
       map Xor allIntTypes,
-      map Pow allIntTypes,
+      map SPow allIntTypes,
+      map UPow allIntTypes,
       map FPow allFloatTypes,
       [LogAnd, LogOr]
     ]
@@ -762,7 +767,8 @@ doBinOp AShr {} = doIntBinOp doAShr
 doBinOp And {} = doIntBinOp doAnd
 doBinOp Or {} = doIntBinOp doOr
 doBinOp Xor {} = doIntBinOp doXor
-doBinOp Pow {} = doIntBinOp doPow
+doBinOp SPow {} = doRiskyIntBinOp doSPow
+doBinOp UPow {} = doIntBinOp doUPow
 doBinOp FPow {} = doFloatBinOp (**) (**) (**)
 doBinOp LogAnd {} = doBoolBinOp (&&)
 doBinOp LogOr {} = doBoolBinOp (||)
@@ -930,9 +936,15 @@ doOr v1 v2 = intValue (intValueType v1) $ intToWord64 v1 .|. intToWord64 v2
 doXor :: IntValue -> IntValue -> IntValue
 doXor v1 v2 = intValue (intValueType v1) $ intToWord64 v1 `xor` intToWord64 v2
 
--- | Integer exponentiation.  The exponent is interpreted as unsigned.
-doPow :: IntValue -> IntValue -> IntValue
-doPow v1 v2 = intValue (intValueType v1) $ intToInt64 v1 ^ intToWord64 v2
+-- | Signed integer exponentiation.  Fails for negative exponents.
+doSPow :: IntValue -> IntValue -> Maybe IntValue
+doSPow v1 v2
+  | negativeIshInt v2 = Nothing
+  | otherwise = Just $ doUPow v1 v2
+
+-- | Unsigned integer exponentiation.
+doUPow :: IntValue -> IntValue -> IntValue
+doUPow v1 v2 = intValue (intValueType v1) $ intToInt64 v1 ^ intToWord64 v2
 
 -- | Apply a 'ConvOp' to an operand.  Returns 'Nothing' if the
 -- application is mistyped.
@@ -1169,7 +1181,8 @@ binOpType (AShr t) = IntType t
 binOpType (And t) = IntType t
 binOpType (Or t) = IntType t
 binOpType (Xor t) = IntType t
-binOpType (Pow t) = IntType t
+binOpType (SPow t) = IntType t
+binOpType (UPow t) = IntType t
 binOpType (FPow t) = FloatType t
 binOpType LogAnd = Bool
 binOpType LogOr = Bool
@@ -1911,7 +1924,8 @@ instance Pretty BinOp where
   pretty (And t) = taggedI "and" t
   pretty (Or t) = taggedI "or" t
   pretty (Xor t) = taggedI "xor" t
-  pretty (Pow t) = taggedI "pow" t
+  pretty (SPow t) = taggedI "spow" t
+  pretty (UPow t) = taggedI "upow" t
   pretty (FPow t) = taggedF "fpow" t
   pretty LogAnd = "logand"
   pretty LogOr = "logor"

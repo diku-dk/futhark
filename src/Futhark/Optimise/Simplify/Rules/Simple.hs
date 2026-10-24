@@ -145,7 +145,10 @@ simplifyBinOp _ _ (BinOp (SRem t _) e1 e2)
 simplifyBinOp _ _ (BinOp SQuot {} e1 e2)
   | isCt1 e2 = resIsSubExp e1
   | isCt0 e2 = Nothing
-simplifyBinOp _ _ (BinOp (Pow t) e1 e2)
+simplifyBinOp _ _ (BinOp (SPow t) e1 e2)
+  | e1 == intConst t 2 =
+      Just (BinOp (Shl t) (intConst t 1) e2, mempty)
+simplifyBinOp _ _ (BinOp (UPow t) e1 e2)
   | e1 == intConst t 2 =
       Just (BinOp (Shl t) (intConst t 1) e2, mempty)
 simplifyBinOp _ _ (BinOp (FPow t) e1 e2)
