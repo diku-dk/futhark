@@ -46,6 +46,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * An invalid simplification that could lead to incorrect results (#2585).
 
+* Various fixes to binary input validation.
+
 ## [0.28.1]
 
 ### Added

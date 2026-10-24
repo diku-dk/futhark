@@ -799,6 +799,12 @@ void cmd_new_array(struct server_state *s, const char *args[]) {
       return;
     }
 
+    if (size != 0 && n_values > INT64_MAX / size) {
+      failure();
+      printf("Array with %d dimensions has too many elements.\n", a->rank);
+      return;
+    }
+
     dims[i] = size;
     n_values *= size;
   }

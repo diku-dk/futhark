@@ -668,19 +668,28 @@ static int read_bin_array(FILE *f,
 
   int64_t elem_count = 1;
   for (int i=0; i<dims; i++) {
-    int64_t bin_shape;
+    uint64_t bin_shape;
     ret = (int)fread(&bin_shape, sizeof(bin_shape), 1, f);
     if (ret != 1) {
       futhark_panic(1, "binary-input: Couldn't read size for dimension %i of array.\n", i);
     }
+    if (bin_shape > INT64_MAX) {
+      futhark_panic(1, "binary-input: dimension %i does not fit in signed 64-bit integer.\n", i);
+    }
     if (IS_BIG_ENDIAN) {
       flip_bytes(sizeof(bin_shape), (unsigned char*) &bin_shape);
+    }
+    if (bin_shape != 0 && elem_count > INT64_MAX / (int64_t)bin_shape) {
+      futhark_panic(1, "binary-input: array with %d dimensions has too many elements.\n", (int)dims);
     }
     elem_count *= bin_shape;
     shape[i] = bin_shape;
   }
 
   int64_t elem_size = expected_type->size;
+  if (elem_count > INT64_MAX / elem_size) {
+    futhark_panic(1, "binary-input: array too large.\n");
+  }
   void* tmp = realloc(*data, (size_t)(elem_count * elem_size));
   if (tmp == NULL) {
     futhark_panic(1, "binary-input: Failed to allocate array of size %lld.\n",
@@ -688,8 +697,8 @@ static int read_bin_array(FILE *f,
   }
   *data = tmp;
 
-  int64_t num_elems_read = (int64_t)fread(*data, (size_t)elem_size, (size_t)elem_count, f);
-  if (num_elems_read != elem_count) {
+  uint64_t num_elems_read = (uint64_t)fread(*data, (size_t)elem_size, (size_t)elem_count, f);
+  if (num_elems_read != (uint64_t)elem_count) {
     futhark_panic(1, "binary-input: tried to read %lld elements of an array, but only got %lld elements.\n",
                   (long long int)elem_count,
                   (long long int)num_elems_read);
