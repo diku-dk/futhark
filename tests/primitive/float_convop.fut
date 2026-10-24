@@ -3,6 +3,7 @@
 entry f16_to_f32 = map f32.f16
 entry f16_to_f64 = map f64.f16
 entry f32_to_f16 = map f16.f32
+entry f32_to_f16_bits = map (f16.f32 >-> f16.to_bits)
 entry f32_to_f64 = map f64.f32
 entry f64_to_f16 = map f16.f64
 entry f64_to_f32 = map f32.f64
@@ -34,6 +35,17 @@ entry f64_to_bool = map bool.f64
 -- entry: f32_to_f16
 -- input { [f32.inf, -f32.inf, -1f32, 1f32, 100000f32, -100000f32] }
 -- output { [f16.inf, -f16.inf, -1.0f16, 1.0f16, f16.inf, -f16.inf] }
+
+-- Rounding to nearest, ties to even, including into the subnormals
+-- and up to infinity.
+-- ==
+-- entry: f32_to_f16_bits
+-- input { [1.0007f32, -1.0007f32, 1.00048828125f32, 1.00146484375f32,
+--          65519f32, 65520f32, 2.9802322e-8f32, 3e-8f32,
+--          8.940697e-8f32] }
+-- output { [0x3c01u16, 0xbc01u16, 0x3c00u16, 0x3c02u16,
+--           0x7bffu16, 0x7c00u16, 0x0000u16, 0x0001u16,
+--           0x0002u16] }
 
 -- ==
 -- entry: f32_to_f64
