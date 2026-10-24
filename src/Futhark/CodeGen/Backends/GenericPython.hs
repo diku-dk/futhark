@@ -1214,7 +1214,6 @@ compilePrimExp f (Imp.BinOpExp op x y) = do
     Xor {} -> simple "^"
     And {} -> simple "&"
     Or {} -> simple "|"
-    Shl {} -> simple "<<"
     LogAnd {} -> simple "and"
     LogOr {} -> simple "or"
     _ -> pure $ simpleCall (prettyString op) [x', y']

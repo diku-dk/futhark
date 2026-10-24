@@ -844,10 +844,9 @@ The predefined operators and their semantics are:
 
   ``^``, ``&``, ``|``, ``>>``, ``<<``
 
-    Bitwise operators, respectively bitwise xor, and, or, arithmetic
-    shift right and left, and logical shift right.  **Shifting is
-    undefined if the right operand is negative, or greater than or
-    equal to the length in bits of the left operand.**
+    Bitwise operators on integers, respectively bitwise xor, and, or, arithmetic
+    shift right and left, and logical shift right. The shift count is taken
+    modulo the bit width of the integer type.
 
     Note that, unlike in C, bitwise operators have *higher* priority
     than arithmetic operators.  This means that ``x & y == z`` is

@@ -20,15 +20,15 @@
 
 -- ==
 -- entry: left
--- input { [0i8, 0i8, 1i8, 1i8, -1i8, -1i8]
---         [0i8, 1i8, 0i8, 1i8, 0i8, 1i8] }
--- output { [0i8, 0i8, 1i8, 2i8, -1i8, -2i8] }
+-- input { [0i8, 0i8, 1i8, 1i8, -1i8, -1i8, 1i8, 1i8, 1i8]
+--         [0i8, 1i8, 0i8, 1i8, 0i8, 1i8, 9i8, -1i8, 8i8] }
+-- output { [0i8, 0i8, 1i8, 2i8, -1i8, -2i8, 2i8, -128i8, 1i8] }
 
 -- ==
 -- entry: right
--- input { [0i8, 0i8, 1i8, 1i8, 2i8, -1i8, -1i8]
---         [0i8, 1i8, 0i8, 1i8, 1i8, 0i8, 1i8] }
--- output { [0i8, 0i8, 1i8, 0i8, 1i8, -1i8, -1i8]}
+-- input { [0i8, 0i8, 1i8, 1i8, 2i8, -1i8, -1i8, -8i8, 64i8, -1i8]
+--         [0i8, 1i8, 0i8, 1i8, 1i8, 0i8, 1i8, 9i8, -2i8, 8i8] }
+-- output { [0i8, 0i8, 1i8, 0i8, 1i8, -1i8, -1i8, -4i8, 1i8, -1i8]}
 
 entry land = map2 (i8.&)
 entry lor = map2 (i8.|)

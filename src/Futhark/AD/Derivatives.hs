@@ -119,11 +119,11 @@ pdBinOp (SMin it) a b =
     derivs x y = (fromBoolExp (x .<=. y), fromBoolExp (x .>. y))
 --
 pdBinOp (Shl it) a b =
-  pdBinOp (Mul it OverflowWrap) a $ BinOpExp (UPow it) (iConst it 2) b
+  pdBinOp (Mul it OverflowWrap) a $ shiftFactor it b
 pdBinOp (LShr it) a b =
-  pdBinOp (UDiv it Unsafe) a $ BinOpExp (UPow it) (iConst it 2) b
+  pdBinOp (UDiv it Unsafe) a $ shiftFactor it b
 pdBinOp (AShr it) a b =
-  pdBinOp (SDiv it Unsafe) a $ BinOpExp (UPow it) (iConst it 2) b
+  pdBinOp (SDiv it Unsafe) a $ shiftFactor it b
 pdBinOp (And it) _a _b = (iConst it 0, iConst it 0) -- FIXME
 pdBinOp (Or it) _a _b = (iConst it 0, iConst it 0) -- FIXME
 pdBinOp (Xor it) _a _b = (iConst it 0, iConst it 0) -- FIXME
@@ -490,3 +490,10 @@ pdBuiltin "popc16" [_] = Just [iConst Int32 0]
 pdBuiltin "popc32" [_] = Just [iConst Int32 0]
 pdBuiltin "popc64" [_] = Just [iConst Int32 0]
 pdBuiltin _ _ = Nothing
+
+-- The factor corresponding to shifting by the given amount, which is
+-- masked to the bit width.
+shiftFactor :: IntType -> PrimExp VName -> PrimExp VName
+shiftFactor it b =
+  BinOpExp (UPow it) (iConst it 2) $
+    BinOpExp (And it) b (iConst it (8 * intByteSize it - 1))

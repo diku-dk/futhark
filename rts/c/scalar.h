@@ -626,20 +626,23 @@ SCALAR_FUN_ATTR uint16_t umax16(uint16_t x, uint16_t y) { return x < y ? y : x; 
 SCALAR_FUN_ATTR uint32_t umax32(uint32_t x, uint32_t y) { return x < y ? y : x; }
 SCALAR_FUN_ATTR uint64_t umax64(uint64_t x, uint64_t y) { return x < y ? y : x; }
 
-SCALAR_FUN_ATTR uint8_t   shl8(uint8_t x, uint8_t y)   { return (uint8_t)(x << y); }
-SCALAR_FUN_ATTR uint16_t shl16(uint16_t x, uint16_t y) { return (uint16_t)(x << y); }
-SCALAR_FUN_ATTR uint32_t shl32(uint32_t x, uint32_t y) { return x << y; }
-SCALAR_FUN_ATTR uint64_t shl64(uint64_t x, uint64_t y) { return x << y; }
+// The shift amount is masked to the bit width, which gives defined
+// behaviour for all shift amounts, and which compilers know how to
+// recognise as part of rotation idioms.
+SCALAR_FUN_ATTR uint8_t   shl8(uint8_t x, uint8_t y)   { return (uint8_t)(x << (y & 7)); }
+SCALAR_FUN_ATTR uint16_t shl16(uint16_t x, uint16_t y) { return (uint16_t)(x << (y & 15)); }
+SCALAR_FUN_ATTR uint32_t shl32(uint32_t x, uint32_t y) { return x << (y & 31); }
+SCALAR_FUN_ATTR uint64_t shl64(uint64_t x, uint64_t y) { return x << (y & 63); }
 
-SCALAR_FUN_ATTR uint8_t   lshr8(uint8_t x, uint8_t y)   { return x >> y; }
-SCALAR_FUN_ATTR uint16_t lshr16(uint16_t x, uint16_t y) { return x >> y; }
-SCALAR_FUN_ATTR uint32_t lshr32(uint32_t x, uint32_t y) { return x >> y; }
-SCALAR_FUN_ATTR uint64_t lshr64(uint64_t x, uint64_t y) { return x >> y; }
+SCALAR_FUN_ATTR uint8_t   lshr8(uint8_t x, uint8_t y)   { return x >> (y & 7); }
+SCALAR_FUN_ATTR uint16_t lshr16(uint16_t x, uint16_t y) { return x >> (y & 15); }
+SCALAR_FUN_ATTR uint32_t lshr32(uint32_t x, uint32_t y) { return x >> (y & 31); }
+SCALAR_FUN_ATTR uint64_t lshr64(uint64_t x, uint64_t y) { return x >> (y & 63); }
 
-SCALAR_FUN_ATTR int8_t   ashr8(int8_t x, int8_t y)   { return x >> y; }
-SCALAR_FUN_ATTR int16_t ashr16(int16_t x, int16_t y) { return x >> y; }
-SCALAR_FUN_ATTR int32_t ashr32(int32_t x, int32_t y) { return x >> y; }
-SCALAR_FUN_ATTR int64_t ashr64(int64_t x, int64_t y) { return x >> y; }
+SCALAR_FUN_ATTR int8_t   ashr8(int8_t x, int8_t y)   { return x >> (y & 7); }
+SCALAR_FUN_ATTR int16_t ashr16(int16_t x, int16_t y) { return x >> (y & 15); }
+SCALAR_FUN_ATTR int32_t ashr32(int32_t x, int32_t y) { return x >> (y & 31); }
+SCALAR_FUN_ATTR int64_t ashr64(int64_t x, int64_t y) { return x >> (y & 63); }
 
 SCALAR_FUN_ATTR uint8_t   and8(uint8_t x, uint8_t y)   { return x & y; }
 SCALAR_FUN_ATTR uint16_t and16(uint16_t x, uint16_t y) { return x & y; }

@@ -50,6 +50,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Handling of unsigned integer exponents in the interpreter.
 
+* Bitshift operators are now fully defined, with masking of problematic shift
+  amounts.
+
 ## [0.28.1]
 
 ### Added

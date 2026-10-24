@@ -454,51 +454,51 @@ static inline uniform uint64_t umax64(uniform uint64_t x, uniform uint64_t y) {
 }
 
 static inline uniform uint8_t shl8(uniform uint8_t x, uniform uint8_t y) {
-  return (uniform uint8_t)(x << y);
+  return (uniform uint8_t)(x << (y & 7));
 }
 
 static inline uniform uint16_t shl16(uniform uint16_t x, uniform uint16_t y) {
-  return (uniform uint16_t)(x << y);
+  return (uniform uint16_t)(x << (y & 15));
 }
 
 static inline uniform uint32_t shl32(uniform uint32_t x, uniform uint32_t y) {
-  return x << y;
+  return x << (y & 31);
 }
 
 static inline uniform uint64_t shl64(uniform uint64_t x, uniform uint64_t y) {
-  return x << y;
+  return x << (y & 63);
 }
 
 static inline uniform uint8_t lshr8(uniform uint8_t x, uniform uint8_t y) {
-  return x >> y;
+  return x >> (y & 7);
 }
 
 static inline uniform uint16_t lshr16(uniform uint16_t x, uniform uint16_t y) {
-  return x >> y;
+  return x >> (y & 15);
 }
 
 static inline uniform uint32_t lshr32(uniform uint32_t x, uniform uint32_t y) {
-  return x >> y;
+  return x >> (y & 31);
 }
 
 static inline uniform uint64_t lshr64(uniform uint64_t x, uniform uint64_t y) {
-  return x >> y;
+  return x >> (y & 63);
 }
 
 static inline uniform int8_t ashr8(uniform int8_t x, uniform int8_t y) {
-  return x >> y;
+  return x >> (y & 7);
 }
 
 static inline uniform int16_t ashr16(uniform int16_t x, uniform int16_t y) {
-  return x >> y;
+  return x >> (y & 15);
 }
 
 static inline uniform int32_t ashr32(uniform int32_t x, uniform int32_t y) {
-  return x >> y;
+  return x >> (y & 31);
 }
 
 static inline uniform int64_t ashr64(uniform int64_t x, uniform int64_t y) {
-  return x >> y;
+  return x >> (y & 63);
 }
 
 static inline uniform uint8_t and8(uniform uint8_t x, uniform uint8_t y) {

@@ -42,14 +42,6 @@ def unsigned(x):
         return np.uint64(x)
 
 
-def shlN(x, y):
-    return x << y
-
-
-def ashrN(x, y):
-    return x >> y
-
-
 # Python is so slow that we just make all the unsafe operations safe,
 # always.
 
@@ -162,20 +154,55 @@ def ultN(x, y):
     return unsigned(x) < unsigned(y)
 
 
+# Shift amounts are masked to the bit width.
+
+
+def shl8(x, y):
+    return x << (y & 7)
+
+
+def shl16(x, y):
+    return x << (y & 15)
+
+
+def shl32(x, y):
+    return x << (y & 31)
+
+
+def shl64(x, y):
+    return x << (y & 63)
+
+
+def ashr8(x, y):
+    return x >> (y & 7)
+
+
+def ashr16(x, y):
+    return x >> (y & 15)
+
+
+def ashr32(x, y):
+    return x >> (y & 31)
+
+
+def ashr64(x, y):
+    return x >> (y & 63)
+
+
 def lshr8(x, y):
-    return np.int8(np.uint8(x) >> np.uint8(y))
+    return np.int8(np.uint8(x) >> np.uint8(y & 7))
 
 
 def lshr16(x, y):
-    return np.int16(np.uint16(x) >> np.uint16(y))
+    return np.int16(np.uint16(x) >> np.uint16(y & 15))
 
 
 def lshr32(x, y):
-    return np.int32(np.uint32(x) >> np.uint32(y))
+    return np.int32(np.uint32(x) >> np.uint32(y & 31))
 
 
 def lshr64(x, y):
-    return np.int64(np.uint64(x) >> np.uint64(y))
+    return np.int64(np.uint64(x) >> np.uint64(y & 63))
 
 
 def sext_T_i8(x):
@@ -315,8 +342,6 @@ squot_safe8 = squot_safe16 = squot_safe32 = squot_safe64 = squotN
 srem8 = srem16 = srem32 = srem64 = sremN
 srem_safe8 = srem_safe16 = srem_safe32 = srem_safe64 = sremN
 
-shl8 = shl16 = shl32 = shl64 = shlN
-ashr8 = ashr16 = ashr32 = ashr64 = ashrN
 smax8 = smax16 = smax32 = smax64 = smaxN
 smin8 = smin16 = smin32 = smin64 = sminN
 umax8 = umax16 = umax32 = umax64 = umaxN
