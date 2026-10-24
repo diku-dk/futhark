@@ -176,6 +176,7 @@ struct futhark_context* futhark_context_new(struct futhark_context_config* cfg) 
   ctx->cfg->in_use = 1;
   ctx->program_initialised = false;
   create_lock(&ctx->error_lock);
+  create_lock(&ctx->mem_lock);
   create_lock(&ctx->lock);
   free_list_init(&ctx->free_list);
   event_list_init(&ctx->event_list);
@@ -212,6 +213,7 @@ void futhark_context_free(struct futhark_context* ctx) {
   free(ctx->error);
   free_lock(&ctx->lock);
   free_lock(&ctx->error_lock);
+  free_lock(&ctx->mem_lock);
   ctx->cfg->in_use = 0;
   free(ctx);
 }
