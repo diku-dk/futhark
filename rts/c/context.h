@@ -46,16 +46,18 @@ static int is_small_alloc(size_t size) {
   return size < 1024*1024;
 }
 
-static void host_alloc(struct futhark_context* ctx,
-                       size_t size, const char* tag, size_t* size_out, void** mem_out) {
+static int host_alloc(struct futhark_context* ctx,
+                      size_t size, const char* tag, size_t* size_out, void** mem_out) {
   if (is_small_alloc(size) || free_list_find(&ctx->free_list, size, tag, size_out, (fl_mem*)mem_out) != 0) {
     *size_out = size;
     *mem_out = malloc(size);
     if (*mem_out == NULL && size != 0) {
       set_error(ctx, msgprintf("Failed to allocate %lld bytes of host memory.\n",
                                (long long)size));
+      return FUTHARK_OUT_OF_MEMORY;
     }
   }
+  return FUTHARK_SUCCESS;
 }
 
 static void host_free(struct futhark_context* ctx,

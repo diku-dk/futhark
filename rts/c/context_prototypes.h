@@ -23,8 +23,9 @@ static int free_constants(struct futhark_context*);
 static void setup_program(struct futhark_context* ctx);
 static void teardown_program(struct futhark_context *ctx);
 
-// Allocate host memory.  Must be freed with host_free().
-static void host_alloc(struct futhark_context* ctx, size_t size, const char* tag, size_t* size_out, void** mem_out);
+// Allocate host memory.  Must be freed with host_free().  Returns
+// FUTHARK_OUT_OF_MEMORY (and sets an error) on failure.
+static int host_alloc(struct futhark_context* ctx, size_t size, const char* tag, size_t* size_out, void** mem_out);
 // Allocate memory allocated with host_alloc().
 static void host_free(struct futhark_context* ctx, size_t size, const char* tag, void* mem);
 

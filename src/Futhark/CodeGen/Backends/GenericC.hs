@@ -192,8 +192,8 @@ defineMemorySpace space = do
 }|]
 
   -- When allocating a memory block we initialise the reference count to 1.
-  alloc <-
-    collect $
+  (alloc, alloc_items) <-
+    collect' $
       allocRawMem [C.cexp|block->mem|] [C.cexp|size|] space [C.cexp|desc|]
   let allocdef =
         [C.cedecl|int $id:(fatMemAlloc space) ($ty:ctx_ty *ctx, $ty:mty *block, typename int64_t size, const char *desc) {
@@ -214,9 +214,9 @@ defineMemorySpace space = do
             (long long) ctx->$id:usagename);
   }
 
-  $items:alloc
+  $items:alloc_items
 
-  if (ctx->error == NULL) {
+  if ($exp:alloc == FUTHARK_SUCCESS) {
     block->references = (int*) malloc(sizeof(int));
     *(block->references) = 1;
     block->size = size;
@@ -246,7 +246,7 @@ defineMemorySpace space = do
                            $string:spacedesc,
                            (long long) size,
                            (long long) ctx->$id:usagename,
-                           old_error);
+                           old_error != NULL ? old_error : "");
     free(old_error);
     lock_unlock(&ctx->error_lock);
     return FUTHARK_OUT_OF_MEMORY;

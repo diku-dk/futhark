@@ -44,6 +44,17 @@ int main() {
   assert(futhark_index_i64_2d(ctx, &y, b, 3, 4) == 0);
   assert(futhark_context_sync(ctx) == 0);
   assert(y == 3+4);
+
+  // An error that has not been retrieved must not make subsequent
+  // allocations fail.
+  assert(futhark_index_i64_2d(ctx, NULL, b, 10, 0) == 1);
+  struct futhark_i64_1d *c;
+  assert(futhark_entry_fun1(ctx, &c, 1000) == 0);
+  assert(futhark_context_sync(ctx) == 0);
+  assert(futhark_free_i64_1d(ctx, c) == 0);
+  assert((err = futhark_context_get_error(ctx)) != NULL);
+  free(err);
+
   assert(futhark_free_i64_2d(ctx, b) == 0);
 
   futhark_context_free(ctx);
