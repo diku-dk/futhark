@@ -115,6 +115,14 @@ blockChunkLoop w m = do
       dPrimV "chunk_size" $ sExt64 $ chunk_end - chunk_start
     m chunk_start chunk_size
 
+-- | Whether two indices into a flattened in-block space, segmented along its
+-- innermost dimension of the given size, are in different segments. We know
+-- these must fit in 32-bit integers, which means we can use much cheaper 32-bit
+-- divisions.
+crossesSegment :: Imp.TExp Int64 -> Imp.TExp Int32 -> Imp.TExp Int32 -> Imp.TExp Bool
+crossesSegment segment_size from to =
+  (to - from) .>. (to `rem` sExt32 segment_size)
+
 virtualisedBlockScan ::
   Maybe (Imp.TExp Int32 -> Imp.TExp Int32 -> Imp.TExp Bool) ->
   Imp.TExp Int32 ->
@@ -406,12 +414,9 @@ compileBlockOp pat (Inner (SegOp (SegScan lvl space _ body scans post_op))) = do
 
   sOp $ Imp.ErrorSync Imp.FenceLocal
 
-  let segment_size = last dims'
-      crossesSegment from to =
-        (sExt64 to - sExt64 from) .>. (sExt64 to `rem` segment_size)
-      seg_flag = case dims' of
+  let seg_flag = case dims' of
         [_] -> Nothing -- Nonsegmented.
-        _ -> Just crossesSegment
+        _ -> Just $ crossesSegment $ last dims'
 
   -- blockScan needs to treat the scan output as a one-dimensional
   -- array of scan elements, so we invent some new flattened arrays
@@ -504,14 +509,11 @@ compileBlockOp pat (Inner (SegOp (SegRed lvl space _ body ops))) = do
     --
     virtCase dims' tmps_for_ops = do
       dims_flat <- dPrimV "dims_flat" $ product dims'
-      let segment_size = last dims'
-          crossesSegment from to =
-            (sExt64 to - sExt64 from) .>. (sExt64 to `rem` sExt64 segment_size)
 
       forM_ (zip ops tmps_for_ops) $ \(op, tmps) -> do
         tmps_flat <- mapM (flattenArray (length dims') dims_flat) tmps
         virtualisedBlockScan
-          (Just crossesSegment)
+          (Just $ crossesSegment $ last dims')
           (sExt32 $ tvExp dims_flat)
           (segBinOpLambda op)
           tmps_flat
@@ -547,14 +549,11 @@ compileBlockOp pat (Inner (SegOp (SegRed lvl space _ body ops))) = do
       -- involve copying anything; merely playing with the index
       -- function.
       dims_flat <- dPrimV "dims_flat" $ product dims'
-      let segment_size = last dims'
-          crossesSegment from to =
-            (sExt64 to - sExt64 from) .>. (sExt64 to `rem` sExt64 segment_size)
 
       forM_ (zip ops tmps_for_ops) $ \(op, tmps) -> do
         tmps_flat <- mapM (flattenArray (length dims') dims_flat) tmps
         blockScan
-          (Just crossesSegment)
+          (Just $ crossesSegment $ last dims')
           (product dims')
           (product dims')
           (segBinOpLambda op)
