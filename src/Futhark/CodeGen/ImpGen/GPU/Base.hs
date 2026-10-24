@@ -15,6 +15,7 @@ module Futhark.CodeGen.ImpGen.GPU.Base
     Target (..),
     KernelEnv (..),
     blockReduce,
+    warpLocal,
     blockScan,
     blockLoop,
     isActive,
@@ -620,7 +621,6 @@ blockReduceWithOffset offset w lam arrs = do
             lambdaBody lam
         sComment "write result of operation" $
           zipWithM_ writeReduceOpResult reduce_acc_params arrs
-      in_wave_reduce = everythingVolatile do_reduce
 
       wave_size = kernelWaveSize constants
       tblock_size = kernelBlockSize constants
@@ -636,9 +636,10 @@ blockReduceWithOffset offset w lam arrs = do
       in_wave_reductions = do
         offset <-- (1 :: Imp.TExp Int32)
         sWhile doing_in_wave_reductions $ do
-          sWhen
-            (arg_in_bounds .&&. apply_in_in_wave_iteration)
-            in_wave_reduce
+          warpLocal $
+            sWhen
+              (arg_in_bounds .&&. apply_in_in_wave_iteration)
+              do_reduce
           offset <-- tvExp offset * 2
 
       doing_cross_wave_reductions =

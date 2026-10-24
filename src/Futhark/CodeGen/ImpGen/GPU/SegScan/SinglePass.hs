@@ -137,7 +137,7 @@ inBlockScanLookback ::
   [VName] ->
   Lambda GPUMem ->
   InKernelGen ()
-inBlockScanLookback constants arrs_full_size flag_arr arrs scan_lam = everythingVolatile $ do
+inBlockScanLookback constants arrs_full_size flag_arr arrs scan_lam = do
   flg_x :: TV Int8 <- dPrim "flg_x"
   flg_y :: TV Int8 <- dPrim "flg_y"
   let flg_param_x = Param mempty (tvVar flg_x) (MemPrim p_int8)
@@ -185,7 +185,7 @@ inBlockScanLookback constants arrs_full_size flag_arr arrs scan_lam = everything
     skip_threads <-- 1
 
     sWhile (tvExp skip_threads .<. block_size) $ do
-      sWhen in_block_thread_active $ do
+      warpLocal . sWhen in_block_thread_active $ do
         sComment "read operands" $
           zipWithM_
             (readParam (sExt64 $ tvExp skip_threads))
@@ -193,13 +193,13 @@ inBlockScanLookback constants arrs_full_size flag_arr arrs scan_lam = everything
             (flag_arr : arrs)
         sComment "perform operation" op_to_x
 
-        sComment "write result" $
-          sequence_ $
-            zipWith3
-              writeResult
-              (flg_param_x : x_params)
-              (flg_param_y : y_params)
-              (flag_arr : arrs)
+      warpLocal . sWhen in_block_thread_active . sComment "write result" $
+        sequence_ $
+          zipWith3
+            writeResult
+            (flg_param_x : x_params)
+            (flg_param_y : y_params)
+            (flag_arr : arrs)
 
       skip_threads <-- tvExp skip_threads * 2
   where
@@ -639,7 +639,7 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
 
         let warp_size = kernelWaveSize constants
         sWhen (bNot blockNewSgm .&&. ltid32 .<. warp_size) $ do
-          sWhen (ltid32 .==. 0) $ do
+          warpLocal . sWhen (ltid32 .==. 0) $ do
             sIf
               (not_segmented_e .||. boundary .==. sExt32 (tblock_size_e * chunk))
               ( do
@@ -661,10 +661,9 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
             everythingVolatile $
               copyDWIMFix warpscan [0] (Var statusFlags) [tvExp dyn_id - 1]
           -- sWhen
-          sOp local_fence
 
           status :: TV Int8 <- dPrim "status"
-          copyDWIMFix (tvVar status) [] (Var warpscan) [0]
+          warpLocal $ copyDWIMFix (tvVar status) [] (Var warpscan) [0]
 
           sIf
             (tvExp status .==. statusP)
@@ -708,12 +707,14 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
                   -- end sIf
                   -- end sWhen
 
-                  forM_ (zip exchanges aggrs) $ \(exchange, aggr) ->
-                    copyDWIMFix exchange [ltid] (tvSize aggr) []
-                  copyDWIMFix warpscan [ltid] (tvSize flag) []
+                  warpLocal $ do
+                    forM_ (zip exchanges aggrs) $ \(exchange, aggr) ->
+                      copyDWIMFix exchange [ltid] (tvSize aggr) []
+                    copyDWIMFix warpscan [ltid] (tvSize flag) []
 
                   -- execute warp-parallel reduction but only if the last read flag in not STATUS_P
-                  copyDWIMFix (tvVar flag) [] (Var warpscan) [sExt64 warp_size - 1]
+                  warpLocal $
+                    copyDWIMFix (tvVar flag) [] (Var warpscan) [sExt64 warp_size - 1]
                   sWhen (tvExp flag .<. statusP) $ do
                     lam' <- renameLambda scan_op1
                     inBlockScanLookback
@@ -724,9 +725,10 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
                       lam'
 
                   -- all threads of the warp read the result of reduction
-                  copyDWIMFix (tvVar flag) [] (Var warpscan) [sExt64 warp_size - 1]
-                  forM_ (zip aggrs exchanges) $ \(aggr, exchange) ->
-                    copyDWIMFix (tvVar aggr) [] (Var exchange) [sExt64 warp_size - 1]
+                  warpLocal $ do
+                    copyDWIMFix (tvVar flag) [] (Var warpscan) [sExt64 warp_size - 1]
+                    forM_ (zip aggrs exchanges) $ \(aggr, exchange) ->
+                      copyDWIMFix (tvVar aggr) [] (Var exchange) [sExt64 warp_size - 1]
                   -- update read offset
                   sIf
                     (tvExp flag .==. statusP)
