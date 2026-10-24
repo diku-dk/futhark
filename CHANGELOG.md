@@ -53,6 +53,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Bitshift operators are now fully defined, with masking of problematic shift
   amounts.
 
+* `f16.sgn` was missing on some targets.
+
+* Various obscure floating-point errors in the `ispc` backend.
+
 ## [0.28.1]
 
 ### Added

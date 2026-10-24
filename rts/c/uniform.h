@@ -1472,11 +1472,11 @@ static inline uniform float btof_bool_f32(uniform bool x) {
 }
 
 static inline uniform int64_t futrts_to_bits64(uniform double x) {
-  return *((uniform int64_t* uniform)&x);
+  return intbits(x);
 }
 
 static inline uniform double futrts_from_bits64(uniform int64_t x) {
-  return *((uniform double* uniform)&x);
+  return doublebits(x);
 }
 
 static inline uniform double fmod64(uniform double x, uniform double y) {
@@ -1809,11 +1809,11 @@ static inline uniform f16 futrts_fma16(uniform f16 a, uniform f16 b, uniform f16
 }
 
 static inline uniform int16_t fptobits_f16_i16(uniform f16 x) {
-  return *((uniform int16_t *)&x);
+  return intbits(x);
 }
 
 static inline uniform f16 bitstofp_i16_f16(uniform int16_t x) {
-  return *((uniform f16 *)&x);
+  return float16bits(x);
 }
 
 static inline uniform float fpconv_f16_f16(uniform f16 x) {
