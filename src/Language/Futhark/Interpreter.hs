@@ -1708,6 +1708,12 @@ initialCtx =
       ]
     arithOp f g = Just $ bopDef $ intOp f ++ floatOp g
 
+    -- The core language exponentiation treats the exponent as
+    -- unsigned, but a negative exponent is an error in the source
+    -- language.
+    nonnegativeExponent (g, p, f, ad) =
+      (g, p, \x y -> if P.negativeIsh y then Nothing else f x y, ad)
+
     flipCmps = map (\(f, g, h, o) -> (f, g, flip h, flip o))
     sintCmp f =
       [ (getS, Just . BoolValue, P.doCmpOp (f Int8), adBinOp $ AD.OpCmp (f Int8)),
@@ -1820,7 +1826,8 @@ initialCtx =
               breakOnNaN [x', y'] z
               pure $ ValuePrim z
         _
-          | Just x' <- getAD x,
+          | not (isPrim x && isPrim y),
+            Just x' <- getAD x,
             Just y' <- getAD y,
             Just (z, i') <- msum $ map (`bopDefAD` (x', y', i)) fs -> do
               putCounter i'
@@ -1839,6 +1846,10 @@ initialCtx =
           y' <- valf y
           retf =<< op x' y'
         bopDefAD (_, _, _, dop) (x, y, i) = dop x y i
+        -- The AD operators do not check signedness, so we must not
+        -- fall back to them for ordinary values.
+        isPrim ValuePrim {} = True
+        isPrim _ = False
 
     unopDef fs = fun1 $ \x -> do
       i <- getCounter
@@ -1919,7 +1930,12 @@ initialCtx =
     def "+" = arithOp (`P.Add` P.OverflowWrap) P.FAdd
     def "-" = arithOp (`P.Sub` P.OverflowWrap) P.FSub
     def "*" = arithOp (`P.Mul` P.OverflowWrap) P.FMul
-    def "**" = arithOp P.Pow P.FPow
+    def "**" =
+      Just $
+        bopDef $
+          map nonnegativeExponent (sintOp P.Pow)
+            ++ uintOp P.Pow
+            ++ floatOp P.FPow
     def "/" =
       Just $
         bopDef $

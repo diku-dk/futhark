@@ -48,6 +48,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Various fixes to binary input validation.
 
+* Handling of unsigned integer exponents in the interpreter.
+
 ## [0.28.1]
 
 ### Added

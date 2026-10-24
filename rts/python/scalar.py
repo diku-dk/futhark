@@ -138,7 +138,8 @@ def fmaxN(x, y):
 
 
 def powN(x, y):
-    return x**y
+    # The exponent is interpreted as unsigned.
+    return signed(unsigned(x) ** unsigned(y))
 
 
 def fpowN(x, y):

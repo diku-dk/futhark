@@ -504,7 +504,7 @@ data BinOp
     Or IntType
   | -- | Bitwise exclusive-or.
     Xor IntType
-  | -- | Integer exponentiation.
+  | -- | Integer exponentiation. Note that the exponent is treated as unsigned.
     Pow IntType
   | -- | Floating-point exponentiation.
     FPow FloatType
@@ -762,7 +762,7 @@ doBinOp AShr {} = doIntBinOp doAShr
 doBinOp And {} = doIntBinOp doAnd
 doBinOp Or {} = doIntBinOp doOr
 doBinOp Xor {} = doIntBinOp doXor
-doBinOp Pow {} = doRiskyIntBinOp doPow
+doBinOp Pow {} = doIntBinOp doPow
 doBinOp FPow {} = doFloatBinOp (**) (**) (**)
 doBinOp LogAnd {} = doBoolBinOp (&&)
 doBinOp LogOr {} = doBoolBinOp (||)
@@ -930,11 +930,9 @@ doOr v1 v2 = intValue (intValueType v1) $ intToWord64 v1 .|. intToWord64 v2
 doXor :: IntValue -> IntValue -> IntValue
 doXor v1 v2 = intValue (intValueType v1) $ intToWord64 v1 `xor` intToWord64 v2
 
--- | Signed integer exponentatation.
-doPow :: IntValue -> IntValue -> Maybe IntValue
-doPow v1 v2
-  | negativeIshInt v2 = Nothing
-  | otherwise = Just $ intValue (intValueType v1) $ intToInt64 v1 ^ intToInt64 v2
+-- | Integer exponentiation.  The exponent is interpreted as unsigned.
+doPow :: IntValue -> IntValue -> IntValue
+doPow v1 v2 = intValue (intValueType v1) $ intToInt64 v1 ^ intToWord64 v2
 
 -- | Apply a 'ConvOp' to an operand.  Returns 'Nothing' if the
 -- application is mistyped.

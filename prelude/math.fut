@@ -352,7 +352,7 @@ module i8 : (integral with t = i8) = {
   def (-) (x: i8) (y: i8) = intrinsics.sub8 (x, y)
   def (*) (x: i8) (y: i8) = intrinsics.mul8 (x, y)
   def (/) (x: i8) (y: i8) = intrinsics.sdiv8 (x, y)
-  def (**) (x: i8) (y: i8) = intrinsics.pow8 (x, y)
+  def (**) (x: i8) (y: i8) = x intrinsics.** y
   def (%) (x: i8) (y: i8) = intrinsics.smod8 (x, y)
   def (//) (x: i8) (y: i8) = intrinsics.squot8 (x, y)
   def (%%) (x: i8) (y: i8) = intrinsics.srem8 (x, y)
@@ -427,7 +427,7 @@ module i16 : (integral with t = i16) = {
   def (-) (x: i16) (y: i16) = intrinsics.sub16 (x, y)
   def (*) (x: i16) (y: i16) = intrinsics.mul16 (x, y)
   def (/) (x: i16) (y: i16) = intrinsics.sdiv16 (x, y)
-  def (**) (x: i16) (y: i16) = intrinsics.pow16 (x, y)
+  def (**) (x: i16) (y: i16) = x intrinsics.** y
   def (%) (x: i16) (y: i16) = intrinsics.smod16 (x, y)
   def (//) (x: i16) (y: i16) = intrinsics.squot16 (x, y)
   def (%%) (x: i16) (y: i16) = intrinsics.srem16 (x, y)
@@ -505,7 +505,7 @@ module i32 : (integral with t = i32) = {
   def (-) (x: i32) (y: i32) = intrinsics.sub32 (x, y)
   def (*) (x: i32) (y: i32) = intrinsics.mul32 (x, y)
   def (/) (x: i32) (y: i32) = intrinsics.sdiv32 (x, y)
-  def (**) (x: i32) (y: i32) = intrinsics.pow32 (x, y)
+  def (**) (x: i32) (y: i32) = x intrinsics.** y
   def (%) (x: i32) (y: i32) = intrinsics.smod32 (x, y)
   def (//) (x: i32) (y: i32) = intrinsics.squot32 (x, y)
   def (%%) (x: i32) (y: i32) = intrinsics.srem32 (x, y)
@@ -583,7 +583,7 @@ module i64 : (integral with t = i64) = {
   def (-) (x: i64) (y: i64) = intrinsics.sub64 (x, y)
   def (*) (x: i64) (y: i64) = intrinsics.mul64 (x, y)
   def (/) (x: i64) (y: i64) = intrinsics.sdiv64 (x, y)
-  def (**) (x: i64) (y: i64) = intrinsics.pow64 (x, y)
+  def (**) (x: i64) (y: i64) = x intrinsics.** y
   def (%) (x: i64) (y: i64) = intrinsics.smod64 (x, y)
   def (//) (x: i64) (y: i64) = intrinsics.squot64 (x, y)
   def (%%) (x: i64) (y: i64) = intrinsics.srem64 (x, y)
@@ -661,7 +661,7 @@ module u8 : (integral with t = u8) = {
   def (-) (x: u8) (y: u8) = unsign (intrinsics.sub8 (sign x, sign y))
   def (*) (x: u8) (y: u8) = unsign (intrinsics.mul8 (sign x, sign y))
   def (/) (x: u8) (y: u8) = unsign (intrinsics.udiv8 (sign x, sign y))
-  def (**) (x: u8) (y: u8) = unsign (intrinsics.pow8 (sign x, sign y))
+  def (**) (x: u8) (y: u8) = x intrinsics.** y
   def (%) (x: u8) (y: u8) = unsign (intrinsics.umod8 (sign x, sign y))
   def (//) (x: u8) (y: u8) = unsign (intrinsics.udiv8 (sign x, sign y))
   def (%%) (x: u8) (y: u8) = unsign (intrinsics.umod8 (sign x, sign y))
@@ -739,7 +739,7 @@ module u16 : (integral with t = u16) = {
   def (-) (x: u16) (y: u16) = unsign (intrinsics.sub16 (sign x, sign y))
   def (*) (x: u16) (y: u16) = unsign (intrinsics.mul16 (sign x, sign y))
   def (/) (x: u16) (y: u16) = unsign (intrinsics.udiv16 (sign x, sign y))
-  def (**) (x: u16) (y: u16) = unsign (intrinsics.pow16 (sign x, sign y))
+  def (**) (x: u16) (y: u16) = x intrinsics.** y
   def (%) (x: u16) (y: u16) = unsign (intrinsics.umod16 (sign x, sign y))
   def (//) (x: u16) (y: u16) = unsign (intrinsics.udiv16 (sign x, sign y))
   def (%%) (x: u16) (y: u16) = unsign (intrinsics.umod16 (sign x, sign y))
@@ -817,7 +817,7 @@ module u32 : (integral with t = u32) = {
   def (-) (x: u32) (y: u32) = unsign (intrinsics.sub32 (sign x, sign y))
   def (*) (x: u32) (y: u32) = unsign (intrinsics.mul32 (sign x, sign y))
   def (/) (x: u32) (y: u32) = unsign (intrinsics.udiv32 (sign x, sign y))
-  def (**) (x: u32) (y: u32) = unsign (intrinsics.pow32 (sign x, sign y))
+  def (**) (x: u32) (y: u32) = x intrinsics.** y
   def (%) (x: u32) (y: u32) = unsign (intrinsics.umod32 (sign x, sign y))
   def (//) (x: u32) (y: u32) = unsign (intrinsics.udiv32 (sign x, sign y))
   def (%%) (x: u32) (y: u32) = unsign (intrinsics.umod32 (sign x, sign y))
@@ -895,7 +895,7 @@ module u64 : (integral with t = u64) = {
   def (-) (x: u64) (y: u64) = unsign (intrinsics.sub64 (sign x, sign y))
   def (*) (x: u64) (y: u64) = unsign (intrinsics.mul64 (sign x, sign y))
   def (/) (x: u64) (y: u64) = unsign (intrinsics.udiv64 (sign x, sign y))
-  def (**) (x: u64) (y: u64) = unsign (intrinsics.pow64 (sign x, sign y))
+  def (**) (x: u64) (y: u64) = x intrinsics.** y
   def (%) (x: u64) (y: u64) = unsign (intrinsics.umod64 (sign x, sign y))
   def (//) (x: u64) (y: u64) = unsign (intrinsics.udiv64 (sign x, sign y))
   def (%%) (x: u64) (y: u64) = unsign (intrinsics.umod64 (sign x, sign y))
