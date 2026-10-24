@@ -1,6 +1,7 @@
 -- The primal result of vjp2 is fresh, even when the function returns a
 -- free variable.
 -- ==
+-- tags { autodiff }
 -- input { [1f32,2f32] 10f32 }
 -- output { [42f32,11f32] [10f32,11f32] }
 
