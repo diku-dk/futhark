@@ -94,15 +94,18 @@ arrayLibraryFunctions pub space pt signed rank = do
 
   new_body <- collect $ do
     prepareNewMem [C.cexp|arr|] space shape pt
-    copy
-      CopyNoBarrier
-      [C.cexp|arr->mem.mem|]
-      [C.cexp|0|]
-      space
-      [C.cexp|(const unsigned char*)data|]
-      [C.cexp|0|]
-      DefaultSpace
-      [C.cexp|((size_t)$exp:arr_size) * $int:(primByteSize pt::Int)|]
+    copy_items <-
+      collect $
+        copy
+          CopyNoBarrier
+          [C.cexp|arr->mem.mem|]
+          [C.cexp|0|]
+          space
+          [C.cexp|(const unsigned char*)data|]
+          [C.cexp|0|]
+          DefaultSpace
+          [C.cexp|((size_t)$exp:arr_size) * $int:(primByteSize pt::Int)|]
+    stm [C.cstm|if (err == 0) { $items:copy_items }|]
 
   new_raw_body <- collect $ do
     resetMem [C.cexp|arr->mem|] space
@@ -602,15 +605,18 @@ recordArrayIndexFunction space _types desc rank elemtype vds = do
           stm [C.cstm|v->$id:(tupleField j) = malloc(sizeof(*v->$id:(tupleField j)));|]
           prepareNewMem [C.cexp|v->$id:(tupleField j)|] space shape pt
           -- Now we can copy into the freshly allocated memory.
-          copy
-            CopyNoBarrier
-            [C.cexp|v->$id:(tupleField j)->mem.mem|]
-            [C.cexp|0|]
-            space
-            [C.cexp|arr->$id:(tupleField j)->mem.mem|]
-            (indexExp pt r [C.cexp|arr->$id:(tupleField j)->shape|])
-            space
-            $ cproduct ([C.cexp|$int:(primByteSize pt::Int)|] : shape)
+          copy_items <-
+            collect
+              $ copy
+                CopyNoBarrier
+                [C.cexp|v->$id:(tupleField j)->mem.mem|]
+                [C.cexp|0|]
+                space
+                [C.cexp|arr->$id:(tupleField j)->mem.mem|]
+                (indexExp pt r [C.cexp|arr->$id:(tupleField j)->shape|])
+                space
+              $ cproduct ([C.cexp|$int:(primByteSize pt::Int)|] : shape)
+          stm [C.cstm|if (err == 0) { $items:copy_items }|]
 
 recordArraySetFunction ::
   Space ->

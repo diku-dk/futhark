@@ -51,6 +51,10 @@ static void host_alloc(struct futhark_context* ctx,
   if (is_small_alloc(size) || free_list_find(&ctx->free_list, size, tag, size_out, (fl_mem*)mem_out) != 0) {
     *size_out = size;
     *mem_out = malloc(size);
+    if (*mem_out == NULL && size != 0) {
+      set_error(ctx, msgprintf("Failed to allocate %lld bytes of host memory.\n",
+                               (long long)size));
+    }
   }
 }
 
