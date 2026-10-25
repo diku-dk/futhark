@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Better detection of host OOM, although still unreliable on systems with
   overcommit.
 
+* With GPU backends, unstructured copies are now sometimes a lot faster, as the
+  run-time now dynamically tries to choose the best copying order.
+
 ### Removed
 
 ### Changed

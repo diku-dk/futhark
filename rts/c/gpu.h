@@ -517,14 +517,27 @@ static int gpu_lmad_copy(struct futhark_context* ctx, const char* provenance,
 
   int64_t zero = 0;
 
+  // To improve the odds of coalesced memory accesses, we pass the dimensions in
+  // order of increasing source stride, and secondarily destination stride, as
+  // uncoalesced reads are much more costly than uncoalesced writes.
+  int perm[8];
+  for (int i = 0; i < r; i++) {
+    int j = i;
+    while (j > 0 && llabs(src_strides[perm[j-1]]) > llabs(src_strides[i])) {
+      perm[j] = perm[j-1];
+      j--;
+    }
+    perm[j] = i;
+  }
+
   for (int i = 0; i < 8; i++) {
     args_sizes[6+i*3] = sizeof(int64_t);
     args_sizes[6+i*3+1] = sizeof(int64_t);
     args_sizes[6+i*3+2] = sizeof(int64_t);
     if (i < r) {
-      args[6+i*3] = &shape[i];
-      args[6+i*3+1] = &dst_strides[i];
-      args[6+i*3+2] = &src_strides[i];
+      args[6+i*3] = &shape[perm[i]];
+      args[6+i*3+1] = &dst_strides[perm[i]];
+      args[6+i*3+2] = &src_strides[perm[i]];
     } else {
       args[6+i*3] = &zero;
       args[6+i*3+1] = &zero;
