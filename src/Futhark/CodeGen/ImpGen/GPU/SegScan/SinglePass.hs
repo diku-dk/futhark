@@ -29,6 +29,11 @@ yParams scan =
 -- types, and map parameter types, compute the largest available chunk
 -- size given the parameters for which we want chunking and the
 -- available resources.
+--
+-- The chunk size is always odd. The inputs and outputs are transposed
+-- through shared memory, where each thread accesses its chunk with a
+-- stride of the chunk size. With an even chunk size, and particularly
+-- a power of two, these accesses suffer from bank conflicts.
 getScanChunkSize :: [Type] -> Imp.KernelConstExp
 getScanChunkSize types =
   let max_tblock_size = Imp.SizeMaxConst SizeThreadBlock
@@ -45,7 +50,8 @@ getScanChunkSize types =
 
       mem_constraint = max k_mem sum_sizes `quot` max_size
       reg_constraint = (k_reg - 1 - sum_sizes') `quot` (2 * sum_sizes')
-   in untyped $ sMax64 1 $ sMin64 mem_constraint reg_constraint
+      chunk = sMax64 1 $ sMin64 mem_constraint reg_constraint
+   in untyped $ chunk - (1 - chunk `rem` 2)
 
 createLocalArrays ::
   Count BlockSize SubExp ->
