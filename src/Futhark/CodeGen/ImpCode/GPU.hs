@@ -177,6 +177,9 @@ data KernelOp
   | Atomic Space AtomicOp
   | Barrier Fence
   | MemFence Fence
+  | -- | Basically a warp-level barrier. Must be executed by all threads of
+    -- warp. Only supported for CUDA and HIP.
+    WarpSync
   | SharedAlloc VName (Count Bytes (TExp Int64))
   | -- | Perform a barrier and also check whether any
     -- threads have failed an assertion.  Make sure all
@@ -250,6 +253,8 @@ instance Pretty KernelOp where
     "mem_fence_local()"
   pretty (MemFence FenceGlobal) =
     "mem_fence_global()"
+  pretty WarpSync =
+    "warp_sync()"
   pretty (SharedAlloc name size) =
     pretty name <+> equals <+> "shared_alloc" <> parens (pretty size)
   pretty (ErrorSync FenceLocal) =

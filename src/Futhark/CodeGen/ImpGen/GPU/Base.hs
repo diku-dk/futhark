@@ -15,6 +15,7 @@ module Futhark.CodeGen.ImpGen.GPU.Base
     Target (..),
     KernelEnv (..),
     blockReduce,
+    warpLocal,
     blockScan,
     blockLoop,
     isActive,
@@ -84,6 +85,7 @@ data HostEnv = HostEnv
 
 data KernelEnv = KernelEnv
   { kernelAtomics :: AtomicBinOp,
+    kernelTarget :: Target,
     kernelConstants :: KernelConstants,
     kernelLocks :: M.Map VName Locks
   }
@@ -299,6 +301,19 @@ kernelConstToExp = traverse f
       emit $ Imp.GetUserParam v name $ isInt64 def'
       pure v
 
+-- | Run code where threads within a warp communicate directly through shared
+-- memory. On OpenCL we rely on lockstep execution make all memory accesses
+-- volatile; on CUDA and HIP we explicitly synchronise the warp afterwards with
+-- 'Imp.WarpSync'. Like a barrier, this must be reached by all threads of the
+-- warp.
+warpLocal :: InKernelGen () -> InKernelGen ()
+warpLocal m = do
+  target <- kernelTarget <$> askEnv
+  case target of
+    OpenCL -> everythingVolatile m
+    CUDA -> m >> sOp Imp.WarpSync
+    HIP -> m >> sOp Imp.WarpSync
+
 inChunkScan ::
   KernelConstants ->
   Maybe (Imp.TExp Int32 -> Imp.TExp Int32 -> Imp.TExp Bool) ->
@@ -310,7 +325,7 @@ inChunkScan ::
   InKernelGen () ->
   Lambda GPUMem ->
   InKernelGen ()
-inChunkScan constants seg_flag arrs_full_size lockstep_width block_size active arrs barrier scan_lam = everythingVolatile $ do
+inChunkScan constants seg_flag arrs_full_size lockstep_width block_size active arrs barrier scan_lam = do
   skip_threads <- dPrim "skip_threads"
   let actual_params = lambdaParams scan_lam
       (x_params, y_params) =
@@ -362,13 +377,14 @@ inChunkScan constants seg_flag arrs_full_size lockstep_width block_size active a
       thread_active <-
         dPrimVE "thread_active" $ tvExp skip_threads .<=. in_block_id .&&. active
 
-      sWhen thread_active . sComment "read operands" $
-        zipWithM_ (readParam (sExt64 $ tvExp skip_threads)) x_params arrs
-      sComment "perform operation" $ op_to_x thread_active
+      warpLocal $ do
+        sWhen thread_active . sComment "read operands" $
+          zipWithM_ (readParam (sExt64 $ tvExp skip_threads)) x_params arrs
+        sComment "perform operation" $ op_to_x thread_active
 
       maybeBarrier
 
-      sWhen thread_active . sComment "write result" $
+      warpLocal . sWhen thread_active . sComment "write result" $
         sequence_ $
           zipWith3 writeResult x_params y_params arrs
 
@@ -605,7 +621,6 @@ blockReduceWithOffset offset w lam arrs = do
             lambdaBody lam
         sComment "write result of operation" $
           zipWithM_ writeReduceOpResult reduce_acc_params arrs
-      in_wave_reduce = everythingVolatile do_reduce
 
       wave_size = kernelWaveSize constants
       tblock_size = kernelBlockSize constants
@@ -621,9 +636,10 @@ blockReduceWithOffset offset w lam arrs = do
       in_wave_reductions = do
         offset <-- (1 :: Imp.TExp Int32)
         sWhile doing_in_wave_reductions $ do
-          sWhen
-            (arg_in_bounds .&&. apply_in_in_wave_iteration)
-            in_wave_reduce
+          warpLocal $
+            sWhen
+              (arg_in_bounds .&&. apply_in_in_wave_iteration)
+              do_reduce
           offset <-- tvExp offset * 2
 
       doing_cross_wave_reductions =
@@ -1224,8 +1240,8 @@ sKernelOp ::
   InKernelGen () ->
   CallKernelGen ()
 sKernelOp attrs constants ops name m = do
-  HostEnv atomics _ locks <- askEnv
-  body <- makeAllMemoryGlobal $ subImpM_ (KernelEnv atomics constants locks) ops m
+  HostEnv atomics target locks <- askEnv
+  body <- makeAllMemoryGlobal $ subImpM_ (KernelEnv atomics target constants locks) ops m
   uses <- computeKernelUses body $ M.keys $ kAttrConstExps attrs
   tblock_size <- onBlockSize $ kernelBlockSize constants
   -- XXX: the provenance of the kernel itself is usually boring (it just points

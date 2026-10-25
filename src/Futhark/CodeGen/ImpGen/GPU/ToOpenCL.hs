@@ -635,6 +635,8 @@ inKernelOperations env mode body =
       GC.stm [C.cstm|mem_fence_local();|]
     kernelOps (MemFence FenceGlobal) =
       GC.stm [C.cstm|mem_fence_global();|]
+    kernelOps WarpSync =
+      GC.stm [C.cstm|warp_sync();|]
     kernelOps (SharedAlloc name size) = do
       name' <- newVName $ nameFromText $ prettyText name <> "_backing"
       GC.modifyUserState $ \s ->
