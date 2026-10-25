@@ -99,60 +99,60 @@ def lmad_memcpyable(dst_strides, src_strides, shape):
     return True
 
 
-def lmad_is_tr(strides, shape):
-    r = len(shape)
-    for i in range(1, r):
-        n = 1
-        m = 1
-        ok = True
-        expected = 1
-        # Check strides before 'i'.
-        for j in range(i - 1, -1, -1):
-            ok = ok and strides[j] == expected
-            expected *= shape[j]
-            n *= shape[j]
-        # Check strides after 'i'.
-        for j in range(r - 1, i - 1, -1):
-            ok = ok and strides[j] == expected
-            expected *= shape[j]
-            m *= shape[j]
-        if ok:
-            return (n, m)
-    return None
-
-
+# See lmad_map_tr() in rts/c/copy.h.  Returns a tuple (num_arrays,
+# rows, cols, dst_array_stride, dst_row_stride, src_array_stride,
+# src_row_stride), or None if the copy is not a map(transpose).
 def lmad_map_tr(dst_strides, src_strides, shape):
-    r = len(dst_strides)
-    rowmajor_strides = [0] * r
-    rowmajor_strides[r - 1] = 1
-
-    for i in range(r - 2, -1, -1):
-        rowmajor_strides[i] = rowmajor_strides[i + 1] * shape[i + 1]
-
-    # map_r will be the number of mapped dimensions on top.
-    map_r = 0
-    k = 1
-    for i in range(r):
+    c_shape = []
+    c_dst_strides = []
+    c_src_strides = []
+    for d, s, n in zip(dst_strides, src_strides, shape):
+        if n == 1:
+            continue
         if (
-            dst_strides[i] != rowmajor_strides[i]
-            or src_strides[i] != rowmajor_strides[i]
+            c_shape
+            and c_dst_strides[-1] == d * n
+            and c_src_strides[-1] == s * n
         ):
-            break
+            c_shape[-1] *= n
+            c_dst_strides[-1] = d
+            c_src_strides[-1] = s
         else:
-            k *= shape[i]
-            map_r += 1
+            c_shape.append(n)
+            c_dst_strides.append(d)
+            c_src_strides.append(s)
 
-    if rowmajor_strides[map_r:] == dst_strides[map_r:]:
-        r = lmad_is_tr(src_strides[map_r:], shape[map_r:])
-        if r is not None:
-            n, m = r
-            return (k, n, m)
-    elif rowmajor_strides[map_r:] == src_strides[map_r:]:
-        r = lmad_is_tr(dst_strides[map_r:], shape[map_r:])
-        if r is not None:
-            n, m = r
-            return (k, m, n)  # Sic!
-    return None
+    if len(c_shape) not in (2, 3):
+        return None
+
+    a, b = len(c_shape) - 2, len(c_shape) - 1
+    if c_dst_strides[b] == 1 and c_src_strides[a] == 1:
+        rows, cols = c_shape[b], c_shape[a]
+        dst_row_stride, src_row_stride = c_dst_strides[a], c_src_strides[b]
+    elif c_dst_strides[a] == 1 and c_src_strides[b] == 1:
+        rows, cols = c_shape[a], c_shape[b]
+        dst_row_stride, src_row_stride = c_dst_strides[b], c_src_strides[a]
+    else:
+        return None
+
+    if len(c_shape) == 3:
+        k, dst_array_stride, src_array_stride = (
+            c_shape[0],
+            c_dst_strides[0],
+            c_src_strides[0],
+        )
+    else:
+        k, dst_array_stride, src_array_stride = 1, 0, 0
+
+    return (
+        k,
+        rows,
+        cols,
+        dst_array_stride,
+        dst_row_stride,
+        src_array_stride,
+        src_row_stride,
+    )
 
 
 def lmad_copy_elements(

@@ -418,8 +418,9 @@ def sync(self):
 
 
 def map_transpose_gpu2gpu(
-    self, elem_size, dst, dst_offset, src, src_offset, k, n, m
+    self, elem_size, dst, dst_offset, src, src_offset, tr
 ):
+    k, n, m = tr[0:3]
     kernels = self.transpose_kernels[elem_size]
     kernel = kernels["default"]
     mulx = TR_BLOCK_DIM / n
@@ -447,6 +448,7 @@ def map_transpose_gpu2gpu(
         k32,
         m32,
         n32,
+        *[np.int32(x) for x in tr[3:]],
         mulx32,
         muly32,
         np.int32(0),
@@ -521,9 +523,8 @@ def lmad_copy_gpu2gpu(
     else:
         tr = lmad_map_tr(dst_strides, src_strides, shape)
         if tr is not None:
-            k, n, m = tr
             map_transpose_gpu2gpu(
-                self, elem_size, dst, dst_offset, src, src_offset, k, m, n
+                self, elem_size, dst, dst_offset, src, src_offset, tr
             )
         else:
             copy_elements_gpu2gpu(
