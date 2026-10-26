@@ -75,6 +75,11 @@ forM2_ xs ys f = forM_ (zip xs ys) (uncurry f)
 -- | Given available register and a list of parameter types, compute
 -- the largest available chunk size given the parameters for which we
 -- want chunking and the available resources.
+--
+-- The chunk size is always odd. The collective copies go through
+-- shared memory, where each thread accesses its chunk with a stride of
+-- the chunk size. With an even chunk size, and particularly a power of
+-- two, these accesses suffer from bank conflicts.
 getRedChunkSize :: [Type] -> Imp.KernelConstExp
 getRedChunkSize types = do
   let max_tblock_size = Imp.SizeMaxConst SizeThreadBlock
@@ -91,7 +96,8 @@ getRedChunkSize types = do
 
       mem_constraint = max k_mem sum_sizes `quot` max_size
       reg_constraint = (k_reg - 1 - sum_sizes') `quot` (2 * sum_sizes')
-  untyped $ sMax64 1 $ sMin64 mem_constraint reg_constraint
+      chunk = sMax64 1 $ sMin64 mem_constraint reg_constraint
+  untyped $ chunk - (1 - chunk `rem` 2)
 
 -- | Code generation for the body of the SegRed, taking a continuation
 -- for saving the results of the body.  The results should be
