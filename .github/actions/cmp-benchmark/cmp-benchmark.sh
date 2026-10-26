@@ -25,7 +25,7 @@ echo "::endgroup::"
 
 hostname
 module unload cuda
-module load cuda/11.8
+module load cuda/12.2
 
 echo "::group::Benchmarking with master compiler"
 $HOME/.local-master/bin/futhark bench futhark-benchmarks \
