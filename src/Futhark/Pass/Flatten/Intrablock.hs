@@ -250,6 +250,10 @@ intrablockWithAccInput map_in_block (shape, arrs, Just (lam, nes)) = do
   lam' <- intrablockLambda map_in_block lam
   pure (shape, arrs, Just (lam', nes))
 
+bindPatToRes :: Pat Type -> [VName] -> FlattenM ()
+bindPatToRes pat res = forM_ (zip (patNames pat) res) $ \(pe_v, v) ->
+  letBindNames [pe_v] $ BasicOp $ SubExp $ Var v
+
 intrablockStm :: InBlockMapTransformer -> Stm SOACS -> FlattenM ()
 intrablockStm map_in_block stm@(Let pat aux e) = do
   scope <- askScope
@@ -285,13 +289,8 @@ intrablockStm map_in_block stm@(Let pat aux e) = do
           let scanfun' = soacsLambdaToGPU scanfun
               mapfun' = soacsLambdaToGPU mapfun
               post_op = soacsLambdaToGPU post_lam
-          scan_res <- certifying (stmAuxCerts aux) $ genUniformSegScanomapWithPost lvl (pure w) "intra_maposcanomap" scanfun' mempty nes post_op mapfun' arrs (const $ pure ())
-          zipWithM_
-            ( \pe v ->
-                letBindNames [patElemName pe] $ BasicOp $ SubExp $ Var v
-            )
-            (patElems pat)
-            scan_res
+          bindPatToRes pat <=< certifying (stmAuxCerts aux) $
+            genUniformSegScanomapWithPost lvl (pure w) "intra_maposcanomap" scanfun' mempty nes post_op mapfun' arrs (const $ pure ())
     Op (Screma w arrs form)
       | Just (reds, map_lam) <- isRedomapSOAC form -> do
           let onRed red =
@@ -302,15 +301,8 @@ intrablockStm map_in_block stm@(Let pat aux e) = do
                  in Reduce comm (soacsLambdaToGPU red_lam) (redNeutral red)
               reds_gpu = map onRed reds
               map_lam' = soacsLambdaToGPU map_lam
-          (red_res, stms) <- runBuilder (genUniformSegRed lvl "intra_redomap" (pure w) reds_gpu mempty map_lam' arrs (const $ pure ()))
-          certifying (stmAuxCerts aux) $ do
-            addStms stms
-            zipWithM_
-              ( \pe v ->
-                  letBindNames [patElemName pe] $ BasicOp $ SubExp $ Var v
-              )
-              (patElems pat)
-              red_res
+          bindPatToRes pat <=< certifying (stmAuxCerts aux) $
+            genUniformSegRed lvl "intra_redomap" (pure w) reds_gpu mempty map_lam' arrs (const $ pure ())
     Op (Screma w arrs form) ->
       -- This screma is too complicated for us to immediately do
       -- anything, so split it up and try again.
@@ -318,24 +310,12 @@ intrablockStm map_in_block stm@(Let pat aux e) = do
         =<< runBuilderT (dissectScrema pat w form arrs) (scopeForSOACs scope)
     Op (Hist w arrs ops bucket_fun) -> do
       let bucket_fun' = soacsLambdaToGPU bucket_fun
-
-      (hist_res, stms) <- runBuilder (genUniformSegHist lvl "Uniform_segHist" (pure w) ops bucket_fun' arrs (const $ pure ()))
-      certifying (stmAuxCerts aux) $ do
-        addStms stms
-        zipWithM_
-          ( \pe v ->
-              letBindNames [patElemName pe] $
-                BasicOp $
-                  SubExp $
-                    Var v
-          )
-          (patElems pat)
-          hist_res
+      bindPatToRes pat <=< certifying (stmAuxCerts aux) $
+        genUniformSegHist lvl "Uniform_segHist" (pure w) ops bucket_fun' arrs (const $ pure ())
     Op (Stream w arrs accs lam) -> do
       types <- asksScope castScope
-      ((), stream_stms) <-
-        runBuilderT (sequentialStreamWholeArray pat w accs lam arrs) types
-      intrablockStms map_in_block stream_stms
+      intrablockStms map_in_block
+        =<< runBuilderT_ (sequentialStreamWholeArray pat w accs lam arrs) types
     _ ->
       addStm $ soacsStmToGPU stm
 
