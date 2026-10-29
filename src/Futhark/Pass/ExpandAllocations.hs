@@ -770,9 +770,9 @@ offsetMemoryInBodyReturns _ br = br
 
 offsetMemoryInLambda :: RebaseMap -> Lambda GPUMem -> OffsetM (Lambda GPUMem)
 offsetMemoryInLambda offsets lam = do
-  body <- inScopeOf lam $ offsetMemoryInBody offsets $ lambdaBody lam
-  let params = map (offsetMemoryInParam offsets) $ lambdaParams lam
-  pure $ lam {lambdaBody = body, lambdaParams = params}
+  let lam' = lam {lambdaParams = map (offsetMemoryInParam offsets) (lambdaParams lam)}
+  body <- inScopeOf lam' $ offsetMemoryInBody offsets $ lambdaBody lam'
+  pure $ lam' {lambdaBody = body}
 
 -- A loop may have memory parameters, and those memory blocks may
 -- be expanded.  We assume (but do not check - FIXME) that if the

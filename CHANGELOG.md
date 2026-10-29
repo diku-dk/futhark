@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Invalid memory expansion in some rare cases.
+
 ## [0.28.2]
 
 ### Added

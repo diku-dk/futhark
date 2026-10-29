@@ -20,6 +20,8 @@ entry scan_arr_add [n]
                    (adj: [2][n]f32) : [2][n]f32 =
   vjp scan_arr_add_primal inp adj
 
+-- The last dataset below is large enough that the intra-block version of the
+-- scan is used, which is a separate code path.
 -- ==
 -- entry: scan_arr_add_vec
 -- input { [[1f32, 2, 3], [4f32, 5, 6]]
@@ -27,6 +29,7 @@ entry scan_arr_add [n]
 --          [[2f32, -1, 3], [0f32, 4, -2]]] }
 -- output { [[[7f32, 6, 4], [15f32, 12, 7]],
 --           [[4f32, 2, 3], [2f32, 2, -2]]] }
+-- compiled random input { [2][64]f32 [2][2][64]f32 } auto output
 entry scan_arr_add_vec [n] [k]
                        (inp: [2][n]f32)
                        (adjs: [k][2][n]f32) : [k][2][n]f32 =
