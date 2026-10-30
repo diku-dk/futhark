@@ -818,6 +818,7 @@ genWGSLStm (Op (ImpGPU.UniformRead tgt mem i _ _)) = do
     WGSL.Assign tgt' $
       WGSL.CallExp "workgroupUniformLoad" [WGSL.UnOpExp "&" $ WGSL.IndexExp mem' i']
 genWGSLStm (Op (ImpGPU.ErrorSync f)) = genWGSLStm $ Op (ImpGPU.Barrier f)
+genWGSLStm (Op ImpGPU.WarpSync {}) = error "genWGSLStm: WarpSync not handled."
 genWGSLStm GetUserParam {} = error "genWGSLStm: GetUserParam not handled."
 
 call1 :: WGSL.Ident -> WGSL.Exp -> WGSL.Exp
