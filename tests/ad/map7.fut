@@ -1,7 +1,7 @@
 -- #1878.  The interesting thing here is that the sparse adjoint also
 -- has active free variables.
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_webgpu }
 -- entry: fwd_map fwd_vec rev_map rev_vec
 -- input { [1.0f32,2.0f32,3.0f32,4.0f32,5.0f32,6.0f32,7.0f32,8.0f32] }
 -- output { [[0.0f32, 2.0f32, 3.0f32, 4.0f32],

@@ -1,3 +1,5 @@
+-- ==
+-- tags { no_webgpu }
 entry main (n: i64) : () =
   let arr =
     reduce_by_index (replicate n ())

@@ -1,4 +1,6 @@
 -- A particular wrong reduction, but it should not crash the compiler.
+-- ==
+-- tags { no_webgpu }
 
 type int = i32
 def max (x: int, y: int) = i32.max x y

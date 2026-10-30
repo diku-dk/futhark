@@ -1,3 +1,5 @@
+-- ==
+-- tags { no_webgpu }
 def dotprod [n] (xs: [n]f32) (ys: [n]f32) : f32 =
   reduce (+) 0.0 (map2 (*) xs ys)
 

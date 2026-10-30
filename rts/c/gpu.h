@@ -172,6 +172,7 @@ struct builtin_kernels {
 
 struct builtin_kernels* init_builtin_kernels(struct futhark_context* ctx) {
   struct builtin_kernels *kernels = malloc(sizeof(struct builtin_kernels));
+
   gpu_create_kernel(ctx, &kernels->map_transpose_1b, "map_transpose_1b");
   gpu_create_kernel(ctx, &kernels->map_transpose_1b_large, "map_transpose_1b_large");
   gpu_create_kernel(ctx, &kernels->map_transpose_1b_low_height, "map_transpose_1b_low_height");
@@ -375,23 +376,27 @@ static int gpu_map_transpose(struct futhark_context* ctx,
 
   void* args[15];
   size_t args_sizes[15] = {
-    sizeof(gpu_mem), sizeof(int64_t),
-    sizeof(gpu_mem), sizeof(int64_t),
-    sizeof(int32_t),
-    sizeof(int32_t),
-    sizeof(int32_t),
-    sizeof(int32_t),
-    sizeof(int32_t),
-    sizeof(int32_t),
-    sizeof(int32_t),
-    sizeof(int32_t),
-    sizeof(int32_t)
+    sizeof(int64_t), // dst_offset
+    sizeof(int64_t), // src_offset
+    sizeof(int32_t), // num_arrays
+    sizeof(int32_t), // x_elems
+    sizeof(int32_t), // y_elems
+    sizeof(int32_t), // dst_array_stride
+    sizeof(int32_t), // dst_row_stride
+    sizeof(int32_t), // src_array_stride
+    sizeof(int32_t), // src_row_stride
+    sizeof(int32_t), // mulx
+    sizeof(int32_t), // muly
+    sizeof(int32_t), // repeat_1
+    sizeof(int32_t), // repeat_2
+    sizeof(gpu_mem), // dst
+    sizeof(gpu_mem)  // src
   };
 
-  args[0] = &dst;
-  args[1] = &dst_offset;
-  args[2] = &src;
-  args[3] = &src_offset;
+  args[0] = &dst_offset;
+  args[1] = &src_offset;
+  args[13] = &dst;
+  args[14] = &src;
 
   if (dst_extent <= 2147483647L && src_extent <= 2147483647L) {
     if (m <= TR_BLOCK_DIM/2 && n <= TR_BLOCK_DIM/2) {
@@ -435,12 +440,12 @@ static int gpu_map_transpose(struct futhark_context* ctx,
       block[1] = TR_TILE_DIM/TR_ELEMS_PER_THREAD;
       block[2] = 1;
     }
-    args[4] = &k32;
-    args[5] = &m32;
-    args[6] = &n32;
-    for (int i = 0; i < 4; i++) { args[7+i] = &strides32[i]; }
-    args[11] = &mulx32;
-    args[12] = &muly32;
+    args[2] = &k32;
+    args[3] = &m32;
+    args[4] = &n32;
+    for (int i = 0; i < 4; i++) { args[5+i] = &strides32[i]; }
+    args[9] = &mulx32;
+    args[10] = &muly32;
   } else {
     if (ctx->logging) { fprintf(ctx->log, "Using large kernel\n"); }
     kernel = kernel_large;
@@ -450,13 +455,13 @@ static int gpu_map_transpose(struct futhark_context* ctx,
     block[0] = TR_TILE_DIM;
     block[1] = TR_TILE_DIM/TR_ELEMS_PER_THREAD;
     block[2] = 1;
-    args[4] = &k;
-    args[5] = &m;
-    args[6] = &n;
-    for (int i = 0; i < 4; i++) { args[7+i] = &strides[i]; }
-    args[11] = &mulx;
-    args[12] = &muly;
-    for (int i = 4; i < 13; i++) { args_sizes[i] = sizeof(int64_t); }
+    args[2] = &k;
+    args[3] = &m;
+    args[4] = &n;
+    for (int i = 0; i < 4; i++) { args[5+i] = &strides[i]; }
+    args[9] = &mulx;
+    args[10] = &muly;
+    for (int i = 2; i < 11; i++) { args_sizes[i] = sizeof(int64_t); }
   }
 
   // Cap the number of thead blocks we launch and figure out how many
@@ -465,10 +470,10 @@ static int gpu_map_transpose(struct futhark_context* ctx,
   int32_t repeat_2 = grid[2] / MAX_TR_THREAD_BLOCKS;
   grid[1] = repeat_1 > 0 ? MAX_TR_THREAD_BLOCKS : grid[1];
   grid[2] = repeat_2 > 0 ? MAX_TR_THREAD_BLOCKS : grid[2];
-  args[13] = &repeat_1;
-  args[14] = &repeat_2;
-  args_sizes[13] = sizeof(repeat_1);
-  args_sizes[14] = sizeof(repeat_2);
+  args[11] = &repeat_1;
+  args[12] = &repeat_2;
+  args_sizes[11] = sizeof(repeat_1);
+  args_sizes[12] = sizeof(repeat_2);
 
   if (ctx->logging) {
     fprintf(ctx->log, "\n");
@@ -515,18 +520,19 @@ static int gpu_lmad_copy(struct futhark_context* ctx, const char* provenance,
   void* args[6+(8*3)];
   size_t args_sizes[6+(8*3)];
 
-  args[0] = &dst;
-  args_sizes[0] = sizeof(gpu_mem);
-  args[1] = &dst_offset;
-  args_sizes[1] = sizeof(dst_offset);
-  args[2] = &src;
-  args_sizes[2] = sizeof(gpu_mem);
-  args[3] = &src_offset;
-  args_sizes[3] = sizeof(src_offset);
-  args[4] = &n;
-  args_sizes[4] = sizeof(n);
-  args[5] = &r;
-  args_sizes[5] = sizeof(r);
+  args[28] = &dst;
+  args_sizes[28] = sizeof(gpu_mem);
+  args[29] = &src;
+  args_sizes[29] = sizeof(gpu_mem);
+
+  args[0] = &dst_offset;
+  args_sizes[0] = sizeof(dst_offset);
+  args[1] = &src_offset;
+  args_sizes[1] = sizeof(src_offset);
+  args[2] = &n;
+  args_sizes[2] = sizeof(n);
+  args[3] = &r;
+  args_sizes[3] = sizeof(r);
 
   int64_t zero = 0;
 
@@ -544,17 +550,17 @@ static int gpu_lmad_copy(struct futhark_context* ctx, const char* provenance,
   }
 
   for (int i = 0; i < 8; i++) {
-    args_sizes[6+i*3] = sizeof(int64_t);
-    args_sizes[6+i*3+1] = sizeof(int64_t);
-    args_sizes[6+i*3+2] = sizeof(int64_t);
+    args_sizes[4+i*3] = sizeof(int64_t);
+    args_sizes[4+i*3+1] = sizeof(int64_t);
+    args_sizes[4+i*3+2] = sizeof(int64_t);
     if (i < r) {
-      args[6+i*3] = &shape[perm[i]];
-      args[6+i*3+1] = &dst_strides[perm[i]];
-      args[6+i*3+2] = &src_strides[perm[i]];
+      args[4+i*3] = &shape[perm[i]];
+      args[4+i*3+1] = &dst_strides[perm[i]];
+      args[4+i*3+2] = &src_strides[perm[i]];
     } else {
-      args[6+i*3] = &zero;
-      args[6+i*3+1] = &zero;
-      args[6+i*3+2] = &zero;
+      args[4+i*3] = &zero;
+      args[4+i*3+1] = &zero;
+      args[4+i*3+2] = &zero;
     }
   }
   const size_t w = 256; // XXX: hardcoded thread block size.

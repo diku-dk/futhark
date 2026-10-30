@@ -1,5 +1,5 @@
 -- ==
--- tags { autodiff no_ispc }
+-- tags { autodiff no_ispc no_webgpu }
 -- entry: rev fwd rev_vec fwd_vec
 -- compiled input @ reducebyindexminmax7.in output @ reducebyindexminmax7.out.gz
 

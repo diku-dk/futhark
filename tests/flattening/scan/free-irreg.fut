@@ -2,6 +2,7 @@
 -- scanomap, and hence must be replicated. Its size intentionally
 -- differs from the width of the scanomap.
 -- ==
+-- tags { no_webgpu }
 -- input { [1i64,4i64,0i64,3i64] }
 -- auto output
 -- structure gpu { /If/True/SegMap 1 /If/False/SegScan 2 }

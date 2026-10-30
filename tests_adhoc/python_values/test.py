@@ -3,7 +3,6 @@ from pathlib import Path
 import runpy
 import unittest
 
-
 runtime = runpy.run_path(
     str(Path(__file__).resolve().parents[2] / "rts/python/values.py")
 )

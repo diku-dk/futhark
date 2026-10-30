@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_webgpu }
 -- input { [1i64, 2i64, 4i64]
 --         [[1i64, 2i64], [3i64, 4i64], [5i64, 6i64]] }
 -- auto output

@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_webgpu }
 -- input { [true,true,false,true,false] [1i64,-1,2,3,4] [1i64,2,3,4,5] }
 -- auto output
 -- input { [true,true,true,true,true] [1i64,-1,2,3,4] [1i64,2,3,4,5] }

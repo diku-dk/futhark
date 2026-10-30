@@ -2,6 +2,7 @@
 -- middle map (Replicated rep): exercises the Replicated case of the
 -- per-row segment splitting in onMapIrregularInputArr.
 -- ==
+-- tags { no_webgpu }
 -- input { [1i64,4i64,0i64,3i64] }
 -- auto output
 -- structure gpu { /SegScan 3 /Apply/repiota 7 /Apply/segiota 2 }

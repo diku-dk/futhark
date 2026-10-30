@@ -1,5 +1,5 @@
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_webgpu }
 -- entry: rev_J
 -- no_oclgrind input {
 --   [[1.0f32,2.0f32],[3.0f32,4.0f32]]

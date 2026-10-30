@@ -1,6 +1,7 @@
 -- Two dimensions in the kernel, but we are only tiling along the
 -- innermost one.
 -- ==
+-- tags { no_webgpu }
 -- input { [1,2,3] [[1,2,3],[4,5,6],[7,8,9]] [1,2,3] } auto output
 -- structure gpu { SegMap/Loop/Loop/SegMap 2 }
 

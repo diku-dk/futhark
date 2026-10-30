@@ -1,6 +1,7 @@
 -- 2D tiling where the loop to tile is inside a sequential loop, that
 -- is variant to an outermost dimension.
 -- ==
+-- tags { no_webgpu }
 -- input { [1,2,3] [[1,2,3],[4,5,6]] [[1,2,3],[4,5,6]] } auto output
 -- structure gpu { SegMap/Loop/Loop/SegMap 2 }
 

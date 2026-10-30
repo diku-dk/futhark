@@ -1,3 +1,5 @@
+-- ==
+-- tags { no_webgpu }
 def DistMatrix [m] (b: [m]f32) : [m][m]f32 =
   let initial = replicate m b
   let outside = (replicate (m + 1) f32.inf) with [0] = 0

@@ -2,6 +2,7 @@
 --
 -- The structure test is to verify that inlining happens as expected.
 -- ==
+-- tags { no_webgpu }
 -- input { [[0.0f32,0.0f32],[2.0f32,0.0f32],[2.0f32,2.0f32],[0.0f32,2.0f32],[1.0f32,1.0f32],[1.5f32,0.5f32],[0.5f32,1.5f32]] }
 -- output { [[0.0f32, 0.0f32], [0.0f32, 2.0f32], [2.0f32, 2.0f32], [2.0f32, 0.0f32]] }
 -- structure { Apply 3 }

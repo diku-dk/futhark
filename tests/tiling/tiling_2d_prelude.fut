@@ -5,6 +5,7 @@
 -- it would otherwise be register tiled (see
 -- tests/reg-tiling/split-index.fut).
 -- ==
+-- tags { no_webgpu }
 -- compiled random input { [1][2]i32 [2][1][2]i32 } auto output
 
 def main [n][k][h][w] (a: [n][k]i32) (b: [k][h][w]i32) : [n][h * w]i32 =

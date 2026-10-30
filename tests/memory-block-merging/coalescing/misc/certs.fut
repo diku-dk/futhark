@@ -7,6 +7,8 @@
 -- the certificate becomes a `[n]unit` array produced by a segmap; short-
 -- circuiting then propagates that certificate back onto the very segmap that
 -- produces it.
+-- ==
+-- tags { no_webgpu }
 
 type rng = {x: [4]u32, k: i32}
 

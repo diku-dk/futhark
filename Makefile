@@ -52,6 +52,9 @@ clean:
 
 # All testing targets are below.
 
+test-webgpu:
+	cabal run -- futhark test tests -c --backend=webgpu --runner tools/browser_test.py --no-tuning
+
 # Test that all test programs type check. Much faster than compiling them.
 test-t:
 	cabal run -- futhark test tests -t

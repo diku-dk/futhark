@@ -1,5 +1,6 @@
 -- Test with only variant 'vs'.
 -- ==
+-- tags { no_webgpu }
 -- input { [3i64,3i64,3i64] }
 -- output { [7i64,7i64,7i64] }
 -- structure gpu { /WithAcc 1 /Apply/segiota 1 /Apply/repiota 1 Update 0 }

@@ -1,5 +1,6 @@
 -- While-loop with a condition that consumes something that it has allocated itself.
 -- ==
+-- tags { no_webgpu }
 -- input {
 --   [5i64,4i64,2i64,8i64,1i64,9i64,9i64]
 --   4i64

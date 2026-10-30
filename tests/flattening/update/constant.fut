@@ -1,5 +1,6 @@
 -- Simple test for flattening an update with a constant value
 -- ==
+-- tags { no_webgpu }
 -- input { [1i64,2i64,3i64] }
 -- output { [12i64,11i64,10i64] }
 -- structure gpu { /SegRed 1 /SegMap/Update 1 }

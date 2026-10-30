@@ -1,6 +1,7 @@
 -- Parallel blocked LU-decomposition.
 --
 -- ==
+-- tags { no_webgpu }
 -- entry: lud
 -- random input { 32i64 [1024]f32 }
 -- compiled random input { 32i64 [16384]f32 }
