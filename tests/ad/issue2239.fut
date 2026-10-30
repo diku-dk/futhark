@@ -1,5 +1,5 @@
 -- ==
--- tags { autodiff no_webgpu }
+-- tags { autodiff }
 -- input { [1.0f32, 1.0f32, 1.0f32] } output { [-4.0f32, -2.0f32, 0.0f32] }
 
 entry main seed =

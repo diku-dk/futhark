@@ -1,7 +1,6 @@
 -- Test a redomap with map-out where each element is also an array.
 --
 -- ==
--- tags { no_webgpu }
 -- input { 5i64 2i64 }
 -- output { [[0i32, 1i32],
 --           [2i32, 3i32],

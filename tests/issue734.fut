@@ -1,5 +1,4 @@
 -- ==
--- tags { no_webgpu }
 -- compiled input { 6400000i64 } output { 30483u16 38172u16 }
 
 let min_max_nonzero (a: (u16, u16)) (b: (u16, u16)): (u16, u16) =

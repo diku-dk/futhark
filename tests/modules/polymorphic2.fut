@@ -1,6 +1,5 @@
 -- Polymorphic function in module parameter.
 -- ==
--- tags { no_webgpu }
 -- input { [1,2] [true,false] }
 -- output { [1,2,1,2] [true,false,true,false] [2,1] [false,true] }
 

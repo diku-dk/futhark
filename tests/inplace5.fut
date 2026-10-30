@@ -1,6 +1,5 @@
 -- In-place update of the middle of an array.
 -- ==
--- tags { no_webgpu }
 -- input { [0u8,1u8,2u8,3u8,4u8] 1i64 3i64 }
 -- output { [1u8, 2u8, 3u8, 128u8, 1u8, 2u8, 3u8, 0u8] }
 

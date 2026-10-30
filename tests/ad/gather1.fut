@@ -1,5 +1,5 @@
 -- ==
--- tags { autodiff no_webgpu }
+-- tags { autodiff }
 -- entry: fwd_J rev_J fwd_vec_J rev_vec_J
 -- input
 -- {

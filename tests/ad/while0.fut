@@ -1,5 +1,5 @@
 -- ==
--- tags { autodiff no_webgpu }
+-- tags { autodiff }
 
 def pow y x =
   let (_, res) =

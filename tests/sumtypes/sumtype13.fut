@@ -1,6 +1,5 @@
 -- Sumtype in-place updates.
 -- ==
--- tags { no_webgpu }
 -- input { }
 -- output { [-1, -2, -3, -4, 2, 4, 6, 8] }
 

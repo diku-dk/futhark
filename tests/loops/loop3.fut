@@ -1,5 +1,4 @@
 -- ==
--- tags { no_webgpu }
 -- input {
 --   42i64
 -- }

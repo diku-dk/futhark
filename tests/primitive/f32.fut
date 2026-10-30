@@ -1,7 +1,6 @@
 -- Test ad-hoc properties and utility functions for f32.
 
 -- ==
--- tags { no_webgpu }
 -- entry: testInf
 -- input { [1f32, -1f32, -1f32] [0f32, 0f32, 1f32] }
 -- output { [true, true, false] }

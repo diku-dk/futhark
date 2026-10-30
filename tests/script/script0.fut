@@ -1,5 +1,4 @@
 -- ==
--- tags { no_webgpu }
 -- entry: doeswork
 -- script input { mkdata 100i64 } output { 5050.0f32 }
 -- script input { mkdata 10000i64 }

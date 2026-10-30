@@ -1,6 +1,5 @@
 -- Test with i16.&.
 -- ==
--- tags { no_webgpu }
 --
 -- input  {
 --   5i64

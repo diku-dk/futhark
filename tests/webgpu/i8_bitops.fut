@@ -3,7 +3,6 @@
 -- and masking when packed into i32.
 
 -- ==
--- tags { no_webgpu }
 -- entry: land
 -- input { [0i8, 0i8, 127i8, -128i8, -1i8, 0x55i8]
 --         [0i8, -1i8, -128i8, 127i8, -1i8, 0xAAi8] }

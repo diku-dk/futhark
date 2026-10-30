@@ -1,5 +1,4 @@
 -- ==
--- tags { no_webgpu }
 -- input { 4i64 [1i64,2i64] [3i64,4i64] }
 -- auto output
 def main [n] [m] (o: i64) (xs: [n]i64) (ys: [m]i64) =

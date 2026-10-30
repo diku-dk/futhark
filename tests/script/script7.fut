@@ -1,6 +1,5 @@
 -- Reference outputs can be generated for script inputs.
 -- ==
--- tags { no_webgpu }
 -- entry: doeswork
 -- script input { mkdata 100i64 } auto output
 -- script input { (100i64, map f32.i64 (iota 100)) } auto output

@@ -1,6 +1,5 @@
 -- Lifting a function with a constants as argument and result
 -- ==
--- tags { no_webgpu }
 -- entry: main
 -- input  { [0i64, 1i64, 2i64, 3i64, 4i64, 5i64] }
 -- output { [7i64, 7i64,10i64,16i64,25i64,37i64] }

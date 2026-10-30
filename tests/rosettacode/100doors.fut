@@ -6,7 +6,6 @@
 -- the doors we care about, while still remaining parallel.  0-indexes the doors.
 --
 -- ==
--- tags { no_webgpu }
 -- input { 10i64 }
 -- output { [false, true, false, false, true, false, false, false, false, true] }
 

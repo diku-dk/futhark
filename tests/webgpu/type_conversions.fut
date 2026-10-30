@@ -3,7 +3,6 @@
 -- and f16 (native) to ensure proper handling.
 
 -- ==
--- tags { no_webgpu }
 -- entry: i8_to_i32
 -- input { [-128i8, -1i8, 0i8, 1i8, 127i8] }
 -- output { [-128i32, -1i32, 0i32, 1i32, 127i32] }

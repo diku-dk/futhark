@@ -1,6 +1,5 @@
 -- Test that write works for large indexes and values arrays.
 -- ==
--- tags { no_webgpu }
 --
 -- input {
 --   9337i64

@@ -1,7 +1,6 @@
 -- Uniform maposcanomap whose neutral element is a variant expression
 -- (but of course still neutral in value). Includes an empty outer array.
 -- ==
--- tags { no_webgpu }
 -- input { [3i64,7i64,1i64] 4i64 }
 -- auto output
 -- input { empty([0]i64) 4i64 }

@@ -3,7 +3,7 @@
 -- For result simplicity, we only return the last element.
 --
 -- ==
--- tags { no_python no_webgpu }
+-- tags { no_python }
 -- input { 100i64 }       output { 4851 }
 -- compiled input { 1000000i64 } output { 1782293665i32 }
 -- structure gpu { SegScan 1 Iota 0 }

@@ -1,6 +1,5 @@
 -- Index projection!
 -- ==
--- tags { no_webgpu }
 -- input { [1,2,3] [[true,false],[false,true]] }
 -- output { 1 [2,3] [true,false] [[false,true]] }
 

@@ -1,6 +1,5 @@
 -- Sizes obtained with existantialy bounded sizes should not be calculated
 -- ==
--- tags { no_webgpu }
 -- input { 2i64 } output { [0i64, 1i64, 0i64, 1i64] }
 
 def double_eval 't (f: () -> []t) : []t =

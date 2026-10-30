@@ -1,7 +1,6 @@
 -- If we have a nonuniform concat inside a loop, that really has to be
 -- flattened.
 -- ==
--- tags { no_webgpu }
 -- input { [1i64, 2i64, 3i64] 3i64 }
 -- auto output
 -- structure gpu { /Loop 1 /Loop/Loop 1 }

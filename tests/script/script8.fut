@@ -1,6 +1,5 @@
 -- Local entry points can be used in script inputs, and tested.
 -- ==
--- tags { no_webgpu }
 -- entry: doeswork
 -- script input { mkdata 100i64 } output { 5050.0f32 }
 

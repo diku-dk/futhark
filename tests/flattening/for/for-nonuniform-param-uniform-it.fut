@@ -1,5 +1,4 @@
 -- ==
--- tags { no_webgpu }
 -- input { [10i64,7i64,0i64,10i64] 8i64 }
 -- auto output
 -- structure gpu { /Loop/ForLoop 1 }

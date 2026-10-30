@@ -4,7 +4,6 @@
 -- of arithmetic and overflow behavior.
 
 -- ==
--- tags { no_webgpu }
 -- entry: add
 -- input  { [0i64, 4294967296i64, 9223372036854775807i64, -1i64, 0x00000001FFFFFFFFi64]
 --          [0i64, 4294967296i64, 1i64, 1i64, 1i64] }

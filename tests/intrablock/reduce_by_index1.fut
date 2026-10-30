@@ -1,5 +1,4 @@
 -- ==
--- tags { no_webgpu }
 -- random input { 10i64 [1][1][256]i64 } auto output
 -- compiled random input { 10i64 [10][1][256]i64 } auto output
 

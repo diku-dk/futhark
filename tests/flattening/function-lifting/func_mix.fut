@@ -1,7 +1,6 @@
 -- Lifting a function with both regular and irregular
 -- parameters and return types.
 -- ==
--- tags { no_webgpu }
 -- entry: main
 -- input  { [0i64, 1i64,  2i64,  3i64,  4i64,     5i64] [0i64, 1i64, 2i64, 3i64,  4i64,  5i64] }
 -- output { [0i64, 0i64, -1i64, 27i64, 252i64, 1175i64] }

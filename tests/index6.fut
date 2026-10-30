@@ -1,6 +1,5 @@
 -- Test simple indexing of an array with a type that is not 32 bits.
 -- ==
--- tags { no_webgpu }
 -- input {
 --   [4i8,3i8,2i8,1i8,0i8]
 --   1
