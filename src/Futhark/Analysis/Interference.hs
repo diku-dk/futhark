@@ -117,6 +117,10 @@ analyseExp lumap inuse_outside expr =
           defbody : map caseBody cases
     Loop merge _ body ->
       analyseLoopParams merge <$> analyseBody lumap inuse_outside body
+    -- The memory of the accumulated arrays is that of the pattern, and is thus
+    -- in use throughout the lambda.
+    WithAcc _ lam ->
+      analyseLambda lumap inuse_outside lam
     Op (Inner (SegOp segop)) -> do
       analyseSegOp lumap inuse_outside segop
     _ ->

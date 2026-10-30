@@ -1,7 +1,7 @@
 -- An array is both a 'map' input and a free variable in the lambda.
 -- ==
 -- tags { autodiff }
--- entry: fwd_map fwd_vec rev_map rev_vec
+-- entry: fwd_map fwd_vec rev_map rev_vec rev_map_intra
 -- input { [1,2,3] }
 -- output {
 -- [[[2, 0, 0], [1, 1, 0], [1, 0, 1]], [[1, 1, 0], [0, 2, 0], [0, 1, 1]], [[1, 0, 1], [0, 1, 1], [0, 0, 2]]]
@@ -30,6 +30,12 @@ entry fwd_vec [n] (xs: [n]i32) =
      |> map transpose
 
 entry rev_map [n] (xs: [n]i32) =
+  tabulate_2d n n (\i j -> vjp primal xs (onehot_2d n n (i, j)))
+
+-- As rev_map, but the intra-block version has an accumulator updated inside an
+-- in-block reduction, which must not share memory with the reduction result.
+entry rev_map_intra [n] (xs: [n]i32) =
+  #[flattening(only_intra)]
   tabulate_2d n n (\i j -> vjp primal xs (onehot_2d n n (i, j)))
 
 entry rev_vec [n] (xs: [n]i32) =
