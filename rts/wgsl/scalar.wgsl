@@ -99,11 +99,19 @@ fn futrts_atan2_16(a: f16, b: f16) -> f16 { if (a == 0 && b == 0) { return 0; } 
 fn futrts_atan2pi_32(a: f32, b: f32) -> f32 { return futrts_atan2_32(a, b) / 3.14159265358979323846; }
 fn futrts_atan2pi_16(a: f16, b: f16) -> f16 { return futrts_atan2_16(a, b) / 3.14159265358979323846; }
 
-fn futrts_to_bits16(a: f16) -> i16 { return bitcast<i32>(vec2<f16>(a, 0.0)); }
+fn futrts_to_bits16(a: f16) -> i16 { return norm_i16(bitcast<i32>(vec2<f16>(a, 0.0))); }
 fn futrts_from_bits16(a: i16) -> f16 { return bitcast<vec2<f16>>(a)[0]; }
 
 fn futrts_to_bits32(a: f32) -> i32 { return bitcast<i32>(a); }
 fn futrts_from_bits32(a: i32) -> f32 { return bitcast<f32>(a); }
+
+fn futrts_cond_bool(x: bool, y: bool, z: bool) -> bool { return select(z, y, x); }
+fn futrts_cond_i8(x: bool, y: i8, z: i8) -> i8 { return select(z, y, x); }
+fn futrts_cond_i16(x: bool, y: i16, z: i16) -> i16 { return select(z, y, x); }
+fn futrts_cond_i32(x: bool, y: i32, z: i32) -> i32 { return select(z, y, x); }
+fn futrts_cond_i64(x: bool, y: i64, z: i64) -> i64 { return select(z, y, x); }
+fn futrts_cond_f16(x: bool, y: f16, z: f16) -> f16 { return select(z, y, x); }
+fn futrts_cond_f32(x: bool, y: f32, z: f32) -> f32 { return select(z, y, x); }
 
 fn futrts_round32(x: f32) -> f32 { return round(x); }
 fn futrts_round16(x: f16) -> f16 { return round(x); }
@@ -122,18 +130,33 @@ fn futrts_popc32(a: i32) -> i32 { return countOneBits(a); }
 fn futrts_popc16(a: i16) -> i32 { return countOneBits(a & 0xffff); }
 fn futrts_popc8(a: i8)  -> i32 { return countOneBits(a & 0xff); }
 
-// TODO: mul_hi32 and 64 cannot currently be implemented properly.
-fn futrts_umul_hi8(a: i8, b: i8) -> i8 { return norm_u8((norm_u8(a) * norm_u8(b)) >> 8); }
-fn futrts_umul_hi16(a: i16, b: i16) -> i16 { return norm_u16((norm_u16(a) * norm_u16(b)) >> 16); }
-fn futrts_umul_hi32(a: i32, b: i32) -> i32 { return bitcast<i32>(bitcast<u32>(a) * bitcast<u32>(b)); }
-fn futrts_umul_hi64(a: i64, b: i64) -> i64 { return i64(mul_i64(a, b)[1]); }
+// The signed high halves are computed from the unsigned ones: for a negative
+// operand, its unsigned reading is 2^n too large, which adds the other operand
+// to the high half.
+fn futrts_umul_hi8(a: i8, b: i8) -> i8 { return norm_i8((norm_u8(a) * norm_u8(b)) >> 8); }
+fn futrts_umul_hi16(a: i16, b: i16) -> i16 { return norm_i16((norm_u16(a) * norm_u16(b)) >> 16); }
+fn futrts_umul_hi32(a: i32, b: i32) -> i32 { return mul_u32_full(bitcast<u32>(a), bitcast<u32>(b)).y; }
+fn futrts_umul_hi64(a: i64, b: i64) -> i64 {
+  let ll = mul_u32_full(bitcast<u32>(a.x), bitcast<u32>(b.x));
+  let lh = mul_u32_full(bitcast<u32>(a.x), bitcast<u32>(b.y));
+  let hl = mul_u32_full(bitcast<u32>(a.y), bitcast<u32>(b.x));
+  let hh = mul_u32_full(bitcast<u32>(a.y), bitcast<u32>(b.y));
+  let mid = add_i64(add_i64(i64(lh.x, 0), i64(hl.x, 0)), i64(ll.y, 0));
+  return add_i64(add_i64(hh, i64(lh.y, 0)), add_i64(i64(hl.y, 0), i64(mid.y, 0)));
+}
 fn futrts_smul_hi8(a: i8, b: i8) -> i8 { return norm_i8((a * b) >> 8); }
 fn futrts_smul_hi16(a: i16, b: i16) -> i16 { return norm_i16((a * b) >> 16); }
-fn futrts_smul_hi32(a: i32, b: i32) -> i32 { return a * b; }
-fn futrts_smul_hi64(a: i64, b: i64) -> i64 { return i64(mul_i64(a, b)[1]); }
+fn futrts_smul_hi32(a: i32, b: i32) -> i32 {
+  return futrts_umul_hi32(a, b) - select(0, b, a < 0) - select(0, a, b < 0);
+}
+fn futrts_smul_hi64(a: i64, b: i64) -> i64 {
+  return sub_i64(sub_i64(futrts_umul_hi64(a, b),
+                         select(zero_i64, b, a.y < 0)),
+                 select(zero_i64, a, b.y < 0));
+}
 
-fn futrts_umad_hi8(a: i8, b: i8, c: i8) -> i8 { return norm_u8(futrts_umul_hi8(a, b) + norm_u8(c)); }
-fn futrts_umad_hi16(a: i16, b: i16, c: i16) -> i16 { return norm_u16(futrts_umul_hi16(a, b) + norm_u16(c)); }
+fn futrts_umad_hi8(a: i8, b: i8, c: i8) -> i8 { return norm_i8(futrts_umul_hi8(a, b) + c); }
+fn futrts_umad_hi16(a: i16, b: i16, c: i16) -> i16 { return norm_i16(futrts_umul_hi16(a, b) + c); }
 fn futrts_umad_hi32(a: i32, b: i32, c: i32) -> i32 { return bitcast<i32>(bitcast<u32>(futrts_umul_hi32(a, b)) + bitcast<u32>(c)); }
 fn futrts_umad_hi64(a: i64, b: i64, c: i64) -> i64 { return add_i64(futrts_umul_hi64(a, b), c); }
 fn futrts_smad_hi8(a: i8, b: i8, c: i8) -> i8 { return norm_i8(futrts_smul_hi8(a, b) + c); }
@@ -144,7 +167,7 @@ fn futrts_smad_hi64(a: i64, b: i64, c: i64) -> i64 { return add_i64(futrts_smul_
 fn futrts_clzz8(x: i8) -> i32 { return countLeadingZeros(x & 0xff) - 24; }
 fn futrts_clzz16(x: i16) -> i32 { return countLeadingZeros(x & 0xffff) - 16; }
 fn futrts_clzz32(x: i32) -> i32 { return countLeadingZeros(x); }
-fn futrts_clzz64(x: i64) -> i32 { 
+fn futrts_clzz64(x: i64) -> i32 {
     if (x[1] == 0) {
         return countLeadingZeros(x[0]) + 32;
     }
@@ -156,7 +179,7 @@ fn futrts_clzz64(x: i64) -> i32 {
 fn futrts_ctzz8(x: i8) -> i32 { return min(8, countTrailingZeros(x & 0xff)); }
 fn futrts_ctzz16(x: i16) -> i32 { return min(16, countTrailingZeros(x & 0xffff)); }
 fn futrts_ctzz32(x: i32) -> i32 { return countTrailingZeros(x); }
-fn futrts_ctzz64(x: i64) -> i32 { 
+fn futrts_ctzz64(x: i64) -> i32 {
     if (x[0] == 0) {
         return countTrailingZeros(x[1]) + 32;
     }

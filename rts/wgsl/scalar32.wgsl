@@ -16,10 +16,12 @@ fn udiv_i32(a: i32, b: i32) -> i32 {
   return bitcast<i32>(bitcast<u32>(a) / bitcast<u32>(b));
 }
 
+// Ceiling division rounds the quotient up when the remainder is nonzero.
+// Unlike (a + b - 1) / b, this cannot overflow.
 fn uceil_div_i32(a_s: i32, b_s: i32) -> i32 {
   let a = bitcast<u32>(a_s);
   let b = bitcast<u32>(b_s);
-  return bitcast<i32>((a + b - 1) / b);
+  return bitcast<i32>(a / b + select(0u, 1u, a % b != 0));
 }
 
 fn sdiv_i32(a: i32, b: i32) -> i32 {
@@ -30,7 +32,10 @@ fn sdiv_i32(a: i32, b: i32) -> i32 {
 }
 
 fn sceil_div_i32(a: i32, b: i32) -> i32 {
-  return sdiv_i32(a + b - 1, b);
+  let q = a / b;
+  let r = a % b;
+  if (r != 0 && ((r > 0) == (b > 0))) { return q + 1; }
+  return q;
 }
 
 fn umod_i32(a: i32, b: i32) -> i32 {
@@ -51,16 +56,17 @@ fn umax_i32(a: i32, b: i32) -> i32 {
   return bitcast<i32>(max(bitcast<u32>(a), bitcast<u32>(b)));
 }
 
+// The shift amount is masked to the bit width.
 fn shl_i32(a: i32, b: i32) -> i32 {
-  return a << bitcast<u32>(b);
+  return a << bitcast<u32>(b & 31);
 }
 
 fn lshr_i32(a: i32, b: i32) -> i32 {
-  return bitcast<i32>(bitcast<u32>(a) >> bitcast<u32>(b));
+  return bitcast<i32>(bitcast<u32>(a) >> bitcast<u32>(b & 31));
 }
 
 fn ashr_i32(a: i32, b: i32) -> i32 {
-  return a >> bitcast<u32>(b);
+  return a >> bitcast<u32>(b & 31);
 }
 
 fn pow_i32(a_p: i32, b: i32) -> i32 {

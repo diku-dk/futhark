@@ -47,40 +47,89 @@ fn mul_i64(a: i64, b: i64) -> i64 {
   );
 }
 
-// TODO: i64 division-related operations are not yet implemented properly.
-// As a stopgap to at least deal with 64-bit size calculations (where the values
-// are always small enough for this to be fine on WebGPU), they just truncate to
-// i32 values.
+// Unsigned division by binary long division, yielding the quotient and the
+// remainder.  Division by zero yields an all-ones quotient and the dividend as
+// the remainder, but is not otherwise checked.  The common case of 32-bit
+// operands, such as most size calculations, uses native division.
+struct udivmod_i64_res {
+  q: i64,
+  r: i64,
+}
+
+fn udivmod_i64(a: i64, b: i64) -> udivmod_i64_res {
+  if a.y == 0 && b.y == 0 && b.x != 0 {
+    return udivmod_i64_res(i64(udiv_i32(a.x, b.x), 0), i64(umod_i32(a.x, b.x), 0));
+  }
+  var q = zero_i64;
+  var r = zero_i64;
+  for (var i = 63; i >= 0; i--) {
+    // If the top bit of r is set, then the shifted r does not fit in 64 bits,
+    // and is certainly at least b.  The wrapping subtraction then gives the
+    // right remainder.
+    let carry = r.y < 0;
+    r = shl_i64(r, one_i64) | (lshr_i64(a, i64(i, 0)) & one_i64);
+    if carry || ule_i64(b, r) {
+      r = sub_i64(r, b);
+      q = q | shl_i64(one_i64, i64(i, 0));
+    }
+  }
+  return udivmod_i64_res(q, r);
+}
+
 fn udiv_i64(a: i64, b: i64) -> i64 {
-  return i64(udiv_i32(a.x, b.y), 0);
+  return udivmod_i64(a, b).q;
 }
 
 fn uceil_div_i64(a: i64, b: i64) -> i64 {
-  return i64(uceil_div_i32(a.x, b.x), 0);
-}
-
-fn sdiv_i64(a: i64, b: i64) -> i64 {
-  return sext_i32_i64(sdiv_i32(a.x, b.x));
-}
-
-fn sceil_div_i64(a: i64, b: i64) -> i64 {
-  return sext_i32_i64(sceil_div_i32(a.x, b.x));
+  let qr = udivmod_i64(a, b);
+  if eq_i64(qr.r, zero_i64) { return qr.q; }
+  return add_i64(qr.q, one_i64);
 }
 
 fn umod_i64(a: i64, b: i64) -> i64 {
-  return i64(umod_i32(a.x, b.x), 0);
+  return udivmod_i64(a, b).r;
 }
 
-fn smod_i64(a: i64, b: i64) -> i64 {
-  return sext_i32_i64(smod_i32(a.x, b.x));
-}
+// The signed operations divide the magnitudes, which are correct when read as
+// unsigned even for the most negative value.  Dividing the most negative value
+// by -1 then wraps around to itself.
 
 fn squot_i64(a: i64, b: i64) -> i64 {
-  return sext_i32_i64(a.x / b.x);
+  let q = udiv_i64(abs_i64(a), abs_i64(b));
+  if (a.y < 0) != (b.y < 0) { return neg_i64(q); }
+  return q;
 }
 
 fn srem_i64(a: i64, b: i64) -> i64 {
-  return sext_i32_i64(a.x % b.x);
+  let r = umod_i64(abs_i64(a), abs_i64(b));
+  if a.y < 0 { return neg_i64(r); }
+  return r;
+}
+
+fn sdiv_i64(a: i64, b: i64) -> i64 {
+  let q = squot_i64(a, b);
+  let r = srem_i64(a, b);
+  if !eq_i64(r, zero_i64) && ((r.y < 0) != (b.y < 0)) {
+    return sub_i64(q, one_i64);
+  }
+  return q;
+}
+
+fn sceil_div_i64(a: i64, b: i64) -> i64 {
+  let q = squot_i64(a, b);
+  let r = srem_i64(a, b);
+  if !eq_i64(r, zero_i64) && ((r.y < 0) == (b.y < 0)) {
+    return add_i64(q, one_i64);
+  }
+  return q;
+}
+
+fn smod_i64(a: i64, b: i64) -> i64 {
+  let r = srem_i64(a, b);
+  if !eq_i64(r, zero_i64) && ((r.y < 0) != (b.y < 0)) {
+    return add_i64(r, b);
+  }
+  return r;
 }
 
 fn smin_i64(a: i64, b: i64) -> i64 {
@@ -103,10 +152,10 @@ fn umax_i64(a: i64, b: i64) -> i64 {
   return a;
 }
 
+// The shift amount is masked to the bit width.
+
 fn shl_i64(a: i64, b_full: i64) -> i64 {
-  // Shifting by more than 64 and by negative amounts is undefined, so we can
-  // assume b.y is 0 and b.x >= 0.
-  let b: u32 = bitcast<u32>(b_full.x);
+  let b: u32 = bitcast<u32>(b_full.x & 63);
 
   if b == 0 { return a; }
   if b >= 32 { return i64(0, a.x << (b - 32)); }
@@ -116,9 +165,7 @@ fn shl_i64(a: i64, b_full: i64) -> i64 {
 }
 
 fn lshr_i64(a: i64, b_full: i64) -> i64 {
-  // Shifting by more than 64 and by negative amounts is undefined, so we can
-  // assume b.y is 0 and b.x >= 0.
-  let b: i32 = b_full.x;
+  let b: i32 = b_full.x & 63;
 
   if b == 0 { return a; }
   if b >= 32 { return i64(lshr_i32(a.y, b - 32), 0); }
@@ -128,14 +175,12 @@ fn lshr_i64(a: i64, b_full: i64) -> i64 {
 }
 
 fn ashr_i64(a: i64, b_full: i64) -> i64 {
-  // Shifting by more than 64 and by negative amounts is undefined, so we can
-  // assume b.y is 0 and b.x >= 0.
-  let b: u32 = bitcast<u32>(b_full.x);
+  let b: u32 = bitcast<u32>(b_full.x & 63);
 
   if b == 0 { return a; }
   if b >= 32 {
-        var high: i32;
-        if a.y < 0 { high = -1; } else { high = 0; }
+    var high: i32;
+    if a.y < 0 { high = -1; } else { high = 0; }
     return i64(a.y >> (b - 32), high);
   }
 
@@ -175,12 +220,13 @@ fn ule_i64(a_s: i64, b_s: i64) -> bool {
   return a.y < b.y || (a.y == b.y && a.x <= b.x);
 }
 
+// Only the high words are signed.
 fn slt_i64(a: i64, b: i64) -> bool {
-  return a.y < b.y || (a.y == b.y && a.x < b.x);
+  return a.y < b.y || (a.y == b.y && bitcast<u32>(a.x) < bitcast<u32>(b.x));
 }
 
 fn sle_i64(a: i64, b: i64) -> bool {
-  return a.y < b.y || (a.y == b.y && a.x <= b.x);
+  return a.y < b.y || (a.y == b.y && bitcast<u32>(a.x) <= bitcast<u32>(b.x));
 }
 
 fn abs_i64(a: i64) -> i64 {
@@ -220,36 +266,43 @@ fn i64_to_bool(a: i64) -> bool {
   if eq_i64(a, zero_i64) { return false; } else { return true; }
 }
 
-// TODO: This is not accurate to a real i64->f16 conversion, but hopefully good
-// enough for now.
-fn i64_to_f16(a: i64) -> f16 {
-  if (a.y == -1) {
-    if (a.x > 0) { return -f16(a.x); }
-    else { return f16(a.x); }
-  }
-  // Just ignoring the high bits. They will be out of range of f16 anyway, and
-  // since WGSL does not even spec that infinity works as expected, I'm not sure
-  // what else to do here.
-  return f16(a.x);
+// Conversions between 64-bit integers and floats go through f32, combining
+// or splitting the 32-bit words.  This may round twice.
+
+fn u64_to_f32(a: i64) -> f32 {
+  return f32(bitcast<u32>(a.y)) * 4294967296.0f + f32(bitcast<u32>(a.x));
 }
 
-// TODO: This is not accurate to a real i64->f32 conversion, but hopefully good
-// enough for now.
 fn i64_to_f32(a: i64) -> f32 {
-  if (a.y == -1) {
-    if (a.x > 0) { return -f32(a.x); }
-    else { return f32(a.x); }
-  }
-  return f32(bitcast<u32>(a.x)) + f32(a.y) * 2e32f;
+  if a.y < 0 { return -u64_to_f32(neg_i64(a)); }
+  return u64_to_f32(a);
 }
 
 fn u64_to_f16(a: i64) -> f16 {
-  // See i64_to_f16 regarding the high bits.
-  return f16(bitcast<u32>(a.x));
+  return f16(u64_to_f32(a));
 }
 
-fn u64_to_f32(a: i64) -> f32 {
-  return f32(bitcast<u32>(a.x)) + f32(bitcast<u32>(a.y)) * 2e32f;
+fn i64_to_f16(a: i64) -> f16 {
+  return f16(i64_to_f32(a));
+}
+
+fn f32_to_u64(a: f32) -> i64 {
+  let hi = floor(a / 4294967296.0f);
+  let lo = a - hi * 4294967296.0f;
+  return i64(bitcast<i32>(u32(lo)), bitcast<i32>(u32(hi)));
+}
+
+fn f32_to_i64(a: f32) -> i64 {
+  if a < 0 { return neg_i64(f32_to_u64(-a)); }
+  return f32_to_u64(a);
+}
+
+fn f16_to_u64(a: f16) -> i64 {
+  return f32_to_u64(f32(a));
+}
+
+fn f16_to_i64(a: f16) -> i64 {
+  return f32_to_i64(f32(a));
 }
 
 // End of scalar64.wgsl

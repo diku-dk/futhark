@@ -75,12 +75,19 @@ fn uceil_div_i8(a: i8, b: i8) -> i8 {
   return norm_i8(uceil_div_i32(norm_u8(a), norm_u8(b)));
 }
 
+// The signed operations are computed on the sign-extended values, so only
+// dividing the most negative value by -1 can produce an out-of-range result,
+// which must wrap around.
 fn sdiv_i8(a: i8, b: i8) -> i8 {
-  return sdiv_i32(a, b);
+  return norm_i8(sdiv_i32(a, b));
 }
 
 fn sceil_div_i8(a: i8, b: i8) -> i8 {
-  return sceil_div_i32(a, b);
+  return norm_i8(sceil_div_i32(a, b));
+}
+
+fn squot_i8(a: i8, b: i8) -> i8 {
+  return norm_i8(a / b);
 }
 
 fn umod_i8(a: i8, b: i8) -> i8 {
@@ -99,16 +106,17 @@ fn umax_i8(a: i8, b: i8) -> i8 {
   return umax_i32(a, b);
 }
 
+// The shift amount is masked to the bit width.
 fn shl_i8(a: i8, b: i8) -> i8 {
-  return a << bitcast<u32>(b);
+  return norm_i8(a << bitcast<u32>(b & 7));
 }
 
 fn lshr_i8(a: i8, b: i8) -> i8 {
-  return bitcast<i8>(bitcast<u32>(a) >> bitcast<u32>(b));
+  return norm_i8(norm_u8(a) >> bitcast<u32>(b & 7));
 }
 
 fn ashr_i8(a: i8, b: i8) -> i8 {
-  return a >> bitcast<u32>(b);
+  return a >> bitcast<u32>(b & 7);
 }
 
 fn pow_i8(a_p: i8, b: i8) -> i8 {
@@ -153,11 +161,11 @@ fn sext_i8_i64(a: i8) -> i64 {
 }
 
 fn trunc_i16_i8(a: i32) -> i8 {
-  return a & 0xff;
+  return norm_i8(a);
 }
 
 fn trunc_i32_i8(a: i32) -> i8 {
-  return a & 0xff;
+  return norm_i8(a);
 }
 
 fn trunc_i64_i8(a: i64) -> i8 {
@@ -165,11 +173,11 @@ fn trunc_i64_i8(a: i64) -> i8 {
 }
 
 fn f16_to_u8(a: f16) -> i8 {
-  return norm_u8(i32(u32(a)));
+  return norm_i8(i32(u32(a)));
 }
 
 fn f32_to_u8(a: f32) -> i8 {
-  return norm_u8(i32(u32(a)));
+  return norm_i8(i32(u32(a)));
 }
 
 fn f16_to_i8(a: f16) -> i8 {
