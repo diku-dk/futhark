@@ -32,8 +32,11 @@ bindLambda pat aux (Lambda params _ body) args = do
         Array {} -> Replicate mempty arg
         _ -> SubExp arg
   res <- bodyBind body
-  forM_ (zip (patNames pat) res) $ \(v, SubExpRes cs se) ->
-    certifying cs $ letBindNames [v] $ BasicOp $ SubExp se
+  forM_ (zip (patElems pat) res) $ \(pe, SubExpRes cs se) ->
+    certifying cs . letBindNames [patElemName pe] . BasicOp $
+      case patElemType pe of
+        Array {} -> Replicate mempty se
+        _ -> SubExp se
 
 onStm :: Bool -> Mode -> Scope SOACS -> Stm SOACS -> PassM (Stms SOACS)
 onStm _ mode scope (Let pat aux (Op (VJP shape args vec lam))) = do

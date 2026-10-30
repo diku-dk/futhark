@@ -71,9 +71,9 @@ fn pow_i32(a_p: i32, b: i32) -> i32 {
   while rem != 0 {
     if (rem & 1) != 0 {
       res = res * a;
-        }
-        rem = rem >> 1;
-        a = a * a;
+    }
+    rem = lshr_i32(rem, 1);
+    a = a * a;
   }
 
   return res;

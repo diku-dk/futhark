@@ -1,16 +1,15 @@
 -- ==
--- tags { no_webgpu }
--- input { [1.0, 2.0, -4.0, 1.5] }
--- output { [13.0, 22.0, -2.0, 17.25] }
+-- input { [1.0f32, 2.0f32, -4.0f32, 1.5f32] }
+-- output { [13.0f32, 22.0f32, -2.0f32, 17.25f32] }
 
-def f (a: f64) : f64 = a + 3.0
-def g (a: f64) : f64 = a * 3.0
-def h1 (a1: f64, a2: f64, a3: f64) : f64 = a1 * a2 + a3
+def f (a: f32) : f32 = a + 3.0
+def g (a: f32) : f32 = a * 3.0
+def h1 (a1: f32, a2: f32, a3: f32) : f32 = a1 * a2 + a3
 
---let f64 h2((f64,f64) a23) = let (a2,a3) = a23 in a2 * a3
-def h2 (a1: f64) (a23: (f64, f64)) : f64 = let (a2, a3) = a23 in a2 * a3 - a1
+--let f32 h2((f32,f32) a23) = let (a2,a3) = a23 in a2 * a3
+def h2 (a1: f32) (a23: (f32, f32)) : f32 = let (a2, a3) = a23 in a2 * a3 - a1
 
-def main (arr: []f64) : []f64 =
+def main (arr: []f32) : []f32 =
   let x = map f arr
   let y = map g arr
   in if arr[0] < 0.0

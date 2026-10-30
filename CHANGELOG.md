@@ -9,11 +9,25 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
-* `io.savevalue` for writing a value to a file in the binary data format.
-
 ### Removed
 
 ### Changed
+
+### Fixed
+
+* Invalid memory expansion in some rare cases.
+
+## [0.28.2]
+
+### Added
+
+* `io.savevalue` for writing a value to a file in the binary data format.
+
+* Better detection of host OOM, although still unreliable on systems with
+  overcommit.
+
+* With GPU backends, unstructured copies are now sometimes a lot faster, as the
+  run-time now dynamically tries to choose the best copying order.
 
 ### Fixed
 
@@ -38,6 +52,21 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * `u16.f16`, `u16.f32`, and `u16.f64` was defective in the interpreter.
 
 * Various cases where generated C code might exhibit undefined behaviour.
+
+* Various compiler crashes (#2588, #2587, #2586).
+
+* An invalid simplification that could lead to incorrect results (#2585).
+
+* Various fixes to binary input validation.
+
+* Handling of unsigned integer exponents in the interpreter.
+
+* Bitshift operators are now fully defined, with masking of problematic shift
+  amounts.
+
+* `f16.sgn` was missing on some targets.
+
+* Various obscure floating-point errors in the `ispc` backend.
 
 ## [0.28.1]
 

@@ -1,4 +1,4 @@
 -- ==
--- input { f64.nan } output { f64.nan }
+-- input { f32.nan } output { f32.nan }
 
-entry main (x: f64) = 0 * x
+entry main (x: f32) = 0 * x

@@ -175,12 +175,15 @@ defineMemorySpace space = do
                       desc, block->desc, $string:spacedesc, *(block->references));
     }
     if (*(block->references) == 0) {
+      lock_lock(&ctx->mem_lock);
       ctx->$id:usagename -= block->size;
+      long long new_usage = ctx->$id:usagename;
+      lock_unlock(&ctx->mem_lock);
       $items:free
       free(block->references);
       if (ctx->detail_memory) {
         fprintf(ctx->log, "%lld bytes freed (now allocated: %lld bytes)\n",
-                (long long) block->size, (long long) ctx->$id:usagename);
+                (long long) block->size, new_usage);
       }
     }
     block->references = NULL;
@@ -189,8 +192,8 @@ defineMemorySpace space = do
 }|]
 
   -- When allocating a memory block we initialise the reference count to 1.
-  alloc <-
-    collect $
+  (alloc, alloc_items) <-
+    collect' $
       allocRawMem [C.cexp|block->mem|] [C.cexp|size|] space [C.cexp|desc|]
   let allocdef =
         [C.cedecl|int $id:(fatMemAlloc space) ($ty:ctx_ty *ctx, $ty:mty *block, typename int64_t size, const char *desc) {
@@ -211,26 +214,24 @@ defineMemorySpace space = do
             (long long) ctx->$id:usagename);
   }
 
-  $items:alloc
+  $items:alloc_items
 
-  if (ctx->error == NULL) {
+  if ($exp:alloc == FUTHARK_SUCCESS) {
     block->references = (int*) malloc(sizeof(int));
     *(block->references) = 1;
     block->size = size;
     block->desc = desc;
-    long long new_usage = ctx->$id:usagename + size;
-    if (ctx->detail_memory) {
-      fprintf(ctx->log, "Received block of %lld bytes; now allocated: %lld bytes",
-              (long long)block->size, new_usage);
-    }
-    ctx->$id:usagename = new_usage;
-    if (new_usage > ctx->$id:peakname) {
+    lock_lock(&ctx->mem_lock);
+    ctx->$id:usagename += size;
+    long long new_usage = ctx->$id:usagename;
+    int new_peak = new_usage > ctx->$id:peakname;
+    if (new_peak) {
       ctx->$id:peakname = new_usage;
-      if (ctx->detail_memory) {
-        fprintf(ctx->log, " (new peak).\n");
-      }
-    } else if (ctx->detail_memory) {
-        fprintf(ctx->log, ".\n");
+    }
+    lock_unlock(&ctx->mem_lock);
+    if (ctx->detail_memory) {
+      fprintf(ctx->log, "Received block of %lld bytes; now allocated: %lld bytes%s",
+              (long long)block->size, new_usage, new_peak ? " (new peak).\n" : ".\n");
     }
     return FUTHARK_SUCCESS;
   } else {
@@ -245,7 +246,7 @@ defineMemorySpace space = do
                            $string:spacedesc,
                            (long long) size,
                            (long long) ctx->$id:usagename,
-                           old_error);
+                           old_error != NULL ? old_error : "");
     free(old_error);
     lock_unlock(&ctx->error_lock);
     return FUTHARK_OUT_OF_MEMORY;

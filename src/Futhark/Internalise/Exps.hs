@@ -1545,6 +1545,7 @@ protectBinOp (I.UDiv t Unsafe) _ y = certifyingNonzero t y
 protectBinOp (I.UMod t Unsafe) _ y = certifyingNonzero t y
 protectBinOp (I.UCeilDiv t Unsafe) _ y = certifyingNonzero t y
 protectBinOp (I.SCeilDiv t Unsafe) _ y = certifyingNonzero t y
+protectBinOp (I.SPow t) _ y = certifyingNonnegative t y
 protectBinOp _ _ _ = id
 
 internaliseBinOp ::
@@ -1586,10 +1587,9 @@ internaliseBinOp desc E.Divide x y (E.FloatType t) _ =
 internaliseBinOp desc E.Pow x y (E.FloatType t) _ =
   simpleBinOp desc (I.FPow t) x y
 internaliseBinOp desc E.Pow x y (E.Signed t) _ =
-  certifyingNonnegative t y $
-    simpleBinOp desc (I.Pow t) x y
+  simpleBinOp desc (I.SPow t) x y
 internaliseBinOp desc E.Pow x y (E.Unsigned t) _ =
-  simpleBinOp desc (I.Pow t) x y
+  simpleBinOp desc (I.UPow t) x y
 internaliseBinOp desc E.Mod x y (E.Signed t) _ =
   simpleBinOp desc (I.SMod t I.Unsafe) x y
 internaliseBinOp desc E.Mod x y (E.Unsigned t) _ =

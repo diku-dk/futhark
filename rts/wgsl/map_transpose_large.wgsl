@@ -8,15 +8,19 @@ override block_size_y: i32 = 1;
 override block_size_z: i32 = 1;
 
 struct MapTransposeParametersLarge {
-    dst_offset: i64,    // 0
-    src_offset: i64,    // 8
-    num_arrays: i64,    // 16
-    x_elems: i64,       // 24
-    y_elems: i64,       // 32
-    mulx: i64,          // 40
-    muly: i64,          // 48
-    repeat_1: i32,      // 56
-    repeat_2: i32       // 60
+    dst_offset: i64,        // 0
+    src_offset: i64,        // 8
+    num_arrays: i64,        // 16
+    x_elems: i64,           // 24
+    y_elems: i64,           // 32
+    dst_array_stride: i64,  // 40
+    dst_row_stride: i64,    // 48
+    src_array_stride: i64,  // 56
+    src_row_stride: i64,    // 64
+    mulx: i64,              // 72
+    muly: i64,              // 80
+    repeat_1: i32,          // 88
+    repeat_2: i32           // 92
 }
 
 var<workgroup> shared_memory_ELEM_TYPE: array<ELEM_TYPE, TR_TILE_DIM*(TR_TILE_DIM+1)>;
@@ -35,6 +39,10 @@ fn map_transpose_NAME_large(
     let src_offset = args.src_offset[0];
     let x_elems = args.x_elems[0];
     let y_elems = args.y_elems[0];
+    let dst_array_stride = args.dst_array_stride[0];
+    let dst_row_stride = args.dst_row_stride[0];
+    let src_array_stride = args.src_array_stride[0];
+    let src_row_stride = args.src_row_stride[0];
 
     let tblock_id_0 = i32(group_id[0]);
     let global_id_0 = i32(global_id[0]);
@@ -46,16 +54,15 @@ fn map_transpose_NAME_large(
         var global_id_2 = i32(global_id[2]);
 
         for (var i2 = 0; i2 <= args.repeat_2; i2++) {
-            let our_array_offset = tblock_id_2 * x_elems * y_elems;
-            let odata_offset = dst_offset + i32(our_array_offset);
-            let idata_offset = src_offset + i32(our_array_offset);
+            let odata_offset = dst_offset + tblock_id_2 * dst_array_stride;
+            let idata_offset = src_offset + tblock_id_2 * src_array_stride;
 
             var x_index = i32(global_id_0);
             var y_index = tblock_id_1 * TR_TILE_DIM + i32(local_id[1]);
 
             if (x_index < x_elems) {
                 for (var j = 0; j < TR_ELEMS_PER_THREAD; j++) {
-                    let index_i = (y_index + j * (TR_TILE_DIM/TR_ELEMS_PER_THREAD)) * x_elems + x_index;
+                    let index_i = (y_index + j * (TR_TILE_DIM/TR_ELEMS_PER_THREAD)) * src_row_stride + x_index;
                     if (y_index + j * (TR_TILE_DIM/TR_ELEMS_PER_THREAD) < y_elems) {
                         let shared_offset = (i32(local_id[1]) + j * (TR_TILE_DIM/TR_ELEMS_PER_THREAD)) * (TR_TILE_DIM+1) + i32(local_id[0]);
                         let src_val = read_ELEM_TYPE(&src_mem, idata_offset + index_i);
@@ -71,7 +78,7 @@ fn map_transpose_NAME_large(
 
             if (x_index < y_elems) {
                 for (var j = 0; j < TR_ELEMS_PER_THREAD; j++) {
-                    let index_out = (y_index + j * (TR_TILE_DIM/TR_ELEMS_PER_THREAD)) * y_elems + x_index;
+                    let index_out = (y_index + j * (TR_TILE_DIM/TR_ELEMS_PER_THREAD)) * dst_row_stride + x_index;
                     if (y_index + j * (TR_TILE_DIM/TR_ELEMS_PER_THREAD) < x_elems) {
                         let shared_offset = i32(local_id[0]) * (TR_TILE_DIM+1) + i32(local_id[1]) + j * (TR_TILE_DIM/TR_ELEMS_PER_THREAD);
                         let src_val = ELEM_TYPE(shared_memory_ELEM_TYPE[shared_offset]);

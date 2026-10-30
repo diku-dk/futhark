@@ -151,7 +151,7 @@ stripmine n pat loop = do
     bound_int <- letSubExp "bound_int" $ BasicOp $ ConvOp (FPToUI Float64 it) bound'
     total_iters <-
       letSubExp "total_iters" . BasicOp $
-        BinOp (Pow it) bound_int (Constant $ IntValue $ intValue it n)
+        BinOp (UPow it) bound_int (Constant $ IntValue $ intValue it n)
     remain_iters <-
       letSubExp "remain_iters" $ BasicOp $ BinOp (Sub it OverflowUndef) bound total_iters
     mined_loop <- nestifyLoop bound_int n loop

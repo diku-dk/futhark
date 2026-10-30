@@ -6,22 +6,22 @@
 
 -- ==
 -- entry: fwd
--- input { 1.0 2.0 }
+-- input { 1.0f32 2.0f32 }
 -- output { false false }
--- input { 1.0 1.0 }
+-- input { 1.0f32 1.0f32 }
 -- output { false false }
 
 entry fwd x y =
-  ( jvp (\(a, b) -> f64.(a == b)) (x, y) (1, 0)
-  , jvp (\(a, b) -> f64.(a == b)) (x, y) (0, 1)
+  ( jvp (\(a, b) -> f32.(a == b)) (x, y) (1, 0)
+  , jvp (\(a, b) -> f32.(a == b)) (x, y) (0, 1)
   )
 
 -- ==
 -- entry: rev
--- input { 1.0 2.0 }
--- output { 0.0 0.0 }
--- input { 1.0 1.0 }
--- output { 0.0 0.0 }
+-- input { 1.0f32 2.0f32 }
+-- output { 0.0f32 0.0f32 }
+-- input { 1.0f32 1.0f32 }
+-- output { 0.0f32 0.0f32 }
 
 entry rev x y =
-  vjp (\(a, b) -> f64.(a == b)) (x, y) true
+  vjp (\(a, b) -> f32.(a == b)) (x, y) true

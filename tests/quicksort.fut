@@ -1,7 +1,11 @@
+-- The initial flatmap buffer is a scratch array, so it must not be
+-- copied when it is moved out of scalar space.
 -- ==
 -- tags { no_webgpu }
 -- input { [1,10,9,8,5,7] }
 -- output { [1i32, 5i32, 7i32, 8i32, 9i32, 10i32] }
+-- structure seq-mem { Manifest 0 }
+-- structure mc-mem { Manifest 0 }
 
 def quicksort [n] (xs: [n]i32) : [n]i32 =
   if n <= 1

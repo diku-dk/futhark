@@ -23,8 +23,9 @@ static int free_constants(struct futhark_context*);
 static void setup_program(struct futhark_context* ctx);
 static void teardown_program(struct futhark_context *ctx);
 
-// Allocate host memory.  Must be freed with host_free().
-static void host_alloc(struct futhark_context* ctx, size_t size, const char* tag, size_t* size_out, void** mem_out);
+// Allocate host memory.  Must be freed with host_free().  Returns
+// FUTHARK_OUT_OF_MEMORY (and sets an error) on failure.
+static int host_alloc(struct futhark_context* ctx, size_t size, const char* tag, size_t* size_out, void** mem_out);
 // Allocate memory allocated with host_alloc().
 static void host_free(struct futhark_context* ctx, size_t size, const char* tag, void* mem);
 
@@ -37,10 +38,21 @@ static void log_copy(struct futhark_context* ctx,
                      int64_t src_offset, int64_t src_strides[r],
                      int64_t shape[r]);
 
-static void log_transpose(struct futhark_context* ctx,
-                          int64_t k, int64_t m, int64_t n);
+// A copy that is a map(transpose). There are 'num_arrays' arrays, and in each
+// of them, the source has 'rows' rows of 'cols' contiguous elements, while the
+// destination has 'cols' rows of 'rows' contiguous elements. Element 'j' of row
+// 'i' of source array 'l' is at index l*src_array_stride + i*src_row_stride +
+// j, and is copied to index l*dst_array_stride + j*dst_row_stride + i.
+struct lmad_transpose {
+  int64_t num_arrays, rows, cols;
+  int64_t dst_array_stride, dst_row_stride;
+  int64_t src_array_stride, src_row_stride;
+};
 
-static bool lmad_map_tr(int64_t *num_arrays_out, int64_t *n_out, int64_t *m_out,
+static void log_transpose(struct futhark_context* ctx,
+                          const struct lmad_transpose *tr);
+
+static bool lmad_map_tr(struct lmad_transpose *tr,
                         int r,
                         const int64_t dst_strides[r],
                         const int64_t src_strides[r],

@@ -46,12 +46,18 @@ static int is_small_alloc(size_t size) {
   return size < 1024*1024;
 }
 
-static void host_alloc(struct futhark_context* ctx,
-                       size_t size, const char* tag, size_t* size_out, void** mem_out) {
+static int host_alloc(struct futhark_context* ctx,
+                      size_t size, const char* tag, size_t* size_out, void** mem_out) {
   if (is_small_alloc(size) || free_list_find(&ctx->free_list, size, tag, size_out, (fl_mem*)mem_out) != 0) {
     *size_out = size;
     *mem_out = malloc(size);
+    if (*mem_out == NULL && size != 0) {
+      set_error(ctx, msgprintf("Failed to allocate %lld bytes of host memory.\n",
+                               (long long)size));
+      return FUTHARK_OUT_OF_MEMORY;
+    }
   }
+  return FUTHARK_SUCCESS;
 }
 
 static void host_free(struct futhark_context* ctx,
@@ -172,6 +178,7 @@ struct futhark_context* futhark_context_new(struct futhark_context_config* cfg) 
   ctx->cfg->in_use = 1;
   ctx->program_initialised = false;
   create_lock(&ctx->error_lock);
+  create_lock(&ctx->mem_lock);
   create_lock(&ctx->lock);
   free_list_init(&ctx->free_list);
   event_list_init(&ctx->event_list);
@@ -208,6 +215,7 @@ void futhark_context_free(struct futhark_context* ctx) {
   free(ctx->error);
   free_lock(&ctx->lock);
   free_lock(&ctx->error_lock);
+  free_lock(&ctx->mem_lock);
   ctx->cfg->in_use = 0;
   free(ctx);
 }

@@ -293,9 +293,8 @@ SCALAR_FUN_ATTR f16 futrts_fma16(f16 a, f16 b, f16 c) { return fmaf(a, b, c); }
 SCALAR_FUN_ATTR int16_t fptobits_f16_i16(f16 x) { return __half_as_ushort(x); }
 SCALAR_FUN_ATTR f16 bitstofp_i16_f16(int16_t x) { return __ushort_as_half(x); }
 #elif defined(ISPC)
-SCALAR_FUN_ATTR int16_t fptobits_f16_i16(f16 x) { varying int16_t y = *((varying int16_t * uniform)&x); return y;
-}
-SCALAR_FUN_ATTR f16 bitstofp_i16_f16(int16_t x) { varying f16 y = *((varying f16 * uniform)&x); return y; }
+SCALAR_FUN_ATTR int16_t fptobits_f16_i16(f16 x) { return intbits(x); }
+SCALAR_FUN_ATTR f16 bitstofp_i16_f16(int16_t x) { return float16bits(x); }
 #else
 SCALAR_FUN_ATTR int16_t fptobits_f16_i16(f16 x) {
   union {
@@ -392,11 +391,16 @@ SCALAR_FUN_ATTR f16 bitstofp_i16_f16(int16_t x) {
 #else
 SCALAR_FUN_ATTR int16_t fptobits_f16_i16(f16 x) { return (int16_t)float2halfbits(x); }
 SCALAR_FUN_ATTR f16 bitstofp_i16_f16(int16_t x) { return halfbits2float((uint16_t)x); }
-SCALAR_FUN_ATTR f16 fsignum16(f16 x) { return futrts_isnan16(x) ? x : (x > 0 ? 1 : 0) - (x < 0 ? 1 : 0); }
 
 #endif
 
 #endif
+
+SCALAR_FUN_ATTR f16 fsignum16(f16 x) {
+  f16 zero = (f16)0.0f;
+  return futrts_isnan16(x) ? x
+    : (f16)(float)((cmplt16(zero, x) ? 1 : 0) - (cmplt16(x, zero) ? 1 : 0));
+}
 
 SCALAR_FUN_ATTR float fpconv_f16_f16(f16 x) { return x; }
 SCALAR_FUN_ATTR float fpconv_f16_f32(f16 x) { return x; }

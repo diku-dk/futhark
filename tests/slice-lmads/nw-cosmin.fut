@@ -2,7 +2,6 @@
 -- https://github.com/kkushagra/rodinia/blob/master/openmp/nw
 --
 -- ==
--- tags { no_webgpu }
 -- entry: nw_flat
 -- compiled random input { 16i64 10i32 [2362369]i32 [2362369]i32 } auto output
 -- compiled random input { 32i64 10i32 [2362369]i32 [2362369]i32 } auto output
@@ -105,7 +104,7 @@ entry nw_flat [n]
               (penalty: i32)
               (input: *[n]i32)
               (refs: [n]i32) : *[n]i32 =
-  let row_length = i64.f64 <| f64.sqrt <| f64.i64 n
+  let row_length = i64.f32 <| f32.sqrt <| f32.i64 n
   let num_blocks = assert ((row_length - 1) % block_size == 0) ((row_length - 1) / block_size)
   let bp1 = assert (row_length > 3) (assert (2 * block_size < row_length) (block_size + 1))
   let input =

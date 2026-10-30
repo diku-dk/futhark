@@ -8,6 +8,8 @@ index i arr_i32 0
 index b arr_bool 0
 new_array bad "[]i32" 1
 type bad
+new_array bad "[][]i32" 4294967296 4294967296
+type bad
 new bad "{bool: bool, i32: i32}" b
 type bad
 construct bad sum bar i

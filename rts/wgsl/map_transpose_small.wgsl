@@ -8,15 +8,19 @@ override block_size_y: i32 = 1;
 override block_size_z: i32 = 1;
 
 struct MapTransposeParameters {
-    dst_offset: i64,    // 0
-    src_offset: i64,    // 8
-    num_arrays: i32,    // 16
-    x_elems: i32,       // 20
-    y_elems: i32,       // 24
-    mulx: i32,          // 28
-    muly: i32,          // 32
-    repeat_1: i32,      // 36
-    repeat_2: i32       // 40
+    dst_offset: i64,        // 0
+    src_offset: i64,        // 8
+    num_arrays: i32,        // 16
+    x_elems: i32,           // 20
+    y_elems: i32,           // 24
+    dst_array_stride: i32,  // 28
+    dst_row_stride: i32,    // 32
+    src_array_stride: i32,  // 36
+    src_row_stride: i32,    // 40
+    mulx: i32,              // 44
+    muly: i32,              // 48
+    repeat_1: i32,          // 52
+    repeat_2: i32           // 56
 }
 
 @group(0) @binding(0) var<uniform> args: MapTransposeParameters;
@@ -34,14 +38,14 @@ fn map_transpose_NAME_small(
 
     let global_id_0 = i32(global_id[0]);
 
-    let our_array_offset = global_id_0 / (args.y_elems * args.x_elems) * args.y_elems * args.x_elems;
+    let array = global_id_0 / (args.y_elems * args.x_elems);
     let x_index = (global_id_0 % (args.y_elems * args.x_elems)) / args.y_elems;
     let y_index = global_id_0 % args.y_elems;
 
-    let odata_offset = dst_offset + our_array_offset;
-    let idata_offset = src_offset + our_array_offset;
-    let index_in = y_index * args.x_elems + x_index;
-    let index_out = x_index * args.y_elems + y_index;
+    let odata_offset = dst_offset + array * args.dst_array_stride;
+    let idata_offset = src_offset + array * args.src_array_stride;
+    let index_in = y_index * args.src_row_stride + x_index;
+    let index_out = x_index * args.dst_row_stride + y_index;
 
     if (global_id_0 < args.x_elems * args.y_elems * args.num_arrays) {
         write_ELEM_TYPE(&dst_mem, odata_offset + index_out, read_ELEM_TYPE(&src_mem, idata_offset + index_in));

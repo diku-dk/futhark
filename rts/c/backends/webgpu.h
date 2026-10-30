@@ -304,6 +304,7 @@ struct futhark_context {
   lock_t lock;
   char *error;
   lock_t error_lock;
+  lock_t mem_lock; // Protects the memory usage statistics.
   FILE *log;
   struct constants *constants;
   struct free_list free_list;

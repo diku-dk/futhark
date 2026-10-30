@@ -1,11 +1,8 @@
--- ==
--- tags { no_webgpu }
-
-type comp = f64
+type comp = f32
 
 type Layer [nx] [ny] =
-    #l_inhomogeneous {epsilon: [nx][ny]comp, mu: [nx][ny]comp, thickness: f64}
-  | #l_homogeneous {epsilon: comp, mu: comp, thickness: f64}
+    #l_inhomogeneous {epsilon: [nx][ny]comp, mu: [nx][ny]comp, thickness: f32}
+  | #l_homogeneous {epsilon: comp, mu: comp, thickness: f32}
 
 type ConvLayer [NM] =
     #inhomogeneous {Kz: [NM][NM]comp}
@@ -36,7 +33,7 @@ entry main (x: i64) =
   --modes in y
   let NM = N * M
   --total number of modes
-  let layer = (#l_homogeneous {epsilon = 1.0, mu = 1.0, thickness = f64.inf} : Layer [nx] [ny])
+  let layer = (#l_homogeneous {epsilon = 1.0, mu = 1.0, thickness = f32.inf} : Layer [nx] [ny])
   let c = makeConvLayer NM layer
   --run it
   in 1

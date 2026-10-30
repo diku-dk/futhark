@@ -1,5 +1,5 @@
 -- It is OK for an entry point to not be a function.
 -- ==
--- input {} output {3.14}
+-- input {} output {3.14f32}
 
-def main : f64 = 3.14
+def main : f32 = 3.14

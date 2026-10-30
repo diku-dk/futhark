@@ -1,10 +1,10 @@
 -- ==
 -- tags { autodiff }
--- input { 2.0 }
+-- input { 2.0f32 }
 
-type sum = #a f64 | #b f64
+type sum = #a f32 | #b f32
 
-entry main (x: f64) : (i32, f64) =
+entry main (x: f32) : (i32, f32) =
   let g =
     vjp (\(x: sum) ->
            match x

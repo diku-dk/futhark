@@ -468,7 +468,7 @@ instance (IntExp t, Pretty v) => IntegralExp (TPrimExp t v) where
   TPrimExp x `pow` TPrimExp y
     | Just z <-
         msum
-          [ asIntOp Pow x y,
+          [ asIntOp SPow x y,
             asFloatOp FPow x y
           ] =
         TPrimExp $ constFoldPrimExp z

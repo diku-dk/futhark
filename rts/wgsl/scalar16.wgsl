@@ -100,14 +100,14 @@ fn ashr_i16(a: i16, b: i16) -> i16 {
 fn pow_i16(a_p: i16, b: i16) -> i16 {
   var a = a_p;
   var res: i16 = 1;
-  var rem: i16 = b;
+  var rem: i32 = norm_u16(b);
 
   while rem != 0 {
     if (rem & 1) != 0 {
-	  res = mul_i16(res, a);
-	}
-	rem = ashr_i16(rem, 1);
-	a = mul_i16(a, a);
+      res = mul_i16(res, a);
+    }
+    rem = lshr_i32(rem, 1);
+    a = mul_i16(a, a);
   }
 
   return res;

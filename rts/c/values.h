@@ -495,17 +495,10 @@ static int write_str_unit(FILE *out, const void *src) {
 
 //// Binary I/O
 
-#define BINARY_FORMAT_VERSION 2
-#define IS_BIG_ENDIAN (!*(unsigned char *)&(uint16_t){1})
+// The binary format is little-endian, and we assume that the host is
+// as well.
 
-static void flip_bytes(size_t elem_size, unsigned char *elem) {
-  for (size_t j=0; j<elem_size/2; j++) {
-    unsigned char head = elem[j];
-    size_t tail_index = elem_size-1-j;
-    elem[j] = elem[tail_index];
-    elem[tail_index] = head;
-  }
-}
+#define BINARY_FORMAT_VERSION 2
 
 // On Windows we need to explicitly set the file mode to not mangle
 // newline characters.  On *nix there is no difference.
@@ -584,8 +577,7 @@ static const struct primtype_info_t* primtypes[] = {
   NULL // NULL-terminated
 };
 
-// General value interface.  All endian business taken care of at
-// lower layers.
+// General value interface.
 
 static int read_is_binary(FILE *f) {
   skipspaces(f);
@@ -668,19 +660,25 @@ static int read_bin_array(FILE *f,
 
   int64_t elem_count = 1;
   for (int i=0; i<dims; i++) {
-    int64_t bin_shape;
+    uint64_t bin_shape;
     ret = (int)fread(&bin_shape, sizeof(bin_shape), 1, f);
     if (ret != 1) {
       futhark_panic(1, "binary-input: Couldn't read size for dimension %i of array.\n", i);
     }
-    if (IS_BIG_ENDIAN) {
-      flip_bytes(sizeof(bin_shape), (unsigned char*) &bin_shape);
+    if (bin_shape > INT64_MAX) {
+      futhark_panic(1, "binary-input: dimension %i does not fit in signed 64-bit integer.\n", i);
+    }
+    if (bin_shape != 0 && elem_count > INT64_MAX / (int64_t)bin_shape) {
+      futhark_panic(1, "binary-input: array with %d dimensions has too many elements.\n", (int)dims);
     }
     elem_count *= bin_shape;
     shape[i] = bin_shape;
   }
 
   int64_t elem_size = expected_type->size;
+  if (elem_count > INT64_MAX / elem_size) {
+    futhark_panic(1, "binary-input: array too large.\n");
+  }
   void* tmp = realloc(*data, (size_t)(elem_count * elem_size));
   if (tmp == NULL) {
     futhark_panic(1, "binary-input: Failed to allocate array of size %lld.\n",
@@ -688,17 +686,11 @@ static int read_bin_array(FILE *f,
   }
   *data = tmp;
 
-  int64_t num_elems_read = (int64_t)fread(*data, (size_t)elem_size, (size_t)elem_count, f);
-  if (num_elems_read != elem_count) {
+  uint64_t num_elems_read = (uint64_t)fread(*data, (size_t)elem_size, (size_t)elem_count, f);
+  if (num_elems_read != (uint64_t)elem_count) {
     futhark_panic(1, "binary-input: tried to read %lld elements of an array, but only got %lld elements.\n",
                   (long long int)elem_count,
                   (long long int)num_elems_read);
-  }
-
-  // If we're on big endian platform we must change all multibyte elements
-  // from using little endian to big endian
-  if (IS_BIG_ENDIAN && elem_size != 1) {
-    flip_bytes((size_t)elem_size, (unsigned char*) *data);
   }
 
   return 0;
@@ -787,16 +779,7 @@ static int write_bin_array(FILE *out,
     fwrite(shape, sizeof(int64_t), (size_t)rank, out);
   }
 
-  if (IS_BIG_ENDIAN) {
-    for (int64_t i = 0; i < num_elems; i++) {
-      const unsigned char *elem = data+i*elem_type->size;
-      for (int64_t j = 0; j < elem_type->size; j++) {
-        fwrite(&elem[elem_type->size-j], 1, 1, out);
-      }
-    }
-  } else {
-    fwrite(data, (size_t)elem_type->size, (size_t)num_elems, out);
-  }
+  fwrite(data, (size_t)elem_type->size, (size_t)num_elems, out);
 
   return 0;
 }
@@ -823,9 +806,6 @@ static int read_scalar(FILE *f,
     read_bin_ensure_scalar(f, expected_type);
     size_t elem_size = (size_t)expected_type->size;
     size_t num_elems_read = fread(dest, elem_size, 1, f);
-    if (IS_BIG_ENDIAN) {
-      flip_bytes(elem_size, (unsigned char*) dest);
-    }
     return num_elems_read == 1 ? 0 : 1;
   }
 }

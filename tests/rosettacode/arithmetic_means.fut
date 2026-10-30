@@ -1,10 +1,9 @@
 -- http://rosettacode.org/wiki/Averages/Arithmetic_mean
 --
 -- ==
--- tags { no_webgpu }
--- input { [1.0,2.0,3.0,1.0] }
--- output { 1.75f64 }
+-- input { [1.0f32,2.0f32,3.0f32,1.0f32] }
+-- output { 1.75f32 }
 
 -- Divide first to improve numerical behaviour.
-def main [n] (as: [n]f64) : f64 =
-  reduce (+) 0f64 (map (/ f64.i64 (n)) as)
+def main [n] (as: [n]f32) : f32 =
+  reduce (+) 0f32 (map (/ f32.i64 (n)) as)

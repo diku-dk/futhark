@@ -2,20 +2,19 @@
 --
 -- We implement a complex number as a pair of floats.  This would be
 -- nicer with operator overloading.
--- ==
--- tags { no_webgpu }
+--
 -- input { 0 1.0 1.0 3.14159 1.2 }
 -- output { 4.14159 2.2 }
 -- input { 1 1.0 1.0 3.14159 1.2 }
--- output { 1.94159f64 4.34159f64 }
+-- output { 1.94159f32 4.34159f32 }
 -- input { 2 1.0 1.0 3.14159 1.2 }
--- output { 0.5f64 -0.5f64 }
+-- output { 0.5f32 -0.5f32 }
 -- input { 3 1.0 1.0 3.14159 1.2 }
--- output { -1.0f64 -1.0f64 }
+-- output { -1.0f32 -1.0f32 }
 -- input { 4 1.0 1.0 3.14159 1.2 }
--- output { 1.0f64 -1.0f64 }
+-- output { 1.0f32 -1.0f32 }
 
-type complex = (f64, f64)
+type complex = (f32, f32)
 
 def complexAdd ((a, b): complex) ((c, d): complex) : complex =
   ( a + c
@@ -39,7 +38,7 @@ def complexNeg ((r, i): complex) : complex =
 def complexConj ((r, i): complex) : complex =
   (r, -i)
 
-def main (o: i32) (ar: f64) (ai: f64) (br: f64) (bi: f64) : (f64, f64) =
+def main (o: i32) (ar: f32) (ai: f32) (br: f32) (bi: f32) : (f32, f32) =
   let a = (ar, ai)
   let b = (br, bi)
   in if o == 0

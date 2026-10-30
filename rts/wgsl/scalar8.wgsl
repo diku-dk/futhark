@@ -114,14 +114,14 @@ fn ashr_i8(a: i8, b: i8) -> i8 {
 fn pow_i8(a_p: i8, b: i8) -> i8 {
   var a = a_p;
   var res: i8 = 1;
-  var rem: i8 = b;
+  var rem: i32 = norm_u8(b);
 
   while rem != 0 {
     if (rem & 1) != 0 {
-	  res = mul_i8(res, a);
-	}
-	rem = ashr_i8(rem, 1);
-	a = mul_i8(a, a);
+      res = mul_i8(res, a);
+    }
+    rem = lshr_i32(rem, 1);
+    a = mul_i8(a, a);
   }
 
   return res;

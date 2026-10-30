@@ -145,9 +145,6 @@ simplifyBinOp _ _ (BinOp (SRem t _) e1 e2)
 simplifyBinOp _ _ (BinOp SQuot {} e1 e2)
   | isCt1 e2 = resIsSubExp e1
   | isCt0 e2 = Nothing
-simplifyBinOp _ _ (BinOp (Pow t) e1 e2)
-  | e1 == intConst t 2 =
-      Just (BinOp (Shl t) (intConst t 1) e2, mempty)
 simplifyBinOp _ _ (BinOp (FPow t) e1 e2)
   | isCt0 e2 = resIsSubExp $ floatConst t 1
   | isCt0 e1 || isCt1 e1 || isCt1 e2 = resIsSubExp e1
@@ -338,25 +335,30 @@ simplifyUpdateReshape defOf seType (Update safety dest slice (Var v))
       Just (Update safety dest slice' $ Var v', v_cs)
 simplifyUpdateReshape _ _ _ = Nothing
 
--- | If we are replicating a scratch array (possibly indirectly), just
--- turn it into a scratch by itself.
+-- | If we are replicating or manifesting a scratch array (possibly
+-- indirectly), just turn it into a scratch by itself.
 repScratchToScratch :: SimpleRule rep
 repScratchToScratch defOf seType (Replicate shape (Var src)) = do
   t <- seType $ Var src
-  cs <- isActuallyScratch src
+  cs <- isActuallyScratch defOf src
   pure (Scratch (elemType t) (shapeDims shape <> arrayDims t), cs)
-  where
-    isActuallyScratch v =
-      case defOf v of
-        Just (BasicOp Scratch {}, cs) ->
-          Just cs
-        Just (BasicOp (Rearrange v' _), cs) ->
-          (cs <>) <$> isActuallyScratch v'
-        Just (BasicOp (Reshape v' _), cs) ->
-          (cs <>) <$> isActuallyScratch v'
-        _ -> Nothing
+repScratchToScratch defOf seType (Manifest src _) = do
+  t <- seType $ Var src
+  cs <- isActuallyScratch defOf src
+  pure (Scratch (elemType t) (arrayDims t), cs)
 repScratchToScratch _ _ _ =
   Nothing
+
+isActuallyScratch :: VarLookup rep -> VName -> Maybe Certs
+isActuallyScratch defOf v =
+  case defOf v of
+    Just (BasicOp Scratch {}, cs) ->
+      Just cs
+    Just (BasicOp (Rearrange v' _), cs) ->
+      (cs <>) <$> isActuallyScratch defOf v'
+    Just (BasicOp (Reshape v' _), cs) ->
+      (cs <>) <$> isActuallyScratch defOf v'
+    _ -> Nothing
 
 simpleRules :: [SimpleRule rep]
 simpleRules =

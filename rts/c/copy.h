@@ -2,33 +2,43 @@
 
 // Cache-oblivious map-transpose function.
 #define GEN_MAP_TRANSPOSE(NAME, ELEM_TYPE)                              \
-  static void map_transpose_##NAME                                      \
-  (ELEM_TYPE* dst, ELEM_TYPE* src,                                      \
-   int64_t k, int64_t m, int64_t n,                                     \
-   int64_t cb, int64_t ce, int64_t rb, int64_t re)                      \
+  static void transpose_##NAME                                          \
+  (ELEM_TYPE* dst, int64_t dst_row_stride,                              \
+   ELEM_TYPE* src, int64_t src_row_stride,                              \
+   int64_t rb, int64_t re, int64_t cb, int64_t ce)                      \
   {                                                                     \
-  int64_t r = re - rb;                                                  \
-  int64_t c = ce - cb;                                                  \
-  if (k == 1) {                                                         \
+    int64_t r = re - rb;                                                \
+    int64_t c = ce - cb;                                                \
     if (r <= 64 && c <= 64) {                                           \
-      for (int64_t j = 0; j < c; j++) {                                 \
-        for (int64_t i = 0; i < r; i++) {                               \
-          dst[(j + cb) * n + (i + rb)] = src[(i + rb) * m + (j + cb)];  \
+      for (int64_t j = cb; j < ce; j++) {                               \
+        for (int64_t i = rb; i < re; i++) {                             \
+          dst[j * dst_row_stride + i] = src[i * src_row_stride + j];    \
         }                                                               \
       }                                                                 \
     } else if (c <= r) {                                                \
-      map_transpose_##NAME(dst, src, k, m, n, cb, ce, rb, rb + r/2);    \
-      map_transpose_##NAME(dst, src, k, m, n, cb, ce, rb + r/2, re);    \
+      transpose_##NAME(dst, dst_row_stride, src, src_row_stride,        \
+                       rb, rb + r/2, cb, ce);                           \
+      transpose_##NAME(dst, dst_row_stride, src, src_row_stride,        \
+                       rb + r/2, re, cb, ce);                           \
     } else {                                                            \
-      map_transpose_##NAME(dst, src, k, m, n, cb, cb + c/2, rb, re);    \
-      map_transpose_##NAME(dst, src, k, m, n, cb + c/2, ce, rb, re);    \
+      transpose_##NAME(dst, dst_row_stride, src, src_row_stride,        \
+                       rb, re, cb, cb + c/2);                           \
+      transpose_##NAME(dst, dst_row_stride, src, src_row_stride,        \
+                       rb, re, cb + c/2, ce);                           \
     }                                                                   \
-  } else {                                                              \
-  for (int64_t i = 0; i < k; i++) {                                     \
-    map_transpose_##NAME(dst + i * m * n, src + i * m * n, 1, m, n, cb, ce, rb, re); \
-  }\
-} \
-}
+  }                                                                     \
+                                                                        \
+  static void map_transpose_##NAME                                      \
+  (ELEM_TYPE* dst, ELEM_TYPE* src, const struct lmad_transpose *tr)     \
+  {                                                                     \
+    for (int64_t k = 0; k < tr->num_arrays; k++) {                      \
+      transpose_##NAME(dst + k * tr->dst_array_stride,                  \
+                       tr->dst_row_stride,                              \
+                       src + k * tr->src_array_stride,                  \
+                       tr->src_row_stride,                              \
+                       0, tr->rows, 0, tr->cols);                       \
+    }                                                                   \
+  }
 
 // Straightforward LMAD copy function.
 #define GEN_LMAD_COPY_ELEMENTS(NAME, ELEM_TYPE)                         \
@@ -50,92 +60,74 @@
     }                                                                   \
   }                                                                     \
 
-// Check whether this LMAD can be seen as a transposed 2D array.  This
-// is done by checking every possible splitting point.
-static bool lmad_is_tr(int64_t *n_out, int64_t *m_out,
-                       int r,
-                       const int64_t strides[r],
-                       const int64_t shape[r]) {
-  for (int i = 1; i < r; i++) {
-    int64_t n = 1, m = 1;
-    bool ok = true;
-    int64_t expected = 1;
-    // Check strides before 'i'.
-    for (int j = i-1; j >= 0; j--) {
-      ok = ok && strides[j] == expected;
-      expected *= shape[j];
-      n *= shape[j];
-    }
-    // Check strides after 'i'.
-    for (int j = r-1; j >= i; j--) {
-      ok = ok && strides[j] == expected;
-      expected *= shape[j];
-      m *= shape[j];
-    }
-    if (ok) {
-      *n_out = n;
-      *m_out = m;
-      return true;
-    }
-  }
-  return false;
-}
-
-// This function determines whether the a 'dst' LMAD is row-major and
-// 'src' LMAD is column-major.  Both LMADs are for arrays of the same
-// shape.  Both LMADs are allowed to have additional dimensions "on
-// top".  Essentially, this function determines whether a copy from
-// 'src' to 'dst' is a "map(transpose)" that we know how to implement
-// efficiently.  The LMADs can have arbitrary rank, and the main
-// challenge here is checking whether the src LMAD actually
-// corresponds to a 2D column-major layout by morally collapsing
-// dimensions.  There is a lot of looping here, but the actual trip
-// count is going to be very low in practice.
-//
-// Returns true if this is indeed a map(transpose), and writes the
-// number of arrays, and moral array size to appropriate output
-// parameters.
-static bool lmad_map_tr(int64_t *num_arrays_out, int64_t *n_out, int64_t *m_out,
+// Determine whether a copy is a map(transpose), and if so, describe it in 'tr'.
+// We first drop dimensions of size 1, and merge adjacent dimensions that can be
+// expressed as a single dimension in both LMADs. If this leaves two or three
+// dimensions, then the copy is a map(transpose) if one of the innermost two has
+// unit stride in the source, and the other has unit stride in the destination.
+// Only those strides are constrained; in particular the arrays need not be
+// contiguous.
+static bool lmad_map_tr(struct lmad_transpose *tr,
                         int r,
                         const int64_t dst_strides[r],
                         const int64_t src_strides[r],
                         const int64_t shape[r]) {
-  int64_t rowmajor_strides[r];
-  rowmajor_strides[r-1] = 1;
+  int64_t c_shape[3], c_dst_strides[3], c_src_strides[3];
+  int c_r = 0;
 
-  for (int i = r-2; i >= 0; i--) {
-    rowmajor_strides[i] = rowmajor_strides[i+1] * shape[i+1];
-  }
-
-  // map_r will be the number of mapped dimensions on top.
-  int map_r = 0;
-  int64_t num_arrays = 1;
   for (int i = 0; i < r; i++) {
-    if (dst_strides[i] != rowmajor_strides[i] ||
-        src_strides[i] != rowmajor_strides[i]) {
-      break;
+    if (shape[i] == 1) {
+      continue;
+    }
+    if (c_r > 0 &&
+        c_dst_strides[c_r-1] == dst_strides[i] * shape[i] &&
+        c_src_strides[c_r-1] == src_strides[i] * shape[i]) {
+      c_shape[c_r-1] *= shape[i];
+      c_dst_strides[c_r-1] = dst_strides[i];
+      c_src_strides[c_r-1] = src_strides[i];
+    } else if (c_r == 3) {
+      // More than three dimensions, so not a map(transpose).
+      return false;
     } else {
-      num_arrays *= shape[i];
-      map_r++;
+      c_shape[c_r] = shape[i];
+      c_dst_strides[c_r] = dst_strides[i];
+      c_src_strides[c_r] = src_strides[i];
+      c_r++;
     }
   }
 
-  *num_arrays_out = num_arrays;
-
-  if (r==map_r) {
+  // Here c_r is at most 3.
+  if (c_r < 2) {
     return false;
   }
 
-  if (memcmp(&rowmajor_strides[map_r],
-             &dst_strides[map_r],
-             sizeof(int64_t)*(r-map_r)) == 0) {
-    return lmad_is_tr(n_out, m_out, r-map_r, src_strides+map_r, shape+map_r);
-  } else if (memcmp(&rowmajor_strides[map_r],
-                    &src_strides[map_r],
-                    sizeof(int64_t)*(r-map_r)) == 0) {
-    return lmad_is_tr(m_out, n_out, r-map_r, dst_strides+map_r, shape+map_r);
+  // The innermost two dimensions are transposed, and the outermost one (if
+  // any) is the map.
+  int a = c_r-2, b = c_r-1;
+  if (c_dst_strides[b] == 1 && c_src_strides[a] == 1) {
+    tr->rows = c_shape[b];
+    tr->cols = c_shape[a];
+    tr->dst_row_stride = c_dst_strides[a];
+    tr->src_row_stride = c_src_strides[b];
+  } else if (c_dst_strides[a] == 1 && c_src_strides[b] == 1) {
+    tr->rows = c_shape[a];
+    tr->cols = c_shape[b];
+    tr->dst_row_stride = c_dst_strides[b];
+    tr->src_row_stride = c_src_strides[a];
+  } else {
+    return false;
   }
-  return false;
+
+  if (c_r == 3) {
+    tr->num_arrays = c_shape[0];
+    tr->dst_array_stride = c_dst_strides[0];
+    tr->src_array_stride = c_src_strides[0];
+  } else {
+    tr->num_arrays = 1;
+    tr->dst_array_stride = 0;
+    tr->src_array_stride = 0;
+  }
+  return true;
 }
 
 // Check if the strides correspond to row-major strides of *any*
@@ -211,12 +203,16 @@ static void log_copy(struct futhark_context* ctx,
 }
 
 static void log_transpose(struct futhark_context* ctx,
-                          int64_t k, int64_t n, int64_t m) {
+                          const struct lmad_transpose *tr) {
   if (ctx->logging) {
     fprintf(ctx->log, "## Transpose\n");
-    fprintf(ctx->log, "Arrays     : %ld\n", (long int)k);
-    fprintf(ctx->log, "X elements : %ld\n", (long int)m);
-    fprintf(ctx->log, "Y elements : %ld\n", (long int)n);
+    fprintf(ctx->log, "Arrays     : %ld\n", (long int)tr->num_arrays);
+    fprintf(ctx->log, "X elements : %ld\n", (long int)tr->cols);
+    fprintf(ctx->log, "Y elements : %ld\n", (long int)tr->rows);
+    fprintf(ctx->log, "Dst strides: %ld %ld\n",
+            (long int)tr->dst_array_stride, (long int)tr->dst_row_stride);
+    fprintf(ctx->log, "Src strides: %ld %ld\n",
+            (long int)tr->src_array_stride, (long int)tr->src_row_stride);
     fprintf(ctx->log, "\n");
   }
 }
@@ -232,12 +228,10 @@ static void log_transpose(struct futhark_context* ctx,
     int64_t size = 1;                                                   \
     for (int i = 0; i < r; i++) { size *= shape[i]; }                   \
     if (size == 0) { return; }                                          \
-    int64_t k, n, m;                                                    \
-    if (lmad_map_tr(&k, &n, &m,                                         \
-                    r, dst_strides, src_strides, shape)) {              \
-      log_transpose(ctx, k, n, m);                                      \
-      map_transpose_##NAME                                              \
-        (dst+dst_offset, src+src_offset, k, n, m, 0, n, 0, m);          \
+    struct lmad_transpose tr;                                           \
+    if (lmad_map_tr(&tr, r, dst_strides, src_strides, shape)) {         \
+      log_transpose(ctx, &tr);                                          \
+      map_transpose_##NAME(dst+dst_offset, src+src_offset, &tr);        \
     } else if (lmad_memcpyable(r, dst_strides, src_strides, shape)) {   \
       if (ctx->logging) {fprintf(ctx->log, "## Flat copy\n\n");}          \
       memcpy(dst+dst_offset, src+src_offset, size*sizeof(*dst));        \

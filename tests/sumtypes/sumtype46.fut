@@ -1,8 +1,7 @@
 -- ==
--- tags { no_webgpu }
 -- error: differ in arity
 
-type t = #foo f64
+type t = #foo f32
 
 def main (surf: t) =
   match surf

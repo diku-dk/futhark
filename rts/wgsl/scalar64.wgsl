@@ -152,7 +152,7 @@ fn pow_i64(a_p: i64, b: i64) -> i64 {
     if !eq_i64(rem & one_i64, zero_i64) {
       res = mul_i64(res, a);
     }
-    rem = ashr_i64(rem, one_i64);
+    rem = lshr_i64(rem, one_i64);
     a = mul_i64(a, a);
   }
 

@@ -3,16 +3,16 @@
 
 -- ==
 -- entry: fwd
--- input { 1f64 }
+-- input { 1f32 }
 -- output { 1i32 }
 
 entry fwd x =
-  jvp i32.f64 x 1
+  jvp i32.f32 x 1
 
 -- ==
 -- entry: rev
--- input { 1f64 }
--- output { 2f64 }
+-- input { 1f32 }
+-- output { 2f32 }
 
 entry rev x =
-  vjp i32.f64 x 2
+  vjp i32.f32 x 2

@@ -3,12 +3,12 @@
 -- The structure test is to verify that inlining happens as expected.
 -- ==
 -- tags { no_webgpu }
--- input { [[0.0,0.0],[2.0,0.0],[2.0,2.0],[0.0,2.0],[1.0,1.0],[1.5,0.5],[0.5,1.5]] }
--- output { [[0.0, 0.0], [0.0, 2.0], [2.0, 2.0], [2.0, 0.0]] }
+-- input { [[0.0f32,0.0f32],[2.0f32,0.0f32],[2.0f32,2.0f32],[0.0f32,2.0f32],[1.0f32,1.0f32],[1.5f32,0.5f32],[0.5f32,1.5f32]] }
+-- output { [[0.0f32, 0.0f32], [0.0f32, 2.0f32], [2.0f32, 2.0f32], [2.0f32, 0.0f32]] }
 -- structure { Apply 3 }
 
-type dist = f64
-type point = {x: f64, y: f64}
+type dist = f32
+type point = {x: f32, y: f32}
 
 def point_eq (p: point) (q: point) =
   p.x == q.x && p.y == q.y
@@ -19,8 +19,8 @@ def point_leq (p: point) (q: point) =
 def point_less (p: point) (q: point) =
   p.x < q.x || (p.x == q.x && p.y < q.y)
 
-def sqr (x: f64) = x * x
-def ssqr (x: f64) = f64.abs x * x
+def sqr (x: f32) = x * x
+def ssqr (x: f32) = f32.abs x * x
 
 def signed_dist_to_line (p: point) (q: point) (r: point) =
   let ax = q.x - p.x
@@ -40,7 +40,7 @@ def side (a: point) (b: point) (p: point) =
   (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)
 
 def farthest (a: point) (b: point) =
-  let dist p = f64.abs (side a b p)
+  let dist p = f32.abs (side a b p)
   in maximum (\p q -> dist p <= dist q)
 
 def hull [n] (a: point) (b: point) (pts: [n]point) : []point =

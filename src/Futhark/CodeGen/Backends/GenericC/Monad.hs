@@ -170,13 +170,14 @@ type ReadScalar op s =
 
 -- | Allocate a memory block of the given size and with the given tag
 -- in the given memory space, saving a reference in the given variable
--- name.
+-- name.  Produces an @int@ expression that is @FUTHARK_SUCCESS@ if
+-- the allocation succeeded.
 type Allocate op s =
   C.Exp ->
   C.Exp ->
   C.Exp ->
   SpaceId ->
-  CompilerM op s ()
+  CompilerM op s C.Exp
 
 -- | De-allocate the given memory block, with the given tag, with the
 -- given size,, which is in the given memory space.
@@ -538,7 +539,7 @@ allocRawMem ::
   b ->
   Space ->
   c ->
-  CompilerM op s ()
+  CompilerM op s C.Exp
 allocRawMem dest size space desc = case space of
   Space sid ->
     join $
@@ -548,8 +549,8 @@ allocRawMem dest size space desc = case space of
         <*> pure [C.cexp|$exp:desc|]
         <*> pure sid
   _ ->
-    stm
-      [C.cstm|host_alloc(ctx, (size_t)$exp:size, $exp:desc, (size_t*)&$exp:size, (void*)&$exp:dest);|]
+    pure
+      [C.cexp|host_alloc(ctx, (size_t)$exp:size, $exp:desc, (size_t*)&$exp:size, (void*)&$exp:dest)|]
 
 freeRawMem ::
   (C.ToExp a, C.ToExp b, C.ToExp c) =>
@@ -642,7 +643,8 @@ allocMem mem size space on_failure = do
                      }|]
     else do
       freeRawMem mem size space mem_s
-      allocRawMem mem size space [C.cexp|desc|]
+      alloc <- allocRawMem mem size space [C.cexp|desc|]
+      stm [C.cstm|if ($exp:alloc != FUTHARK_SUCCESS) { $stm:on_failure }|]
 
 copyMemoryDefaultSpace ::
   C.Exp ->

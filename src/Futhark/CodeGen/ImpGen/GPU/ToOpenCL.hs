@@ -635,6 +635,8 @@ inKernelOperations env mode body =
       GC.stm [C.cstm|mem_fence_local();|]
     kernelOps (MemFence FenceGlobal) =
       GC.stm [C.cstm|mem_fence_global();|]
+    kernelOps WarpSync =
+      GC.stm [C.cstm|warp_sync();|]
     kernelOps (SharedAlloc name size) = do
       name' <- newVName $ nameFromText $ prettyText name <> "_backing"
       GC.modifyUserState $ \s ->
@@ -877,8 +879,9 @@ typesInCode (DeclareScalar _ _ t) = S.singleton t
 typesInCode (DeclareArray _ t _) = S.singleton t
 typesInCode (Allocate _ (Count (TPrimExp e)) _) = typesInExp e
 typesInCode Free {} = mempty
-typesInCode (Copy _ shape _ (Count (TPrimExp dstoffset), dststrides) _ (Count (TPrimExp srcoffset), srcstrides)) =
-  foldMap (typesInExp . untyped . unCount) shape
+typesInCode (Copy t shape _ (Count (TPrimExp dstoffset), dststrides) _ (Count (TPrimExp srcoffset), srcstrides)) =
+  S.singleton t
+    <> foldMap (typesInExp . untyped . unCount) shape
     <> typesInExp dstoffset
     <> foldMap (typesInExp . untyped . unCount) dststrides
     <> typesInExp srcoffset

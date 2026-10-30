@@ -9,6 +9,7 @@ where
 
 import Control.Monad (guard)
 import Data.Bifunctor (first)
+import Data.Bits qualified as Bits
 import Data.List qualified as L
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Maybe
@@ -178,7 +179,7 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
             pure $ IndexResult cs arr $ Slice $ ds_inds' ++ rest_inds
       where
         index DimFix {} = Nothing
-        index (DimSlice _ n s) = Just (n, DimSlice (constant (0 :: Int64)) n s)
+        index (DimSlice _ n _) = Just (n, DimSlice (constant (0 :: Int64)) n (constant (1 :: Int64)))
     Just (Replicate (Shape []) (Var src), cs)
       | Just dims <- arrayDims <$> seType (Var src),
         length inds == length dims,
@@ -266,7 +267,12 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
     worthInlining e
       | primExpSizeAtLeast 20 e = False -- totally ad-hoc.
       | otherwise = worthInlining' e
-    worthInlining' (BinOpExp Pow {} _ _) = False
+    worthInlining' (BinOpExp SPow {} (ValueExp (IntValue x)) _) =
+      isPowOf2 (valueIntegral x)
+    worthInlining' (BinOpExp SPow {} _ _) = False
+    worthInlining' (BinOpExp UPow {} (ValueExp (IntValue x)) _) =
+      isPowOf2 (valueIntegral x)
+    worthInlining' (BinOpExp UPow {} _ _) = False
     worthInlining' (BinOpExp FPow {} _ _) = False
     worthInlining' (BinOpExp _ x y) = worthInlining' x && worthInlining' y
     worthInlining' (CmpOpExp _ x y) = worthInlining' x && worthInlining' y
@@ -278,6 +284,9 @@ simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
       | isJust $ isCondFun f = all worthInlining' args
       | otherwise = False
     worthInlining' _ = True
+
+    isPowOf2 :: Integer -> Bool
+    isPowOf2 x = x > 0 && x Bits..&. (x - 1) == 0
 
     isConcat v
       | Just (Concat {}, _) <- defOf v =

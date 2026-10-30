@@ -1,9 +1,8 @@
 -- ==
--- tags { no_webgpu }
-def f (a: f64) : f64 = a + 3.0
-def g (a: f64) : f64 = a * 3.0
+def f (a: f32) : f32 = a + 3.0
+def g (a: f32) : f32 = a * 3.0
 
-def main (arr: []f64) : f64 =
+def main (arr: []f32) : f32 =
   let x = map f arr
   let y = map f x
   let z = map g x

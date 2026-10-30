@@ -548,7 +548,8 @@ static int random_other_worker(struct scheduler *scheduler, int my_id) {
 
 static inline int64_t compute_chunk_size(int64_t minimum_chunk_size, double kappa, struct subtask* subtask)
 {
-  double C = (double)*subtask->task_time / (double)*subtask->task_iter;
+  double C = (double)__atomic_load_n(subtask->task_time, __ATOMIC_RELAXED)
+    / (double)__atomic_load_n(subtask->task_iter, __ATOMIC_RELAXED);
   if (C == 0.0F) C += DBL_EPSILON;
   return smax64((int64_t)(kappa / C), minimum_chunk_size);
 }
@@ -559,7 +560,7 @@ static inline struct subtask* chunk_subtask(struct worker* worker, struct subtas
 {
   if (subtask->chunkable) {
     // Do we have information from previous runs avaliable
-    if (*subtask->task_iter > 0) {
+    if (__atomic_load_n(subtask->task_iter, __ATOMIC_RELAXED) > 0) {
       subtask->chunk_size = compute_chunk_size(worker->scheduler->minimum_chunk_size,
                                                worker->scheduler->kappa,
                                                subtask);
@@ -612,10 +613,10 @@ static inline int run_subtask(struct worker* worker, struct subtask* subtask)
   // These updates should really be done using a single atomic CAS operation
   __atomic_fetch_add(subtask->task_time, time_elapsed, __ATOMIC_RELAXED);
   __atomic_fetch_add(subtask->task_iter, iter, __ATOMIC_RELAXED);
-  // We need a fence here, since if the counter is decremented before either
-  // of the two above are updated bad things can happen, e.g. if they are stack-allocated
-  __atomic_thread_fence(__ATOMIC_SEQ_CST);
-  __atomic_fetch_sub(subtask->counter, 1, __ATOMIC_RELAXED);
+  // The decrement releases everything this subtask has written (results,
+  // the error, and the timers above, which may be stack-allocated) to the
+  // thread waiting for the counter to reach zero.
+  __atomic_fetch_sub(subtask->counter, 1, __ATOMIC_RELEASE);
   free(subtask);
   return 0;
 }
@@ -623,8 +624,8 @@ static inline int run_subtask(struct worker* worker, struct subtask* subtask)
 
 static inline int is_small(struct scheduler_segop *task, struct scheduler *scheduler, int *nsubtasks)
 {
-  int64_t time = *task->task_time;
-  int64_t iter = *task->task_iter;
+  int64_t time = __atomic_load_n(task->task_time, __ATOMIC_RELAXED);
+  int64_t iter = __atomic_load_n(task->task_iter, __ATOMIC_RELAXED);
 
   if (task->sched == DYNAMIC || iter == 0) {
     *nsubtasks = scheduler->num_threads;
@@ -721,7 +722,7 @@ static inline void wake_up_threads(struct scheduler *scheduler, int start_tid, i
 }
 
 static inline int is_finished(struct worker *worker) {
-  return worker->dead && subtask_queue_is_empty(&worker->q);
+  return __atomic_load_n(&worker->dead, __ATOMIC_RELAXED) && subtask_queue_is_empty(&worker->q);
 }
 
 // Try to steal from a random queue
@@ -836,7 +837,7 @@ static inline int scheduler_execute_parloop(struct scheduler *scheduler,
   }
 
   // Join (wait for subtasks to finish)
-  while(join_counter != 0) {
+  while (__atomic_load_n(&join_counter, __ATOMIC_ACQUIRE) != 0) {
     if (!subtask_queue_is_empty(&worker->q)) {
       struct subtask *subtask = NULL;
       int err = subtask_queue_dequeue(worker, &subtask, 0);
@@ -1137,7 +1138,7 @@ static int scheduler_destroy(struct scheduler *scheduler) {
   // First mark them all as dead.
   for (int i = 1; i < scheduler->num_threads; i++) {
     struct worker *cur_worker = &scheduler->workers[i];
-    cur_worker->dead = 1;
+    __atomic_store_n(&cur_worker->dead, 1, __ATOMIC_RELAXED);
   }
 
   // Then destroy their task queues (this will wake up the threads and

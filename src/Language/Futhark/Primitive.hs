@@ -60,7 +60,8 @@ module Language.Futhark.Primitive
     doMul,
     doSDiv,
     doSMod,
-    doPow,
+    doSPow,
+    doUPow,
 
     -- ** Conversion Operations
     doConvOp,
@@ -123,7 +124,7 @@ import Data.Bits
     countLeadingZeros,
     countTrailingZeros,
     popCount,
-    shift,
+    shiftL,
     shiftR,
     xor,
     (.&.),
@@ -492,11 +493,13 @@ data BinOp
     UMax IntType
   | -- | Returns the greatest of two floating-point numbers.
     FMax FloatType
-  | -- | Left-shift.
+  | -- | Left-shift.  The shift amount is masked to the bit width.
     Shl IntType
-  | -- | Logical right-shift, zero-extended.
+  | -- | Logical right-shift, zero-extended.  The shift amount is
+    -- masked to the bit width.
     LShr IntType
-  | -- | Arithmetic right-shift, sign-extended.
+  | -- | Arithmetic right-shift, sign-extended.  The shift amount is
+    -- masked to the bit width.
     AShr IntType
   | -- | Bitwise and.
     And IntType
@@ -504,8 +507,11 @@ data BinOp
     Or IntType
   | -- | Bitwise exclusive-or.
     Xor IntType
-  | -- | Integer exponentiation.
-    Pow IntType
+  | -- | Signed integer exponentiation.  Undefined for negative
+    -- exponents.
+    SPow IntType
+  | -- | Unsigned integer exponentiation.
+    UPow IntType
   | -- | Floating-point exponentiation.
     FPow FloatType
   | -- | Boolean and - not short-circuiting.
@@ -629,7 +635,8 @@ allBinOps =
       map And allIntTypes,
       map Or allIntTypes,
       map Xor allIntTypes,
-      map Pow allIntTypes,
+      map SPow allIntTypes,
+      map UPow allIntTypes,
       map FPow allFloatTypes,
       [LogAnd, LogOr]
     ]
@@ -762,7 +769,8 @@ doBinOp AShr {} = doIntBinOp doAShr
 doBinOp And {} = doIntBinOp doAnd
 doBinOp Or {} = doIntBinOp doOr
 doBinOp Xor {} = doIntBinOp doXor
-doBinOp Pow {} = doRiskyIntBinOp doPow
+doBinOp SPow {} = doRiskyIntBinOp doSPow
+doBinOp UPow {} = doIntBinOp doUPow
 doBinOp FPow {} = doFloatBinOp (**) (**) (**)
 doBinOp LogAnd {} = doBoolBinOp (&&)
 doBinOp LogOr {} = doBoolBinOp (||)
@@ -906,17 +914,23 @@ doSMax v1 v2 = intValue (intValueType v1) $ intToInt64 v1 `max` intToInt64 v2
 doUMax :: IntValue -> IntValue -> IntValue
 doUMax v1 v2 = intValue (intValueType v1) $ intToWord64 v1 `max` intToWord64 v2
 
+-- | The shift amount for shifting the first operand by the second,
+-- masked to the bit width.
+shiftAmount :: IntValue -> IntValue -> Int
+shiftAmount v1 v2 =
+  fromIntegral (intToWord64 v2) .&. (8 * intByteSize (intValueType v1) - 1)
+
 -- | Left-shift.
 doShl :: IntValue -> IntValue -> IntValue
-doShl v1 v2 = intValue (intValueType v1) $ intToInt64 v1 `shift` intToInt v2
+doShl v1 v2 = intValue (intValueType v1) $ intToInt64 v1 `shiftL` shiftAmount v1 v2
 
 -- | Logical right-shift, zero-extended.
 doLShr :: IntValue -> IntValue -> IntValue
-doLShr v1 v2 = intValue (intValueType v1) $ intToWord64 v1 `shift` negate (intToInt v2)
+doLShr v1 v2 = intValue (intValueType v1) $ intToWord64 v1 `shiftR` shiftAmount v1 v2
 
 -- | Arithmetic right-shift, sign-extended.
 doAShr :: IntValue -> IntValue -> IntValue
-doAShr v1 v2 = intValue (intValueType v1) $ intToInt64 v1 `shift` negate (intToInt v2)
+doAShr v1 v2 = intValue (intValueType v1) $ intToInt64 v1 `shiftR` shiftAmount v1 v2
 
 -- | Bitwise and.
 doAnd :: IntValue -> IntValue -> IntValue
@@ -930,11 +944,15 @@ doOr v1 v2 = intValue (intValueType v1) $ intToWord64 v1 .|. intToWord64 v2
 doXor :: IntValue -> IntValue -> IntValue
 doXor v1 v2 = intValue (intValueType v1) $ intToWord64 v1 `xor` intToWord64 v2
 
--- | Signed integer exponentatation.
-doPow :: IntValue -> IntValue -> Maybe IntValue
-doPow v1 v2
+-- | Signed integer exponentiation.  Fails for negative exponents.
+doSPow :: IntValue -> IntValue -> Maybe IntValue
+doSPow v1 v2
   | negativeIshInt v2 = Nothing
-  | otherwise = Just $ intValue (intValueType v1) $ intToInt64 v1 ^ intToInt64 v2
+  | otherwise = Just $ doUPow v1 v2
+
+-- | Unsigned integer exponentiation.
+doUPow :: IntValue -> IntValue -> IntValue
+doUPow v1 v2 = intValue (intValueType v1) $ intToInt64 v1 ^ intToWord64 v2
 
 -- | Apply a 'ConvOp' to an operand.  Returns 'Nothing' if the
 -- application is mistyped.
@@ -1103,10 +1121,6 @@ intToInt64 (Int16Value v) = fromIntegral v
 intToInt64 (Int32Value v) = fromIntegral v
 intToInt64 (Int64Value v) = fromIntegral v
 
--- | Careful - there is no guarantee this will fit.
-intToInt :: IntValue -> Int
-intToInt = fromIntegral . intToInt64
-
 floatToDouble :: FloatValue -> Double
 floatToDouble (Float16Value v)
   | isInfinite v, v > 0 = 1 / 0
@@ -1171,7 +1185,8 @@ binOpType (AShr t) = IntType t
 binOpType (And t) = IntType t
 binOpType (Or t) = IntType t
 binOpType (Xor t) = IntType t
-binOpType (Pow t) = IntType t
+binOpType (SPow t) = IntType t
+binOpType (UPow t) = IntType t
 binOpType (FPow t) = FloatType t
 binOpType LogAnd = Bool
 binOpType LogOr = Bool
@@ -1913,7 +1928,8 @@ instance Pretty BinOp where
   pretty (And t) = taggedI "and" t
   pretty (Or t) = taggedI "or" t
   pretty (Xor t) = taggedI "xor" t
-  pretty (Pow t) = taggedI "pow" t
+  pretty (SPow t) = taggedI "spow" t
+  pretty (UPow t) = taggedI "upow" t
   pretty (FPow t) = taggedF "fpow" t
   pretty LogAnd = "logand"
   pretty LogOr = "logor"

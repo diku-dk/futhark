@@ -166,8 +166,8 @@ builtinKernels =
     transposeInterface program name elemType atomic =
       KernelInterface
         { safety = SafetyNone,
-          scalarsOffsets = [0, 8, 16, 20, 24, 28, 32, 36, 40],
-          scalarsSize = 48, -- uniform buffers must be multiple of 16 bytes
+          scalarsOffsets = [0, 8, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56],
+          scalarsSize = 64, -- uniform buffers must be multiple of 16 bytes
           scalarsBindSlot = 0,
           memBindSlots = [1, 2],
           overrideNames = ["block_size_x", "block_size_y", "block_size_z"],
@@ -183,8 +183,8 @@ builtinKernels =
     transposeInterfaceLarge program name elemType atomic =
       KernelInterface
         { safety = SafetyNone,
-          scalarsOffsets = [0, 8, 16, 24, 32, 40, 48, 56, 60],
-          scalarsSize = 64, -- uniform buffers must be multiple of 16 bytes
+          scalarsOffsets = [0, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 92],
+          scalarsSize = 96, -- uniform buffers must be multiple of 16 bytes
           scalarsBindSlot = 0,
           memBindSlots = [1, 2],
           overrideNames = ["block_size_x", "block_size_y", "block_size_z"],

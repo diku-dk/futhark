@@ -454,51 +454,51 @@ static inline uniform uint64_t umax64(uniform uint64_t x, uniform uint64_t y) {
 }
 
 static inline uniform uint8_t shl8(uniform uint8_t x, uniform uint8_t y) {
-  return (uniform uint8_t)(x << y);
+  return (uniform uint8_t)(x << (y & 7));
 }
 
 static inline uniform uint16_t shl16(uniform uint16_t x, uniform uint16_t y) {
-  return (uniform uint16_t)(x << y);
+  return (uniform uint16_t)(x << (y & 15));
 }
 
 static inline uniform uint32_t shl32(uniform uint32_t x, uniform uint32_t y) {
-  return x << y;
+  return x << (y & 31);
 }
 
 static inline uniform uint64_t shl64(uniform uint64_t x, uniform uint64_t y) {
-  return x << y;
+  return x << (y & 63);
 }
 
 static inline uniform uint8_t lshr8(uniform uint8_t x, uniform uint8_t y) {
-  return x >> y;
+  return x >> (y & 7);
 }
 
 static inline uniform uint16_t lshr16(uniform uint16_t x, uniform uint16_t y) {
-  return x >> y;
+  return x >> (y & 15);
 }
 
 static inline uniform uint32_t lshr32(uniform uint32_t x, uniform uint32_t y) {
-  return x >> y;
+  return x >> (y & 31);
 }
 
 static inline uniform uint64_t lshr64(uniform uint64_t x, uniform uint64_t y) {
-  return x >> y;
+  return x >> (y & 63);
 }
 
 static inline uniform int8_t ashr8(uniform int8_t x, uniform int8_t y) {
-  return x >> y;
+  return x >> (y & 7);
 }
 
 static inline uniform int16_t ashr16(uniform int16_t x, uniform int16_t y) {
-  return x >> y;
+  return x >> (y & 15);
 }
 
 static inline uniform int32_t ashr32(uniform int32_t x, uniform int32_t y) {
-  return x >> y;
+  return x >> (y & 31);
 }
 
 static inline uniform int64_t ashr64(uniform int64_t x, uniform int64_t y) {
-  return x >> y;
+  return x >> (y & 63);
 }
 
 static inline uniform uint8_t and8(uniform uint8_t x, uniform uint8_t y) {
@@ -613,7 +613,7 @@ static inline uniform bool sle64(uniform int64_t x, uniform int64_t y) {
   return x <= y;
 }
 
-static inline uniform uint8_t pow8(uniform uint8_t x, uniform uint8_t y) {
+static inline uniform uint8_t upow8(uniform uint8_t x, uniform uint8_t y) {
   uniform uint8_t res = 1, rem = y;
 
   while (rem != 0) {
@@ -625,7 +625,7 @@ static inline uniform uint8_t pow8(uniform uint8_t x, uniform uint8_t y) {
   return res;
 }
 
-static inline uniform uint16_t pow16(uniform uint16_t x, uniform uint16_t y) {
+static inline uniform uint16_t upow16(uniform uint16_t x, uniform uint16_t y) {
   uniform uint16_t res = 1, rem = y;
 
   while (rem != 0) {
@@ -637,7 +637,7 @@ static inline uniform uint16_t pow16(uniform uint16_t x, uniform uint16_t y) {
   return res;
 }
 
-static inline uniform uint32_t pow32(uniform uint32_t x, uniform uint32_t y) {
+static inline uniform uint32_t upow32(uniform uint32_t x, uniform uint32_t y) {
   uniform uint32_t res = 1, rem = y;
 
   while (rem != 0) {
@@ -649,7 +649,7 @@ static inline uniform uint32_t pow32(uniform uint32_t x, uniform uint32_t y) {
   return res;
 }
 
-static inline uniform uint64_t pow64(uniform uint64_t x, uniform uint64_t y) {
+static inline uniform uint64_t upow64(uniform uint64_t x, uniform uint64_t y) {
   uniform uint64_t res = 1, rem = y;
 
   while (rem != 0) {
@@ -659,6 +659,22 @@ static inline uniform uint64_t pow64(uniform uint64_t x, uniform uint64_t y) {
     x *= x;
   }
   return res;
+}
+
+static inline uniform int8_t spow8(uniform int8_t x, uniform int8_t y) {
+  return (uniform int8_t)upow8((uniform uint8_t)x, (uniform uint8_t)y);
+}
+
+static inline uniform int16_t spow16(uniform int16_t x, uniform int16_t y) {
+  return (uniform int16_t)upow16((uniform uint16_t)x, (uniform uint16_t)y);
+}
+
+static inline uniform int32_t spow32(uniform int32_t x, uniform int32_t y) {
+  return (uniform int32_t)upow32((uniform uint32_t)x, (uniform uint32_t)y);
+}
+
+static inline uniform int64_t spow64(uniform int64_t x, uniform int64_t y) {
+  return (uniform int64_t)upow64((uniform uint64_t)x, (uniform uint64_t)y);
 }
 
 static inline uniform bool itob_i8_bool(uniform int8_t x) {
@@ -1456,11 +1472,11 @@ static inline uniform float btof_bool_f32(uniform bool x) {
 }
 
 static inline uniform int64_t futrts_to_bits64(uniform double x) {
-  return *((uniform int64_t* uniform)&x);
+  return intbits(x);
 }
 
 static inline uniform double futrts_from_bits64(uniform int64_t x) {
-  return *((uniform double* uniform)&x);
+  return doublebits(x);
 }
 
 static inline uniform double fmod64(uniform double x, uniform double y) {
@@ -1793,11 +1809,11 @@ static inline uniform f16 futrts_fma16(uniform f16 a, uniform f16 b, uniform f16
 }
 
 static inline uniform int16_t fptobits_f16_i16(uniform f16 x) {
-  return *((uniform int16_t *)&x);
+  return intbits(x);
 }
 
 static inline uniform f16 bitstofp_i16_f16(uniform int16_t x) {
-  return *((uniform f16 *)&x);
+  return float16bits(x);
 }
 
 static inline uniform float fpconv_f16_f16(uniform f16 x) {

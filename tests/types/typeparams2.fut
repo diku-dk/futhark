@@ -1,7 +1,7 @@
 -- Shadowing in type.
 -- ==
--- input { 2.0 } output { 2.0 }
+-- input { 2.0f32 } output { 2.0f32 }
 
 type t 'int = int
 
-def main (x: f64) : t f64 = x
+def main (x: f32) : t f32 = x

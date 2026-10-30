@@ -346,26 +346,45 @@ static int gpu_map_transpose(struct futhark_context* ctx,
                              const char *name, size_t elem_size,
                              gpu_mem dst, int64_t dst_offset,
                              gpu_mem src, int64_t src_offset,
-                             int64_t k, int64_t n, int64_t m) {
+                             const struct lmad_transpose *tr) {
+  int64_t k = tr->num_arrays;
+  int64_t n = tr->rows;
+  int64_t m = tr->cols;
   int64_t mulx = TR_BLOCK_DIM / n;
   int64_t muly = TR_BLOCK_DIM / m;
+  int64_t strides[4] = { tr->dst_array_stride, tr->dst_row_stride,
+                         tr->src_array_stride, tr->src_row_stride };
   int32_t mulx32 = mulx;
   int32_t muly32 = muly;
   int32_t k32 = k;
   int32_t n32 = n;
   int32_t m32 = m;
+  int32_t strides32[4] = { strides[0], strides[1], strides[2], strides[3] };
+
+  // Bounds on the magnitude of every partial index computed by the
+  // kernels, used to decide whether 32-bit arithmetic suffices.
+  int64_t dst_extent = dst_offset
+    + (k-1) * llabs(tr->dst_array_stride)
+    + (m-1) * llabs(tr->dst_row_stride) + n;
+  int64_t src_extent = src_offset
+    + (k-1) * llabs(tr->src_array_stride)
+    + (n-1) * llabs(tr->src_row_stride) + m;
 
   gpu_kernel kernel = kernel_default;
   int32_t grid[3];
   int32_t block[3];
 
-  void* args[11];
-  size_t args_sizes[11] = {
+  void* args[15];
+  size_t args_sizes[15] = {
     sizeof(int64_t), // dst_offset
     sizeof(int64_t), // src_offset
     sizeof(int32_t), // num_arrays
     sizeof(int32_t), // x_elems
     sizeof(int32_t), // y_elems
+    sizeof(int32_t), // dst_array_stride
+    sizeof(int32_t), // dst_row_stride
+    sizeof(int32_t), // src_array_stride
+    sizeof(int32_t), // src_row_stride
     sizeof(int32_t), // mulx
     sizeof(int32_t), // muly
     sizeof(int32_t), // repeat_1
@@ -374,15 +393,12 @@ static int gpu_map_transpose(struct futhark_context* ctx,
     sizeof(gpu_mem)  // src
   };
 
-  args[9] = &dst;
   args[0] = &dst_offset;
-  args[10] = &src;
   args[1] = &src_offset;
-  args[5] = &mulx;
-  args[6] = &muly;
+  args[13] = &dst;
+  args[14] = &src;
 
-  if (dst_offset + k * n * m <= 2147483647L &&
-      src_offset + k * n * m <= 2147483647L) {
+  if (dst_extent <= 2147483647L && src_extent <= 2147483647L) {
     if (m <= TR_BLOCK_DIM/2 && n <= TR_BLOCK_DIM/2) {
       if (ctx->logging) { fprintf(ctx->log, "Using small kernel\n"); }
       kernel = kernel_small;
@@ -427,8 +443,9 @@ static int gpu_map_transpose(struct futhark_context* ctx,
     args[2] = &k32;
     args[3] = &m32;
     args[4] = &n32;
-    args[5] = &mulx32;
-    args[6] = &muly32;
+    for (int i = 0; i < 4; i++) { args[5+i] = &strides32[i]; }
+    args[9] = &mulx32;
+    args[10] = &muly32;
   } else {
     if (ctx->logging) { fprintf(ctx->log, "Using large kernel\n"); }
     kernel = kernel_large;
@@ -441,13 +458,10 @@ static int gpu_map_transpose(struct futhark_context* ctx,
     args[2] = &k;
     args[3] = &m;
     args[4] = &n;
-    args[5] = &mulx;
-    args[6] = &muly;
-    args_sizes[2] = sizeof(int64_t);
-    args_sizes[3] = sizeof(int64_t);
-    args_sizes[4] = sizeof(int64_t);
-    args_sizes[5] = sizeof(int64_t);
-    args_sizes[6] = sizeof(int64_t);
+    for (int i = 0; i < 4; i++) { args[5+i] = &strides[i]; }
+    args[9] = &mulx;
+    args[10] = &muly;
+    for (int i = 2; i < 11; i++) { args_sizes[i] = sizeof(int64_t); }
   }
 
   // Cap the number of thead blocks we launch and figure out how many
@@ -456,10 +470,10 @@ static int gpu_map_transpose(struct futhark_context* ctx,
   int32_t repeat_2 = grid[2] / MAX_TR_THREAD_BLOCKS;
   grid[1] = repeat_1 > 0 ? MAX_TR_THREAD_BLOCKS : grid[1];
   grid[2] = repeat_2 > 0 ? MAX_TR_THREAD_BLOCKS : grid[2];
-  args[7] = &repeat_1;
-  args[8] = &repeat_2;
-  args_sizes[7] = sizeof(repeat_1);
-  args_sizes[8] = sizeof(repeat_2);
+  args[11] = &repeat_1;
+  args[12] = &repeat_2;
+  args_sizes[11] = sizeof(repeat_1);
+  args_sizes[12] = sizeof(repeat_2);
 
   if (ctx->logging) {
     fprintf(ctx->log, "\n");
@@ -475,7 +489,7 @@ static int gpu_map_transpose(struct futhark_context* ctx,
   (struct futhark_context* ctx, const char* provenance,                 \
    gpu_mem dst, int64_t dst_offset,                                     \
    gpu_mem src, int64_t src_offset,                                     \
-   int64_t k, int64_t m, int64_t n)                                     \
+   const struct lmad_transpose *tr)                                     \
   {                                                                     \
     return                                                              \
       gpu_map_transpose                                                 \
@@ -487,8 +501,7 @@ static int gpu_map_transpose(struct futhark_context* ctx,
        ctx->kernels->map_transpose_##NAME##_small,                      \
        ctx->kernels->map_transpose_##NAME##_large,                      \
        "map_transpose_" #NAME, sizeof(ELEM_TYPE),                       \
-       dst, dst_offset, src, src_offset,                                \
-       k, n, m);                                                        \
+       dst, dst_offset, src, src_offset, tr);                           \
   }
 
 static int gpu_lmad_copy(struct futhark_context* ctx, const char* provenance,
@@ -523,14 +536,27 @@ static int gpu_lmad_copy(struct futhark_context* ctx, const char* provenance,
 
   int64_t zero = 0;
 
+  // To improve the odds of coalesced memory accesses, we pass the dimensions in
+  // order of increasing source stride, and secondarily destination stride, as
+  // uncoalesced reads are much more costly than uncoalesced writes.
+  int perm[8];
+  for (int i = 0; i < r; i++) {
+    int j = i;
+    while (j > 0 && llabs(src_strides[perm[j-1]]) > llabs(src_strides[i])) {
+      perm[j] = perm[j-1];
+      j--;
+    }
+    perm[j] = i;
+  }
+
   for (int i = 0; i < 8; i++) {
     args_sizes[4+i*3] = sizeof(int64_t);
     args_sizes[4+i*3+1] = sizeof(int64_t);
     args_sizes[4+i*3+2] = sizeof(int64_t);
     if (i < r) {
-      args[4+i*3] = &shape[i];
-      args[4+i*3+1] = &dst_strides[i];
-      args[4+i*3+2] = &src_strides[i];
+      args[4+i*3] = &shape[perm[i]];
+      args[4+i*3+1] = &dst_strides[perm[i]];
+      args[4+i*3+2] = &src_strides[perm[i]];
     } else {
       args[4+i*3] = &zero;
       args[4+i*3+1] = &zero;
@@ -572,12 +598,11 @@ static int gpu_lmad_copy(struct futhark_context* ctx, const char* provenance,
     int64_t size = 1;                                                   \
     for (int i = 0; i < r; i++) { size *= shape[i]; }                   \
     if (size == 0) { return FUTHARK_SUCCESS; }                          \
-    int64_t k, n, m;                                                    \
-    if (lmad_map_tr(&k, &n, &m,                                         \
-                    r, dst_strides, src_strides, shape)) {              \
-      log_transpose(ctx, k, n, m);                                      \
+    struct lmad_transpose tr;                                           \
+    if (lmad_map_tr(&tr, r, dst_strides, src_strides, shape)) {         \
+      log_transpose(ctx, &tr);                                          \
       return map_transpose_gpu2gpu_##NAME                               \
-        (ctx, provenance, dst, dst_offset, src, src_offset, k, n, m);   \
+        (ctx, provenance, dst, dst_offset, src, src_offset, &tr);       \
     } else if (lmad_memcpyable(r, dst_strides, src_strides, shape)) {   \
       if (ctx->logging) {fprintf(ctx->log, "## Flat copy\n\n");}        \
       return gpu_memcpy(ctx,                                            \

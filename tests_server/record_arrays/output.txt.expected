@@ -17,6 +17,12 @@ Expected 1 values, but got 0.
 Unknown variable: bad
 %%% OK
 %%% FAILURE
+Array with 2 dimensions has too many elements.
+%%% OK
+%%% FAILURE
+Unknown variable: bad
+%%% OK
+%%% FAILURE
 2 fields expected but 1 values provided.
 %%% OK
 %%% FAILURE

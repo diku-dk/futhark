@@ -1,13 +1,10 @@
--- ==
--- tags { no_webgpu }
-
 type ObjectGeom =
-    #Wall f64
-  | #Block ([3]f64)
+    #Wall f32
+  | #Block ([3]f32)
 
 type Object =
     #PassiveObject ObjectGeom
-  | #Light ([3]f64)
+  | #Light ([3]f32)
 
 def main (_: i32) : Object =
   #PassiveObject (#Block [1.0, -1.6, 1.2])
