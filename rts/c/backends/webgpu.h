@@ -545,7 +545,7 @@ int backend_context_setup(struct futhark_context *ctx) {
 
   WGPUBufferDescriptor desc = {
     .label = wgpu_str("scalar_readback"),
-    .size = 8,
+    .size = 16,
     .usage = WGPUBufferUsage_MapRead | WGPUBufferUsage_CopyDst,
   };
   ctx->scalar_readback_buffer = wgpuDeviceCreateBuffer(ctx->device, &desc);
@@ -655,9 +655,12 @@ typedef WGPUBuffer gpu_mem;
 
 static int gpu_alloc_actual(struct futhark_context *ctx,
   size_t size, gpu_mem *mem_out) {
-  // Storage buffers bindings must have an effective size that is amultiple of
-  // 4, so we round up all allocations.
+  // Storage buffers bindings must have an effective size that is a multiple of
+  // 4, so we round up all allocations.  A binding must also be large enough to
+  // hold at least one element of the array type in the shader, even when the
+  // array is empty, so we never allocate less than 16 bytes.
   size = ((size + 4 - 1) / 4) * 4;
+  if (size < 16) { size = 16; }
   WGPUBufferDescriptor desc = {
     .size = size,
     .usage = WGPUBufferUsage_CopySrc
@@ -789,28 +792,117 @@ static void gpu_free_kernel(struct futhark_context *ctx,
   free(kernel);
 }
 
+// WebGPU requires the offsets and sizes of buffer copies and writes to be
+// multiples of 4.  We handle other regions by rounding them outwards to 4-byte
+// boundaries.  This stays within bounds because all buffers have sizes that are
+// multiples of 4 (see gpu_alloc_actual).  When writing, the bytes outside the
+// region must keep their old values, so we first read them back.  This is
+// slow, but only happens for arrays with elements smaller than 4 bytes.
+
+static int64_t wgpu_align_down(int64_t x) { return x & ~(int64_t)3; }
+static int64_t wgpu_align_up(int64_t x) { return (x + 3) & ~(int64_t)3; }
+
+static int memcpy_gpu2host(struct futhark_context *ctx,
+                           const char *provenance,
+                           bool sync,
+                           unsigned char *dst, int64_t dst_offset,
+                           gpu_mem src, int64_t src_offset,
+                           int64_t nbytes) {
+  (void)provenance;
+  (void)sync;
+  if (nbytes <= 0) { return FUTHARK_SUCCESS; }
+
+  int64_t lo = wgpu_align_down(src_offset);
+  int64_t buf_size = wgpu_align_up(src_offset + nbytes) - lo;
+
+  WGPUBufferDescriptor desc = {
+    .label = wgpu_str("tmp_readback"),
+    .size = buf_size,
+    .usage = WGPUBufferUsage_MapRead | WGPUBufferUsage_CopyDst,
+  };
+  WGPUBuffer readback = wgpuDeviceCreateBuffer(ctx->device, &desc);
+
+  WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(ctx->device, NULL);
+  wgpuCommandEncoderCopyBufferToBuffer(encoder, src, lo, readback, 0, buf_size);
+  WGPUCommandBuffer commandBuffer = wgpuCommandEncoderFinish(encoder, NULL);
+  wgpuQueueSubmit(ctx->queue, 1, &commandBuffer);
+
+  // TODO: Could we do an actual async mapping here if `sync` is false?
+  WGPUMapAsyncStatus status =
+    wgpu_map_buffer_sync(ctx->instance, readback, WGPUMapMode_Read, 0, buf_size);
+  if (status != WGPUMapAsyncStatus_Success) {
+    futhark_panic(-1, "memcpy_gpu2host: Failed to copy from device memory with error %d\n",
+                  status);
+  }
+
+  const unsigned char *mapped = wgpuBufferGetConstMappedRange(readback, 0, buf_size);
+  memcpy(dst + dst_offset, mapped + (src_offset - lo), nbytes);
+
+  wgpuBufferUnmap(readback);
+  wgpuBufferDestroy(readback);
+  return FUTHARK_SUCCESS;
+}
+
+static int memcpy_host2gpu(struct futhark_context *ctx,
+                           const char *provenance,
+                           bool sync,
+                           gpu_mem dst, int64_t dst_offset,
+                           const unsigned char *src, int64_t src_offset,
+                           int64_t nbytes) {
+  // There is no async copy to device memory at the moment (the spec for
+  // `writeBuffer` specifies that a copy of the data is always made and there is
+  // no other good option to use here), so we ignore the sync parameter.
+  (void)sync;
+  if (nbytes <= 0) { return FUTHARK_SUCCESS; }
+
+  int64_t lo = wgpu_align_down(dst_offset);
+  int64_t hi = wgpu_align_up(dst_offset + nbytes);
+
+  if (lo == dst_offset && hi == dst_offset + nbytes) {
+    wgpuQueueWriteBuffer(ctx->queue, dst, dst_offset, src + src_offset, nbytes);
+    return FUTHARK_SUCCESS;
+  }
+
+  unsigned char *buf = calloc(hi - lo, 1);
+  int err = FUTHARK_SUCCESS;
+  // There is nothing to preserve if the region starts aligned and its end is
+  // only followed by padding.
+  if (lo != dst_offset || (uint64_t)hi != wgpuBufferGetSize(dst)) {
+    err = memcpy_gpu2host(ctx, provenance, true, buf, 0, dst, lo, hi - lo);
+  }
+  if (err == FUTHARK_SUCCESS) {
+    memcpy(buf + (dst_offset - lo), src + src_offset, nbytes);
+    wgpuQueueWriteBuffer(ctx->queue, dst, lo, buf, hi - lo);
+  }
+  free(buf);
+  return err;
+}
+
 static int gpu_scalar_to_device(struct futhark_context *ctx,
                                 const char *provenance,
                                 gpu_mem dst, size_t offset, size_t size,
                                 void *src) {
-  wgpuQueueWriteBuffer(ctx->queue, dst, offset, src, size);
-  return FUTHARK_SUCCESS;
+  return memcpy_host2gpu(ctx, provenance, true, dst, offset, src, 0, size);
 }
 
+// Reading a scalar uses a dedicated readback buffer, which is large enough for
+// the rounded-out region of any scalar of at most 8 bytes.
 static int gpu_scalar_from_device(struct futhark_context *ctx,
                                   const char *provenance,
                                   void *dst,
                                   gpu_mem src, size_t offset, size_t size) {
+  (void)provenance;
   if (size > 8) {
     futhark_panic(-1, "gpu_scalar_from_device with size %zu > 8 is not allowed\n",
                   size);
   }
 
-  size_t copy_size = ((size + 4 - 1) / 4) * 4;
+  int64_t lo = wgpu_align_down(offset);
+  int64_t copy_size = wgpu_align_up(offset + size) - lo;
 
   WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(ctx->device, NULL);
   wgpuCommandEncoderCopyBufferToBuffer(encoder,
-    src, offset,
+    src, lo,
     ctx->scalar_readback_buffer, 0,
     copy_size);
 
@@ -825,107 +917,11 @@ static int gpu_scalar_from_device(struct futhark_context *ctx,
                   status);
   }
 
-  const void *mapped = wgpuBufferGetConstMappedRange(ctx->scalar_readback_buffer,
-                                                     0, copy_size);
-  memcpy(dst, mapped, size);
+  const unsigned char *mapped =
+    wgpuBufferGetConstMappedRange(ctx->scalar_readback_buffer, 0, copy_size);
+  memcpy(dst, mapped + (offset - lo), size);
 
   wgpuBufferUnmap(ctx->scalar_readback_buffer);
-  return FUTHARK_SUCCESS;
-}
-
-static int memcpy_host2gpu(struct futhark_context *ctx,
-                           const char *provenance,
-                           bool sync,
-                           gpu_mem dst, int64_t dst_offset,
-                           const unsigned char *src, int64_t src_offset,
-                           int64_t nbytes) {
-  if (nbytes <= 0) { return FUTHARK_SUCCESS; }
-
-  // There is no async copy to device memory at the moment (the spec for
-  // `writeBuffer` specifies that a copy of the data is always made and there is
-  // no other good option to use here), so we ignore the sync parameter.
-  (void)sync;
-
-  // Bound storage buffers and copy operations must have sizes multiple of 4.
-  // Note that writing more than `nbytes` is safe because we also pad all
-  // buffers when allocating them, but we can't guarantee that the `src` here
-  // has enough bytes.
-  // If this is a copy somewhere into the middle of `dst`, it is also possible
-  // we overwrite some data here, which would be bad.
-  int64_t copy_size = ((nbytes + 4 - 1) / 4) * 4;
-  if (copy_size > nbytes) {
-    // Potential for an issue if we're not at the end of the destination buffer.
-    // Find its size to make sure.
-    uint64_t dst_size = wgpuBufferGetSize(dst);
-    if (dst_offset + copy_size != dst_size) {
-      printf("memcpy_host2gpu: Potentially could corrupt data due to padding!\n");
-      //futhark_panic(-1, "memcpy_host2gpu: Would corrupt data due to padding!\n");
-    }
-  }
-
-  const unsigned char *buf;
-  int64_t offset;
-  if (copy_size > nbytes) {
-    buf = malloc(copy_size);
-    offset = 0;
-    memcpy((unsigned char*)buf, src + src_offset, copy_size);
-  }
-  else {
-    buf = src;
-    offset = src_offset;
-  }
-
-  wgpuQueueWriteBuffer(ctx->queue, dst, dst_offset, buf + offset, copy_size);
-
-  if (buf != src) {
-    free((void*)buf);
-  }
-
-  return FUTHARK_SUCCESS;
-}
-
-static int memcpy_gpu2host(struct futhark_context *ctx,
-                           const char *provenance,
-                           bool sync,
-                           unsigned char *dst, int64_t dst_offset,
-                           gpu_mem src, int64_t src_offset,
-                           int64_t nbytes) {
-  if (nbytes <= 0) { return FUTHARK_SUCCESS; }
-
-  // Bound storage buffers and copy operations must have sizes multiple of 4.
-  // Note that mapping more than `nbytes` is safe because we also pad all
-  // buffers when allocating them.
-  int64_t buf_size = ((nbytes + 4 - 1) / 4) * 4;
-
-  WGPUBufferDescriptor desc = {
-    .label = wgpu_str("tmp_readback"),
-    .size = buf_size,
-    .usage = WGPUBufferUsage_MapRead | WGPUBufferUsage_CopyDst,
-  };
-  WGPUBuffer readback = wgpuDeviceCreateBuffer(ctx->device, &desc);
-
-  WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(ctx->device, NULL);
-  wgpuCommandEncoderCopyBufferToBuffer(encoder,
-    src, src_offset,
-    readback, 0,
-    buf_size);
-
-  WGPUCommandBuffer commandBuffer = wgpuCommandEncoderFinish(encoder, NULL);
-  wgpuQueueSubmit(ctx->queue, 1, &commandBuffer);
-
-  // TODO: Could we do an actual async mapping here if `sync` is false?
-  WGPUMapAsyncStatus status =
-    wgpu_map_buffer_sync(ctx->instance, readback, WGPUMapMode_Read, 0, buf_size);
-  if (status != WGPUMapAsyncStatus_Success) {
-    futhark_panic(-1, "memcpy_gpu2host: Failed to copy from device memory with error %d\n",
-                  status);
-  }
-
-  const void *mapped = wgpuBufferGetConstMappedRange(readback, 0, buf_size);
-  memcpy(dst + dst_offset, mapped, nbytes);
-
-  wgpuBufferUnmap(readback);
-  wgpuBufferDestroy(readback);
   return FUTHARK_SUCCESS;
 }
 
@@ -934,30 +930,34 @@ static int gpu_memcpy(struct futhark_context *ctx,
                       gpu_mem dst, int64_t dst_offset,
                       gpu_mem src, int64_t src_offset,
                       int64_t nbytes) {
-  // Bound storage buffers and copy operations must have sizes multiple of 4.
-  // Note that copying more than `nbytes` is memory-safe because we also pad all
-  // buffers when allocating them.
-  // It could however corrupt data if the copy is in the middle of the buffer,
-  // like in host2gpu.
-  int64_t copy_size = ((nbytes + 4 - 1) / 4) * 4;
-  if (copy_size > nbytes) {
-    // Potential for an issue if we're not at the end of the destination buffer.
-    // Find its size to make sure.
-    uint64_t dst_size = wgpuBufferGetSize(dst);
-    if (dst_offset + copy_size != dst_size) {
-      printf("gpu_memcpy: Potentially could corrupt data due to padding!\n");
-      //futhark_panic(-1, "gpu_memcpy: Would corrupt data due to padding!\n");
+  if (nbytes <= 0) { return FUTHARK_SUCCESS; }
+
+  // Copying a rounded-up size is fine if the copy ends at the end of the
+  // destination, as then only padding is overwritten.
+  int64_t copy_size = wgpu_align_up(nbytes);
+  bool aligned = wgpu_align_down(dst_offset) == dst_offset
+    && wgpu_align_down(src_offset) == src_offset
+    && (copy_size == nbytes
+        || (uint64_t)(dst_offset + copy_size) == wgpuBufferGetSize(dst));
+
+  if (!aligned) {
+    unsigned char *buf = malloc(nbytes);
+    int err = memcpy_gpu2host(ctx, provenance, true, buf, 0, src, src_offset, nbytes);
+    if (err == FUTHARK_SUCCESS) {
+      err = memcpy_host2gpu(ctx, provenance, true, dst, dst_offset, buf, 0, nbytes);
     }
+    free(buf);
+    return err;
   }
+
   WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(ctx->device, NULL);
 
   if (dst == src) {
-    printf("gpu_memcpy: Cannot memcpy to/from the same buffer. Copying to temporary buffer first.\n");
-    // Allocate temporary buffer.
+    // WebGPU does not allow copying within the same buffer, so we go through a
+    // temporary buffer.
     gpu_mem tmp;
     gpu_alloc_actual(ctx, copy_size, &tmp);
 
-    // Copy data to temporary buffer and then to the destination.
     wgpuCommandEncoderCopyBufferToBuffer(encoder,
       src, src_offset, tmp, 0, copy_size);
     wgpuCommandEncoderCopyBufferToBuffer(encoder,
