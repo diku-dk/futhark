@@ -59,6 +59,8 @@ module Futhark.SoP.SoP
     padWithZero,
     isZero,
     hasConstant,
+    isFactorOf,
+    divTerm,
   )
 where
 

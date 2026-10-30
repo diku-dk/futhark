@@ -241,9 +241,9 @@ append2Sched (l, s, o, p, d) sched =
         , signals = d : (signals sched)
         }
 
-oneFullyConsumedMapRed :: ScremaForm SOACS -> Maybe (Lambda SOACS)
-oneFullyConsumedMapRed (ScremaForm map_lam [] [Reduce _com red_lam _ne])
-  | lambdaReturnType red_lam == lambdaReturnType map_lam = Just red_lam
+oneFullyConsumedMapRed :: ScremaForm SOACS -> Maybe (Lambda SOACS, [SubExp], Commutativity)
+oneFullyConsumedMapRed (ScremaForm map_lam [] [Reduce com red_lam ne])
+  | lambdaReturnType red_lam == lambdaReturnType map_lam = Just (red_lam, ne, com)
 oneFullyConsumedMapRed _ = Nothing
 
 -- | ToDo: extend for map-nest on top of the same binary operator.
@@ -275,7 +275,6 @@ fromFParam p = Param (paramAttrs p) (paramName p) $ fromDecl (paramDec p)
 stmtMatchesSchedule :: TopEnv -> Stm SOACS -> HLSched -> Bool
 stmtMatchesSchedule _ _ sched
   | length (dimlens sched) == 0  = True
-  -- error "In stmMatchesSchedule: empty schedule as argument!"
 stmtMatchesSchedule env stm sched =
   case getMBody stm of
     Nothing   -> False
@@ -292,5 +291,5 @@ bodyMatchesSchedule env body sched =
   foldl f False $ reverse $ stmsToList $ bodyStms body
   where
     f True _ = True
-    f _ stm = stmtMatchesSchedule env stm sched  
+    f _ stm = stmtMatchesSchedule env stm sched
 

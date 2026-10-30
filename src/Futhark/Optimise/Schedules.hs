@@ -198,7 +198,24 @@ applySchedOnStm (td_env, bu_env) stm@(Let soac_pat aux e)
     --    whether the rescheduling result needs to be adjusted and
     --    the operator and neutral element for the manifested accumulation,
     --    i.e., the case of a generalized reduction hoisted out.
-    let (_valid, _mb_accum_lam_ne) = checkValidSched sched $ Op soac
+    let (_valid, per_dim_kind, _mb_accum_lam_ne) = checkValidSched td_env sched stm
+    
+    trace ("\nTop-Down Env:" ++
+           "\n\tFwdTileTab: " ++ prettyString (M.toList $ appTilesFwd td_env) ++ 
+           "\n\tInvTileTab: " ++ prettyString (M.toList $ appTilesInv td_env) ++
+           "\n\tIotaTab: "    ++ prettyString (M.toList $ iotas td_env) ++
+           "\n\n\nHL-Sched: " ++ prettyString sched ++
+           "\n\n\nDim Kind: " ++ show per_dim_kind
+--           "\n\n\nORIGINAL SOAC STMT:" ++
+--           "\nPattern: "    ++ prettyString soac_pat++" = "++
+--           "\n" ++ prettyString soac ++
+--           "\n\n\nStripmined SOAC:\n"++ prettyString e_soac' ++
+--           "\n\n\nStripmined Prol:\n"++ prettyString prologue ++
+--           "\n\n\ninit-withacc:\n" ++ prettyString init_stms ++
+--           "\n\n\nManifestedRes:\n"++ prettyString withacc_stm ++
+--           "\n\n\nPermuted SOAC:\n"++ prettyString permuted_res_stms
+          ) $ error "After LMAD Sanity, Terminating!" 
+{--    
     -- 2. perform the split of original dimnesions, according schedule's @dimlens@
     --    this refers to simple stripmining, as in the case of matrix multiplication,
     --    or to introducing redundant computation by means of overlapping lmads.
@@ -226,7 +243,8 @@ applySchedOnStm (td_env, bu_env) stm@(Let soac_pat aux e)
            "\n\n\ninit-withacc:\n" ++ prettyString init_stms ++
            "\n\n\nManifestedRes:\n"++ prettyString withacc_stm ++
            "\n\n\nPermuted SOAC:\n"++ prettyString permuted_res_stms
-          ) $ error "Partially Transformed Schedule, Terminating!"  
+          ) $ error "Partially Transformed Schedule, Terminating!"
+--} 
 --    scope <- askScope
 --    body' <- fuseInBody scope $ lambdaBody map_lam
 --    error "unimplemented"

@@ -50,7 +50,7 @@ applyPermute env sched aux e_soac
     findSOACtype (Screma mm _inp_nms (ScremaForm map_lam [] [])) =
       map (`arrayOfRow` mm) $ lambdaReturnType map_lam
     findSOACtype (Screma _mm _inp_nms form)
-      | Just red_lam <- oneFullyConsumedMapRed form = lambdaReturnType red_lam
+      | Just (red_lam, _, _) <- oneFullyConsumedMapRed form = lambdaReturnType red_lam
     findSOACtype soac =
       error ("Unsupported soac in function findType of HLSched: "++prettyString soac)
 --
