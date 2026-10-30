@@ -295,7 +295,7 @@ generateDeviceFun fname device_func = do
               out_params
       let wgslFun =
             WGSL.Function
-              { WGSL.funName = "futrts_" <> nameToText fname,
+              { WGSL.funName = "futrts_" <> textToIdent (nameToText fname),
                 WGSL.funAttribs = mempty,
                 WGSL.funParams = in_params,
                 WGSL.funOutput = out_ptr_params,
