@@ -301,6 +301,7 @@ mkJsContext manifest =
       }
       async init(module) {
         this.m = module;
+        fix_asyncify_rewind(this.m);
         this.cfg = this.m._futhark_context_config_new();
         this.ctx = await ${newContext};
         this.entry = {};

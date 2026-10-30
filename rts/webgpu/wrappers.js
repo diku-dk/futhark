@@ -187,6 +187,25 @@ function read_output(fut, type, p) {
   return fut.types[type].from_native(fut.m.HEAP32[p / 4]);
 }
 
+// Asyncify resumes a suspended C function by calling it again without
+// arguments, which are then ignored, as the function restores its state from
+// the Asyncify stack.  However, WebAssembly cannot convert the missing argument
+// for an int64_t parameter to a BigInt, so resuming an entry point that takes
+// an i64 fails.  We remember the arguments of the most recent 'ccall', which is
+// the one in flight (Asyncify allows only one), and resume with those instead.
+// This relies on all calls into C going through 'ccall', and on all arguments
+// passed being 'number' (so 'ccall' passes them unchanged).
+function fix_asyncify_rewind(m) {
+  const ccall = m.ccall;
+  let args_in_flight = [];
+  m.ccall = (cfun, ret, types, args, opts) => {
+    args_in_flight = args;
+    return ccall(cfun, ret, types, args, opts);
+  };
+  m.Asyncify.doRewind = (ptr) =>
+    m.Asyncify.funcWrappers.get(m.Asyncify.getDataRewindFunc(ptr))(...args_in_flight);
+}
+
 // Call a C function that stores a value of the given type through its first
 // argument (after the context), and return that value.
 async function call_with_output(fut, cfun, type, args) {
