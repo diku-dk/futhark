@@ -838,12 +838,13 @@ onMapInputArrMultiDim lvl old_segments w env inps ws ws_O ws_data p arr = do
 
 flattenMapForInBlock ::
   FlattenOps ->
+  SegLevel ->
   Pat Type ->
   SubExp ->
   [VName] ->
   Lambda SOACS ->
   FlattenM ()
-flattenMapForInBlock ops pat w arrs map_lam = do
+flattenMapForInBlock ops lvl pat w arrs map_lam = do
   scope <- askScope
   lam <- preprocessLambda (castScope scope) map_lam
   let arrs' = zipWith MapArray arrs $ map paramType (lambdaParams lam)
@@ -851,7 +852,7 @@ flattenMapForInBlock ops pat w arrs map_lam = do
         distributeMapWith ops' scope pat [w] arrs' lam
   transformDistributed ops' mempty [w] distributed
   where
-    ops' = atSegLevel inBlockSegLevel ops
+    ops' = atSegLevel lvl ops
 
 resultMapMode :: InnerMapMode -> DistInputs -> Type -> InnerMapMode
 resultMapMode SingleDim _ _ = SingleDim

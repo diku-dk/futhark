@@ -55,7 +55,6 @@ module Futhark.Pass.Flatten.Incremental
 
     -- * Levels
     defaultSegLevel,
-    Intrablock.inBlockSegLevel,
     allowVersioning,
 
     -- * Various queries

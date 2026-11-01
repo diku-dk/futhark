@@ -4,7 +4,6 @@ module Futhark.Pass.Flatten.Intrablock
   ( IntrablockResult (..),
     intrablockParallelise,
     intraMinInnerPar,
-    inBlockSegLevel,
     InBlockMapTransformer,
   )
 where
@@ -46,6 +45,7 @@ data IntrablockResult = IntrablockResult
   }
 
 type InBlockMapTransformer =
+  SegLevel ->
   Pat Type ->
   SubExp ->
   [VName] ->
@@ -290,7 +290,7 @@ intrablockStm map_in_block stm@(Let pat aux e) = do
             =<< runBuilder_ (FOT.transformSOAC pat soac)
     Op (Screma w arrs form)
       | Just lam <- isMapSOAC form ->
-          map_in_block pat w arrs lam
+          map_in_block inBlockSegLevel pat w arrs lam
     Op (Screma w arrs form)
       | Just (post_lam, scans, mapfun) <- isMaposcanomapSOAC form,
         -- FIXME: Futhark.CodeGen.ImpGen.GPU.Block.compileBlockScan
