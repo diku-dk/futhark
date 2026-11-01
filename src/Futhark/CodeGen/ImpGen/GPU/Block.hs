@@ -29,7 +29,7 @@ import Futhark.IR.GPUMem
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Transform.Rename
 import Futhark.Util (chunks, mapAccumLM, takeLast)
-import Futhark.Util.IntegralExp (ceilDiv, rem)
+import Futhark.Util.IntegralExp (ceilDiv, quot, rem)
 import Prelude hiding (quot, rem)
 
 -- | @flattenArray k flat arr@ flattens the outer @k@ dimensions of
@@ -278,19 +278,20 @@ blockCoverSegSpace virt space m = do
   virt' <- blockCoverVirt virt space
   case virt' of
     SegVirt -> do
-      iters <- M.lookup dims . kernelChunkItersMap . kernelConstants <$> askEnv
-      case iters of
-        Nothing -> do
-          iterations <- dPrimVE "iterations" $ product $ map sExt32 dims'
-          blockLoop iterations $ \i -> do
+      iterations <- dPrimVE "iterations" $ product $ map sExt32 dims'
+      let onIteration i = do
             dIndexSpace (zip ltids dims') $ sExt64 i
             m
-        Just num_chunks -> localOps threadOperations $ do
-          let ltid = kernelLocalThreadId constants
-          sFor "chunk_i" num_chunks $ \chunk_i -> do
-            i <- dPrimVE "i" $ chunk_i * sExt32 tblock_size + ltid
-            dIndexSpace (zip ltids dims') $ sExt64 i
-            sWhen (inBounds (Slice (map (DimFix . le64) ltids)) dims') m
+      full_chunks <- M.lookup dims . kernelFullChunksMap . kernelConstants <$> askEnv
+      case full_chunks of
+        Nothing -> blockLoop iterations onIteration
+        Just num_full_chunks ->
+          peeledKernelLoop
+            (kernelLocalThreadId constants)
+            (sExt32 tblock_size)
+            num_full_chunks
+            iterations
+            onIteration
     SegNoVirt -> localOps threadOperations $ do
       zipWithM_ dPrimV_ ltids =<< localThreadIDs dims
       sWhen (isActive $ zip ltids dims) m
@@ -917,7 +918,7 @@ type SegOpSizes = S.Set [SubExp]
 -- | Various useful precomputed information for block-level SegOps.
 data Precomputed = Precomputed
   { pcSegOpSizes :: SegOpSizes,
-    pcChunkItersMap :: M.Map [SubExp] (Imp.TExp Int32)
+    pcFullChunksMap :: M.Map [SubExp] (Imp.TExp Int32)
   }
 
 -- | Find the sizes of nested parallelism in a t'SegOp' body.
@@ -946,13 +947,16 @@ segOpSizes = onStms
 precomputeConstants :: Count BlockSize (Imp.TExp Int64) -> Stms GPUMem -> CallKernelGen Precomputed
 precomputeConstants tblock_size stms = do
   let sizes = segOpSizes stms
-  iters_map <- M.fromList <$> mapM mkMap (S.toList sizes)
-  pure $ Precomputed sizes iters_map
+  -- Constant sizes are left to the kernel; see Note [Peeled block loops].
+  full_chunks_map <-
+    M.fromList <$> mapM mkMap (filter (any (isJust . subExpVar)) (S.toList sizes))
+  pure $ Precomputed sizes full_chunks_map
   where
     mkMap dims = do
       let n = product $ map Imp.pe64 dims
-      num_chunks <- dPrimVE "num_chunks" $ sExt32 $ n `ceilDiv` unCount tblock_size
-      pure (dims, num_chunks)
+      num_full_chunks <-
+        dPrimVE "num_full_chunks" $ sExt32 $ n `quot` unCount tblock_size
+      pure (dims, num_full_chunks)
 
 -- | Make use of various precomputed constants.
 precomputedConstants :: Precomputed -> InKernelGen a -> InKernelGen a
@@ -964,7 +968,7 @@ precomputedConstants pre m = do
           { kernelConstants =
               (kernelConstants env)
                 { kernelLocalIdMap = new_ids,
-                  kernelChunkItersMap = pcChunkItersMap pre
+                  kernelFullChunksMap = pcFullChunksMap pre
                 }
           }
   localEnv f m
