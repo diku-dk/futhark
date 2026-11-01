@@ -4,6 +4,7 @@ module Futhark.Pass.Flatten.Intrablock
   ( IntrablockResult (..),
     intrablockParallelise,
     intraMinInnerPar,
+    inBlockSegLevel,
     InBlockMapTransformer,
   )
 where
@@ -31,6 +32,9 @@ import Prelude hiding (log)
 -- in intra-group versions.
 intraMinInnerPar :: Int64
 intraMinInnerPar = 32
+
+inBlockSegLevel :: SegLevel
+inBlockSegLevel = SegThreadInBlock SegNoVirt
 
 data IntrablockResult = IntrablockResult
   { intraMinPar :: SubExp,
@@ -263,7 +267,7 @@ bindPatToRes pat res = forM_ (zip (patNames pat) res) $ \(pe_v, v) ->
 intrablockStm :: InBlockMapTransformer -> Stm SOACS -> FlattenM ()
 intrablockStm map_in_block stm@(Let pat aux e) = do
   scope <- askScope
-  let lvl = SegThreadInBlock SegNoVirt
+  let lvl = inBlockSegLevel
 
   case e of
     Loop merge form loopbody ->
