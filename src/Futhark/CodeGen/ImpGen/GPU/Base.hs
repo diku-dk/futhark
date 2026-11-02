@@ -17,7 +17,9 @@ module Futhark.CodeGen.ImpGen.GPU.Base
     blockReduce,
     warpLocal,
     blockScan,
+    blockScanChunkSize,
     blockLoop,
+    peeledKernelLoop,
     isActive,
     sKernel,
     sKernelThread,
@@ -107,9 +109,10 @@ data KernelConstants = KernelConstants
     -- | A mapping from dimensions of nested SegOps to already
     -- computed local thread IDs.  Only valid in non-virtualised case.
     kernelLocalIdMap :: M.Map [SubExp] [Imp.TExp Int32],
-    -- | Mapping from dimensions of nested SegOps to how many
-    -- iterations the virtualisation loop needs.
-    kernelChunkItersMap :: M.Map [SubExp] (Imp.TExp Int32)
+    -- | Mapping from dimensions of nested SegOps to how many full block-sized
+    -- chunks the virtualisation loop has; see 'peeledKernelLoop'. Constant dimensions
+    -- are not included.
+    kernelFullChunksMap :: M.Map [SubExp] (Imp.TExp Int32)
   }
 
 kernelGlobalThreadId, kernelLocalThreadId, kernelBlockId :: KernelConstants -> Imp.TExp Int32
@@ -226,6 +229,28 @@ kernelLoop tid num_threads n f =
           i <- dPrimVE "i" $ chunk_i * num_threads + tid
           sWhen (i .<. n) $ f i
 
+-- | @peeledKernelLoop tid num_threads num_full_chunks n f@ invokes @f@ on the
+-- iterations @tid@, @tid+num_threads@, and so on, below @n@, where
+-- @num_full_chunks@ must be @n `quot` num_threads@. Only the final partial
+-- chunk is bounds checked, so the body is generated twice; see Note [Peeled
+-- block loops]. The body must contain thread-level code.
+peeledKernelLoop ::
+  (IntExp t) =>
+  Imp.TExp t ->
+  Imp.TExp t ->
+  Imp.TExp t ->
+  Imp.TExp t ->
+  (Imp.TExp t -> InKernelGen ()) ->
+  InKernelGen ()
+peeledKernelLoop tid num_threads num_full_chunks n f =
+  localOps threadOperations $ do
+    sFor "chunk_i" num_full_chunks $ \chunk_i ->
+      f =<< dPrimVE "i" (sMinAs (chunk_i * num_threads + tid) (n - 1))
+    i <- dPrimVE "i" $ num_full_chunks * num_threads + tid
+    sWhen (i .<. n) $ f i
+  where
+    sMinAs x y = TPrimExp $ BinOpExp (SMin $ expIntType x) (untyped x) (untyped y)
+
 -- | Assign iterations of a for-loop to threads in the threadblock.  The
 -- passed-in function is invoked with the (symbolic) iteration.  For
 -- multidimensional loops, use 'blockCoverSpace'.
@@ -236,11 +261,13 @@ blockLoop ::
   InKernelGen ()
 blockLoop n f = do
   constants <- kernelConstants <$> askEnv
-  kernelLoop
-    (kernelLocalThreadId constants `sExtAs` n)
-    (kernelBlockSize constants `sExtAs` n)
-    n
-    f
+  let tid = kernelLocalThreadId constants `sExtAs` n
+      num_threads = kernelBlockSize constants `sExtAs` n
+  if n == num_threads
+    then localOps threadOperations $ f tid
+    else do
+      num_full_chunks <- dPrimVE "num_full_chunks" $ n `quot` num_threads
+      peeledKernelLoop tid num_threads num_full_chunks n f
 
 -- | Iterate collectively though a multidimensional space, such that
 -- all threads in the block participate.  The passed-in function is
@@ -332,8 +359,7 @@ inChunkScan constants seg_flag arrs_full_size lockstep_width block_size active a
         splitAt (length actual_params `div` 2) actual_params
       y_to_x =
         forM_ (zip x_params y_params) $ \(x, y) ->
-          when (isPrimParam x) $
-            copyDWIM (paramName x) [] (Var (paramName y)) []
+          copyDWIM (paramName x) [] (Var (paramName y)) []
 
   -- Set initial y values
   sComment "read input for in-block scan" $
@@ -398,8 +424,12 @@ inChunkScan constants seg_flag arrs_full_size lockstep_width block_size active a
     ltid = sExt64 ltid32
     array_scan = not $ all primType $ lambdaReturnType scan_lam
 
-    readInitial p arr =
+    readInitial p arr = do
       copyDWIMFix (paramName p) [] (Var arr) [ltid]
+      -- An array-typed element is also read @arrs_full_size@ elements along,
+      -- by 'readParam', so put it there too.
+      unless (isPrimParam p) $
+        copyDWIMFix arr [ltid + arrs_full_size] (Var arr) [ltid]
 
     readParam behind p arr
       | isPrimParam p =
@@ -408,10 +438,35 @@ inChunkScan constants seg_flag arrs_full_size lockstep_width block_size active a
           copyDWIMFix (paramName p) [] (Var arr) [ltid - behind + arrs_full_size]
 
     writeResult x y arr = do
-      when (isPrimParam x) $
-        copyDWIMFix arr [ltid] (Var $ paramName x) []
+      copyDWIMFix arr [ltid] (Var $ paramName x) []
+      unless (isPrimParam x) $
+        copyDWIMFix arr [ltid + arrs_full_size] (Var $ paramName x) []
       copyDWIM (paramName y) [] (Var $ paramName x) []
 
+-- | 'blockScan' splits the block into chunks of this size, which are scanned
+-- separately.  The only requirement is that it should not be less than the
+-- square root of the block size.  With 32, we will work on blocks of size 1024
+-- or smaller, which fits every device Troels has seen.  Still, it would be
+-- nicer if it were a runtime parameter.  Some day.
+blockScanChunkSize :: (Num a) => a
+blockScanChunkSize = 32
+
+-- | Scan the @w@ first elements of the given arrays, in place.
+--
+-- An array-typed element is kept twice: at index @i@, where the result is
+-- expected, and again at index @i + arrs_full_size@. It is the latter copy that
+-- a thread reads as its x operand, because the operator writes its result
+-- through its x parameter, which may well be the former. The elements from
+-- index @arrs_full_size + 'blockScanChunkSize'@ on are then used to save the
+-- elements of the first chunk, which are overwritten with the per-chunk
+-- carry-ins. Only the @w@ first elements need be within the /shape/ of the
+-- arrays, but all of the above must be backed by memory; see
+-- 'Futhark.CodeGen.ImpGen.GPU.Block.blockScanElems'.
+--
+-- The callers in "Futhark.CodeGen.ImpGen.GPU.SegScan.TwoPass" and
+-- "Futhark.CodeGen.ImpGen.GPU.SegRed" pass arrays whose elements /are/ the x
+-- and y parameters of the operator, so for them the copies that keep the two in
+-- step are redundant, but harmless.
 blockScan ::
   Maybe (Imp.TExp Int32 -> Imp.TExp Int32 -> Imp.TExp Bool) ->
   Imp.TExp Int64 ->
@@ -419,7 +474,7 @@ blockScan ::
   Lambda GPUMem ->
   [VName] ->
   InKernelGen ()
-blockScan seg_flag arrs_full_size w lam arrs = do
+blockScan seg_flag arrs_full_size w lam arrs = localOps threadOperations $ do
   constants <- kernelConstants <$> askEnv
   renamed_lam <- renameLambda lam
 
@@ -437,12 +492,7 @@ blockScan seg_flag arrs_full_size w lam arrs = do
   -- scanned separately. Typically, these chunks are at most the
   -- lockstep width, which enables barrier-free execution inside them.
   --
-  -- We hardcode the chunk size here. The only requirement is that it
-  -- should not be less than the square root of the block size. With
-  -- 32, we will work on blocks of size 1024 or smaller, which fits
-  -- every device Troels has seen. Still, it would be nicer if it were
-  -- a runtime parameter. Some day.
-  let chunk_size = 32
+  let chunk_size = blockScanChunkSize
       simd_width = kernelWaveSize constants
       chunk_id = ltid32 `quot` chunk_size
       in_chunk_id = ltid32 - chunk_id * chunk_size
@@ -541,8 +591,7 @@ blockScan seg_flag arrs_full_size w lam arrs = do
 
       write_final_result =
         forM_ (zip x_params arrs) $ \(p, arr) ->
-          when (isPrimParam p) $
-            copyDWIMFix arr [ltid] (Var $ paramName p) []
+          copyDWIMFix arr [ltid] (Var $ paramName p) []
 
   sComment "carry-in for every block except the first" $
     localOps threadOperations $ do
@@ -554,13 +603,15 @@ blockScan seg_flag arrs_full_size w lam arrs = do
 
   sComment "restore correct values for first block" $
     sWhen (is_first_block .&&. ltid_in_bounds) $
-      forM_ (zip3 x_params y_params arrs) $ \(x, y, arr) ->
+      forM_ (zip3 x_params y_params arrs) $ \(_x, y, arr) ->
         if isPrimParam y
           then copyDWIMFix arr [ltid] (Var $ paramName y) []
-          else copyDWIMFix (paramName x) [] (Var arr) [arrs_full_size + ltid]
+          else copyDWIMFix arr [ltid] (Var arr) [arrs_full_size + ltid]
 
   barrier
 
+-- | Reduce the @w@ first elements of the given arrays, leaving the result in
+-- element zero of each. The others are clobbered.
 blockReduce ::
   Imp.TExp Int32 ->
   Lambda GPUMem ->
@@ -594,12 +645,7 @@ blockReduceWithOffset offset w lam arrs = do
         copyDWIMFix (paramName param) [] (Var arr) [sExt64 i]
 
       writeReduceOpResult param arr =
-        when (isPrimParam param) $
-          copyDWIMFix arr [sExt64 local_tid] (Var $ paramName param) []
-
-      writeArrayOpResult param arr =
-        unless (isPrimParam param) $
-          copyDWIMFix arr [sExt64 local_tid] (Var $ paramName param) []
+        copyDWIMFix arr [sExt64 local_tid] (Var $ paramName param) []
 
   let (reduce_acc_params, reduce_arr_params) =
         splitAt (length arrs) $ lambdaParams lam
@@ -660,12 +706,6 @@ blockReduceWithOffset offset w lam arrs = do
   in_wave_reductions
   cross_wave_reductions
   errorsync
-
-  unless (all isPrimParam reduce_acc_params) $
-    sComment "Copy array-typed operands to result array" $
-      sWhen (local_tid .==. 0) $
-        localOps threadOperations $
-          zipWithM_ writeArrayOpResult reduce_acc_params arrs
 
 compileThreadOp :: OpCompiler GPUMem KernelEnv Imp.KernelOp
 compileThreadOp pat (Alloc size space) =
@@ -1005,7 +1045,7 @@ kernelInitialisationSimple num_tblocks tblock_size = do
             kernelNumThreads = sExt32 (tblock_size' * num_tblocks'),
             kernelWaveSize = Imp.le32 wave_size,
             kernelLocalIdMap = mempty,
-            kernelChunkItersMap = mempty
+            kernelFullChunksMap = mempty
           }
 
   let set_constants = do
@@ -1095,7 +1135,7 @@ simpleKernelConstants kernel_size desc = do
             kernelNumThreads = sExt32 (tblock_size' * num_tblocks'),
             kernelWaveSize = 0,
             kernelLocalIdMap = mempty,
-            kernelChunkItersMap = mempty
+            kernelFullChunksMap = mempty
           }
 
       wrapKernel m = do
@@ -1477,3 +1517,25 @@ compileThreadResult space pe (Returns _ _ what) = do
   copyDWIMFix (patElemName pe) is what []
 compileThreadResult _ _ TileReturns {} =
   compilerBugS "compileThreadResult: TileReturns unhandled."
+
+-- Note [Peeled block loops]
+--
+-- When the threads of a block cover an iteration space larger than the block
+-- (virtualised SegOps), each thread handles one iteration per block-sized
+-- chunk, and only the final chunk can be partial. A bounds check in every chunk
+-- keeps the kernel compiler from overlapping the memory accesses of consecutive
+-- chunks, which makes memory-bound loops considerably slower.
+-- 'peeledKernelLoop' therefore runs the full chunks without a check, and
+-- generates the body again for the final chunk, with a bounds check.
+--
+-- A bounds check also tells the kernel compiler that the iteration is in
+-- bounds, which lets it remove checks in the body that follow from it, such as
+-- those of accumulator updates, which likewise keep memory accesses from
+-- overlapping. To retain that information, the iteration is clamped to @n-1@ in
+-- the full chunks, which does not change its value. This is a bit of a hack,
+-- but it seems robust.
+--
+-- For the same reason, the number of full chunks should be computed in the
+-- kernel when it is a constant, rather than be passed in as a kernel argument,
+-- so that the kernel compiler can unroll the loop. This is why
+-- 'kernelFullChunksMap' does not contain constant dimensions.

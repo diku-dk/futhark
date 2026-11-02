@@ -542,7 +542,10 @@ static int gpu_lmad_copy(struct futhark_context* ctx, const char* provenance,
   int perm[8];
   for (int i = 0; i < r; i++) {
     int j = i;
-    while (j > 0 && llabs(src_strides[perm[j-1]]) > llabs(src_strides[i])) {
+    while (j > 0 &&
+           (llabs(src_strides[perm[j-1]]) > llabs(src_strides[i])
+            || (llabs(src_strides[perm[j-1]]) == llabs(src_strides[i])
+                && llabs(dst_strides[perm[j-1]]) > llabs(dst_strides[i])))) {
       perm[j] = perm[j-1];
       j--;
     }

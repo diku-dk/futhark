@@ -10,8 +10,9 @@ where
 
 import Control.Monad
 import Control.Monad.RWS
-import Control.Monad.Writer
+import Control.Monad.State
 import Data.Map qualified as M
+import Data.Maybe
 import Data.Set qualified as S
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.GPU hiding (HistOp)
@@ -41,6 +42,7 @@ data IntrablockResult = IntrablockResult
   }
 
 type InBlockMapTransformer =
+  SegLevel ->
   Pat Type ->
   SubExp ->
   [VName] ->
@@ -51,9 +53,10 @@ foldBinOp' :: (MonadBuilder m) => BinOp -> [SubExp] -> m (Exp (Rep m))
 foldBinOp' _ [] = eSubExp $ intConst Int64 1
 foldBinOp' bop (x : xs) = foldBinOp bop x xs
 
--- | Extract the intra-block parallelism used by the body.
-findParallelism :: KernelBody GPU -> [[SubExp]]
-findParallelism = S.toList . execWriter . onKernelBody
+-- | Extract the intra-block parallelism used by the body, paired with whether
+-- it is virtualised.
+findParallelism :: KernelBody GPU -> [([SubExp], SegVirt)]
+findParallelism = S.toList . flip execState mempty . onKernelBody
   where
     onKernelBody = mapM_ onStm . bodyStms
     onBody = mapM_ onStm . bodyStms
@@ -64,36 +67,39 @@ findParallelism = S.toList . execWriter . onKernelBody
           walkOnOp = onOp
         }
     onOp (SegOp op) = do
-      tell $ S.singleton $ segSpaceDims $ segSpace op
+      modify $ S.insert (segSpaceDims $ segSpace op, segVirt (segLevel op))
       onKernelBody $ segBody op
     onOp _ = pure ()
 
-computeThreadBlockSize :: [[SubExp]] -> [[SubExp]] -> FlattenM (SubExp, SubExp)
-computeThreadBlockSize wss_min wss_avail = do
-  ws_min <-
-    mapM (letSubExp "one_intra_par_min" <=< foldBinOp' (Mul Int64 OverflowUndef)) $
-      filter (not . null) wss_min
-  ws_avail <-
-    mapM (letSubExp "one_intra_par_avail" <=< foldBinOp' (Mul Int64 OverflowUndef)) $
-      filter (not . null) wss_avail
+onlyNonVirt :: [([SubExp], SegVirt)] -> [[SubExp]]
+onlyNonVirt = mapMaybe f
+  where
+    f (_, SegVirt) = Nothing
+    f (ws, _) = Just ws
 
-  -- The amount of parallelism available *in the worst case* is
-  -- equal to the smallest parallel loop, or *at least* 1.
+computeThreadBlockSize :: [[SubExp]] -> FlattenM (SubExp, SubExp)
+computeThreadBlockSize [] = do
+  tblock_size <- getSize "tblock_size" SizeThreadBlock
+  pure (tblock_size, tblock_size)
+computeThreadBlockSize wss = do
+  ws <-
+    mapM (letSubExp "one_intra_par" <=< foldBinOp' (Mul Int64 OverflowUndef)) $
+      filter (not . null) wss
+
+  -- The amount of parallelism available *in the worst case* is equal to the
+  -- smallest parallel loop.
   intra_avail_par <-
-    letSubExp "intra_avail_par" =<< foldBinOp' (SMin Int64) ws_avail
+    letSubExp "intra_avail_par" =<< foldBinOp' (SMin Int64) ws
 
   tblock_size <- newVName "computed_tblock_size"
-  -- The group size is either the maximum of the minimum parallelism
-  -- exploited, or the desired parallelism (bounded by the max group
-  -- size) in case there is no minimum.
+
+  -- The group size is either the maximum of the minimum parallelism exploited,
+  -- or the desired parallelism (bounded by the max group size) in case there is
+  -- no minimum, but in all cases at least one.
   letBindNames [tblock_size]
-    =<< if null ws_min
-      then
-        eBinOp
-          (SMin Int64)
-          (eSubExp =<< letSubExp "max_tblock_size" (Op $ SizeOp $ GetSizeMax SizeThreadBlock))
-          (eSubExp intra_avail_par)
-      else foldBinOp' (SMax Int64) ws_min
+    =<< if null ws
+      then eSubExp =<< letSubExp "max_tblock_size" (Op $ SizeOp $ GetSizeMax SizeThreadBlock)
+      else foldBinOp' (SMax Int64) (intConst Int64 1 : ws)
   pure (intra_avail_par, Var tblock_size)
 
 -- | Check whether this result is actually something that is acceptable to use:
@@ -155,13 +161,14 @@ intrablockParallelise map_in_block segments env inps dist_res _pat aux w arrs la
   let new_segments = segments <> pure w
       wss = findParallelism kbody
 
-  noNonuniformPar (freeIn wss) $ do
+  noNonuniformPar (freeIn $ map fst wss) $ do
     ((intra_avail_par, tblock_size, kspace, num_tblocks), prelude_stms) <-
       collectStms $ do
         num_tblocks <-
           letSubExp "intra_num_tblocks"
             =<< foldBinOp' (Mul Int64 OverflowUndef) new_segments
-        (intra_avail_par, tblock_size) <- computeThreadBlockSize wss wss
+        (intra_avail_par, tblock_size) <-
+          computeThreadBlockSize $ onlyNonVirt wss
         gtids <- mapM (const $ newVName "gtid") new_segments
         kspace <- mkSegSpace $ zip gtids new_segments
         pure (intra_avail_par, tblock_size, kspace, num_tblocks)
@@ -257,7 +264,11 @@ bindPatToRes pat res = forM_ (zip (patNames pat) res) $ \(pe_v, v) ->
 intrablockStm :: InBlockMapTransformer -> Stm SOACS -> FlattenM ()
 intrablockStm map_in_block stm@(Let pat aux e) = do
   scope <- askScope
-  let lvl = SegThreadInBlock SegNoVirt
+  let lvl
+        | "intrablock_virtualise" `inAttrs` stmAuxAttrs aux =
+            SegThreadInBlock SegVirt
+        | otherwise =
+            SegThreadInBlock SegNoVirt
 
   case e of
     Loop merge form loopbody ->
@@ -280,10 +291,10 @@ intrablockStm map_in_block stm@(Let pat aux e) = do
             =<< runBuilder_ (FOT.transformSOAC pat soac)
     Op (Screma w arrs form)
       | Just lam <- isMapSOAC form ->
-          map_in_block pat w arrs lam
+          map_in_block lvl pat w arrs lam
     Op (Screma w arrs form)
       | Just (post_lam, scans, mapfun) <- isMaposcanomapSOAC form,
-        -- FIXME: Futhark.CodeGen.ImpGen.GPU.Block.compileGroupOp
+        -- FIXME: Futhark.CodeGen.ImpGen.GPU.Block.compileBlockScan
         -- cannot handle multiple scan operators yet.
         Scan scanfun nes <- singleScan scans -> do
           let scanfun' = soacsLambdaToGPU scanfun

@@ -55,7 +55,6 @@ module Futhark.Pass.Flatten.Incremental
 
     -- * Levels
     defaultSegLevel,
-    inBlockSegLevel,
     allowVersioning,
 
     -- * Various queries
@@ -83,9 +82,6 @@ import Prelude hiding (div, quot, rem)
 
 defaultSegLevel :: SegLevel
 defaultSegLevel = SegThread SegVirt Nothing
-
-inBlockSegLevel :: SegLevel
-inBlockSegLevel = SegThreadInBlock SegNoVirt
 
 allowVersioning :: SegLevel -> Bool
 allowVersioning SegThreadInBlock {} = False
