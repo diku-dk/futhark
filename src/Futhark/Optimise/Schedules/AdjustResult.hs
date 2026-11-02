@@ -36,7 +36,7 @@ pe0 = ValueExp $ IntValue $ Int64Value 0
 --     3. the with-acc statement that uses accumulators
 --           to "copy" the result in the original shape
 --   ToDo:
---     1. treat the case of an accumulated reduction:
+--     1. Treat the case of an accumulated reduction:
 --          - initialize with replicate of neutral elem instead of scratch
 --          - accumulate with operator instead of simple assignment
 --     2. Treat the case of an originally-reduced dimension being

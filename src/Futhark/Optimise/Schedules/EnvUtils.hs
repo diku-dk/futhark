@@ -96,10 +96,11 @@ data TopEnv = TopEnv
   { bdy_res     :: [SubExp]
   , appTilesFwd :: FwdTileTab
   , appTilesInv :: InvTileTab
-  , iotas       :: M.Map VName (SubExp, PrimExp VName, SoP VName) -- , Stms SOACS
+  , iotas       :: M.Map VName (SubExp, PrimExp VName, SoP VName)
     -- ^ binds the name of an iota array to its size
   , inv_iotas   :: M.Map (PrimExp VName) (VName, SubExp, SoP VName)
     -- ^ binds a size pexp to the name of a iota and its SubExp size
+    --   ToDo: it should probably have SubExp as key, no?
   , scalars     :: M.Map VName (PrimExp VName, SoP VName)
     -- ^ binds the name of a scalar var to its expression
   , arrayLits   :: M.Map VName [(PrimExp VName, SoP VName)]
