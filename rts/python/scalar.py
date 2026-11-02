@@ -481,7 +481,7 @@ def fptoui_T_i8(x):
     if np.isnan(x) or x < 0 or x >= (1 << 8):
         return np.int8(0)
     else:
-        return np.int8(np.trunc(x))
+        return np.uint8(np.trunc(x)).astype(np.int8)
 
 
 fptoui_f16_i8 = fptoui_f32_i8 = fptoui_f64_i8 = fptoui_T_i8
@@ -491,7 +491,7 @@ def fptoui_T_i16(x):
     if np.isnan(x) or x < 0 or x >= (1 << 16):
         return np.int16(0)
     else:
-        return np.int16(np.trunc(x))
+        return np.uint16(np.trunc(x)).astype(np.int16)
 
 
 fptoui_f16_i16 = fptoui_f32_i16 = fptoui_f64_i16 = fptoui_T_i16
@@ -501,7 +501,7 @@ def fptoui_T_i32(x):
     if np.isnan(x) or x < 0 or x >= (1 << 32):
         return np.int32(0)
     else:
-        return np.int32(np.trunc(x))
+        return np.uint32(np.trunc(x)).astype(np.int32)
 
 
 fptoui_f16_i32 = fptoui_f32_i32 = fptoui_f64_i32 = fptoui_T_i32
@@ -511,7 +511,7 @@ def fptoui_T_i64(x):
     if np.isnan(x) or x < 0 or x >= (1 << 64):
         return np.int64(0)
     else:
-        return np.int64(np.trunc(x))
+        return np.uint64(np.trunc(x)).astype(np.int64)
 
 
 fptoui_f16_i64 = fptoui_f32_i64 = fptoui_f64_i64 = fptoui_T_i64
