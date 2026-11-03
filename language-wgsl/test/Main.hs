@@ -140,6 +140,59 @@ floatLitTests =
         fmap render (floatExp 65505 F16) @?= Nothing
     ]
 
+-- | An assignment's left-hand side is an assignable expression.  See
+-- https://www.w3.org/TR/WGSL/#assignment.
+assignTests :: TestTree
+assignTests =
+  testGroup
+    "Assign"
+    [ testCase "variable" $
+        render (Assign (VarExp "x") (VarExp "y")) @?= "x = y",
+      testCase "dereference" $
+        render (Assign (UnOpExp "*" (VarExp "p")) (VarExp "x")) @?= "(*p) = x",
+      testCase "index" $
+        render (Assign (IndexExp "a" (IntExp 0 AbstractInt)) (IntExp 1 AbstractInt))
+          @?= "a[0] = 1",
+      testCase "member" $
+        render (Assign (FieldExp (VarExp "s") "f") (VarExp "y")) @?= "s.f = y"
+    ]
+
+-- | A return statement supplies a value exactly when the enclosing function
+-- has a return type.  See https://www.w3.org/TR/WGSL/#return-statement.
+returnTests :: TestTree
+returnTests =
+  testGroup
+    "Return"
+    [ testCase "without value" $
+        render (Return Nothing) @?= "return",
+      testCase "with value" $
+        render (Return (Just (VarExp "x"))) @?= "return x"
+    ]
+
+-- | A function declaration has at most one return type, which may carry
+-- attributes.  See https://www.w3.org/TR/WGSL/#function-declaration-sec.
+funDeclTests :: TestTree
+funDeclTests =
+  testGroup
+    "FunDecl"
+    [ testCase "without return type" $
+        render (FunDecl "f" [] [Param "a" (Prim Int32) []] Nothing (Call "g" [VarExp "a"]))
+          @?= "\nfn f(\n  a : i32\n) {\n  g(a);\n}",
+      testCase "with return type" $
+        render (FunDecl "f" [] [] (Just ([], Prim Int32)) (Return (Just (IntExp 1 AbstractInt))))
+          @?= "\nfn f() -> i32 {\n  return 1;\n}",
+      testCase "with return attributes" $
+        render
+          ( FunDecl
+              "vs"
+              [Attrib "vertex" []]
+              []
+              (Just ([Attrib "builtin" [VarExp "position"]], Prim (Vec4 Float32)))
+              (Return (Just (VarExp "p")))
+          )
+          @?= "@vertex\nfn vs() -> @builtin(position) vec4<f32> {\n  return p;\n}"
+    ]
+
 tests :: TestTree
 tests =
   testGroup
@@ -147,7 +200,8 @@ tests =
     [ testGroup "types" [pointerTests],
       testGroup "memory" [accessModeTests],
       testGroup "expressions" [intLitTests, floatLitTests],
-      testGroup "declarations" [varDeclTests]
+      testGroup "statements" [assignTests, returnTests],
+      testGroup "declarations" [varDeclTests, funDeclTests]
     ]
 
 main :: IO ()

@@ -36,7 +36,6 @@ module Language.WGSL
   )
 where
 
-import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Prettyprinter
 
@@ -145,12 +144,16 @@ data Stmt
   | Seq Stmt Stmt
   | Let Ident Exp
   | DeclareVar Ident Type
-  | Assign Ident Exp
-  | AssignIndex Ident Exp Exp
+  | -- | The left-hand side must be an assignable expression.  See
+    -- https://www.w3.org/TR/WGSL/#assignment.
+    Assign Exp Exp
   | If Exp Stmt Stmt
   | For Ident Exp Exp Stmt Stmt
   | While Exp Stmt
   | Call Ident [Exp]
+  | -- | The expression must be present exactly when the enclosing function
+    -- has a return type.
+    Return (Maybe Exp)
 
 data Attrib = Attrib Ident [Exp]
 
@@ -162,7 +165,7 @@ data FunDecl = FunDecl
   { funName :: Ident,
     funAttribs :: [Attrib],
     funParams :: [Param],
-    funOutput :: [Param],
+    funReturn :: Maybe ([Attrib], Type),
     funBody :: Stmt
   }
 
@@ -307,9 +310,7 @@ instance Pretty Stmt where
   pretty (Seq s1 s2) = semistack [pretty s1, pretty s2]
   pretty (Let x e) = "let" <+> pretty x <+> "=" <+> pretty e
   pretty (DeclareVar x t) = "var" <+> pretty x <+> ":" <+> pretty t
-  pretty (Assign x e) = pretty x <+> "=" <+> pretty e
-  pretty (AssignIndex x i e) =
-    pretty x <> brackets (pretty i) <+> "=" <+> pretty e
+  pretty (Assign lhs e) = pretty lhs <+> "=" <+> pretty e
   pretty (If cond Skip Skip) = "if" <+> pretty cond <+> "{ }"
   pretty (If cond th Skip) =
     "if"
@@ -360,6 +361,8 @@ instance Pretty Stmt where
       <> ";"
         </> "}"
   pretty (Call f args) = pretty f <> parens (commasep $ map pretty args)
+  pretty (Return Nothing) = "return"
+  pretty (Return (Just e)) = "return" <+> pretty e
 
 instance Pretty Attrib where
   pretty (Attrib name []) = "@" <> pretty name
@@ -379,44 +382,25 @@ prettyParams :: [Param] -> Doc a
 prettyParams [] = "()"
 prettyParams params = "(" </> indent 2 (commastack (map pretty params)) </> ")"
 
-prettyAssignOutParams :: [Param] -> Doc a
-prettyAssignOutParams [] = ""
-prettyAssignOutParams params = stack (map prettyAssign params)
-  where
-    prettyAssign (Param name _ _) =
-      indent 2 "*" <> pretty name <> " = " <> pretty (T.stripSuffix "_out" name) <> ";"
-
 instance Pretty FunDecl where
-  pretty (FunDecl name attribs in_params out_params body) = do
-    stack $ hsep (map pretty attribs) : function
+  pretty (FunDecl name attribs params ret body) =
+    stack
+      [ hsep (map pretty attribs),
+        header,
+        indent 2 (pretty body) <> ";",
+        "}"
+      ]
     where
-      funBody = indent 2 (pretty body) <> ";"
-      funDecls =
-        let local_decls =
-              map
-                ( \(Param v typ _) -> case typ of
-                    Pointer t _ _ -> DeclareVar (fromMaybe v (T.stripSuffix "_out" v)) (Prim t)
-                    _ -> error "Can only return primitive types!"
-                )
-                out_params
-         in stack (map (\decl -> indent 2 (pretty decl) <> ";") local_decls)
-      function = case out_params of
-        [] ->
-          ["fn" <+> pretty name <> prettyParams in_params <+> "{", funBody, "}"]
-        [Param ret_id (Pointer t _ _) _] ->
-          [ "fn" <+> pretty name <> prettyParams in_params <+> "->" <+> pretty t <+> "{",
-            funDecls,
-            funBody,
-            indent 2 "return " <> pretty (T.stripSuffix "_out" ret_id) <> ";",
-            "}"
-          ]
-        _ ->
-          [ "fn" <+> pretty name <> prettyParams (in_params ++ out_params) <+> "{",
-            funDecls,
-            funBody,
-            prettyAssignOutParams out_params,
-            "}"
-          ]
+      header = case ret of
+        Nothing ->
+          "fn" <+> pretty name <> prettyParams params <+> "{"
+        Just (ret_attribs, t) ->
+          "fn"
+            <+> pretty name
+            <> prettyParams params
+            <+> "->"
+            <+> hsep (map pretty ret_attribs ++ [pretty t])
+            <+> "{"
 
 instance Pretty Field where
   pretty (Field name typ) = pretty name <+> ":" <+> pretty typ
