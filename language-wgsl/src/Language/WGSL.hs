@@ -10,8 +10,14 @@
 module Language.WGSL
   ( Ident,
     PrimType (..),
-    hsLayout,
-    structLayout,
+    roundUp,
+    alignOf,
+    sizeOf,
+    elementStride,
+    hostShareable,
+    alignOfStruct,
+    offsetOfMembers,
+    sizeOfStruct,
     Type (..),
     BinOp,
     UnOp,
@@ -57,46 +63,123 @@ data PrimType
   | Atomic PrimType
   deriving (Show)
 
--- | AlignOf and SizeOf of host-shareable primitive types.
---
--- See https://www.w3.org/TR/WGSL/#alignment-and-size.
-hsLayout :: PrimType -> Maybe (Int, Int)
-hsLayout Bool = Nothing
-hsLayout Int32 = Just (4, 4)
-hsLayout UInt32 = Just (4, 4)
-hsLayout Float16 = Just (2, 2)
-hsLayout Float32 = Just (4, 4)
-hsLayout (Vec2 t) =
-  (\(a, s) -> (a * 2, s * 2)) <$> hsLayout t
-hsLayout (Vec3 t) =
-  (\(a, s) -> (a * 4, s * 3)) <$> hsLayout t
-hsLayout (Vec4 t) =
-  (\(a, s) -> (a * 4, s * 4)) <$> hsLayout t
-hsLayout (Atomic t) = hsLayout t
-
--- | Field offsets, AlignOf, and SizeOf of a host-shareable struct type with the
--- given fields.
-structLayout :: [PrimType] -> Maybe ([Int], Int, Int)
-structLayout [] = Nothing
-structLayout fields = do
-  fieldLayouts <- mapM hsLayout fields
-  let (fieldAligns, fieldSizes) = unzip fieldLayouts
-  let structAlign = maximum fieldAligns
-  let fieldOffsets =
-        scanl
-          (\prev_off (al, prev_sz) -> roundUp al (prev_off + prev_sz))
-          0
-          (zip (drop 1 fieldAligns) fieldSizes)
-  let structSize = roundUp structAlign (last fieldOffsets + last fieldSizes)
-  pure (fieldOffsets, structAlign, structSize)
-  where
-    roundUp k n = ceiling ((fromIntegral n :: Double) / fromIntegral k) * k
-
 data Type
   = Prim PrimType
   | Array PrimType (Maybe Exp)
   | Named Ident
   | Pointer PrimType AddressSpace (Maybe AccessMode)
+
+-- | @roundUp(k, n)@, as used by the layout rules.
+roundUp :: Int -> Int -> Int
+roundUp k n = ((n + k - 1) `div` k) * k
+
+-- | @AlignOf@ of a primitive type.  Every primitive type has a fixed
+-- footprint, so this is total, even for the ones that are not
+-- 'hostShareable'.  See
+-- https://www.w3.org/TR/WGSL/#alignment-and-size.
+primAlignOf :: PrimType -> Int
+primAlignOf Bool = 4
+primAlignOf Int32 = 4
+primAlignOf UInt32 = 4
+primAlignOf Float16 = 2
+primAlignOf Float32 = 4
+primAlignOf (Vec2 t) = 2 * primAlignOf t
+primAlignOf (Vec3 t) = 4 * primAlignOf t
+primAlignOf (Vec4 t) = 4 * primAlignOf t
+primAlignOf (Atomic _) = 4
+
+-- | @SizeOf@ of a primitive type.
+primSizeOf :: PrimType -> Int
+primSizeOf Bool = 4
+primSizeOf Int32 = 4
+primSizeOf UInt32 = 4
+primSizeOf Float16 = 2
+primSizeOf Float32 = 4
+primSizeOf (Vec2 t) = 2 * primSizeOf t
+primSizeOf (Vec3 t) = 3 * primSizeOf t
+primSizeOf (Vec4 t) = 4 * primSizeOf t
+primSizeOf (Atomic _) = 4
+
+-- | @AlignOf@ of a type, or 'Nothing' if it has none. The latter occurs for
+-- named types and pointers.
+alignOf :: Type -> Maybe Int
+alignOf (Prim t) = Just $ primAlignOf t
+alignOf (Array t _) = Just $ primAlignOf t
+alignOf (Named _) = Nothing
+alignOf Pointer {} = Nothing
+
+-- | The element stride of an array with the given element type, which is the
+-- element size rounded up to the element alignment. See
+-- https://www.w3.org/TR/WGSL/#array-layout-examples.
+elementStride :: PrimType -> Int
+elementStride t = roundUp (primAlignOf t) (primSizeOf t)
+
+-- | @SizeOf@ of a type. An array has a size only if its element count is a
+-- literal. Named types and pointers have no size.
+sizeOf :: Type -> Maybe Int
+sizeOf (Prim t) = Just $ primSizeOf t
+sizeOf (Array t (Just (IntExp n _)))
+  | n >= 0 = Just $ n * elementStride t
+sizeOf Array {} = Nothing
+sizeOf (Named _) = Nothing
+sizeOf Pointer {} = Nothing
+
+-- | Whether a type is host-shareable, and so may be the store type of a uniform
+-- or storage buffer. A named type is not resolved here, so it is reported as
+-- not host-shareable. See https://www.w3.org/TR/WGSL/#host-shareable-types.
+hostShareable :: Type -> Bool
+hostShareable (Prim t) = numeric t
+  where
+    -- bool is not a numeric scalar type, and a vector of bool is not a
+    -- numeric vector type.
+    numeric Bool = False
+    numeric (Vec2 t') = numeric t'
+    numeric (Vec3 t') = numeric t'
+    numeric (Vec4 t') = numeric t'
+    numeric _ = True
+-- A fixed-size array is host-shareable only if it has a creation-fixed
+-- footprint, so its element count must be a literal. A runtime-sized array has
+-- no count at all.
+hostShareable (Array t Nothing) = hostShareable (Prim t)
+hostShareable (Array t (Just (IntExp _ _))) = hostShareable (Prim t)
+hostShareable Array {} = False
+hostShareable (Named _) = False
+hostShareable Pointer {} = False
+
+-- | @AlignOf@ of a structure with the given member types, which is the greatest
+-- alignment of any member. Returns 'Nothing' if there are no members, since a
+-- WGSL structure must have at least one, or if some member has no @AlignOf@.
+-- Layout attributes are not taken into account. See
+-- https://www.w3.org/TR/WGSL/#structure-member-layout.
+alignOfStruct :: [Type] -> Maybe Int
+alignOfStruct [] = Nothing
+alignOfStruct members = maximum <$> mapM alignOf members
+
+-- | @OffsetOfMember@ of every member of a structure with the given member
+-- types. These are known even when the structure has no @SizeOf@, as when its
+-- last member is a runtime-sized array. Layout attributes are not taken into
+-- account.
+offsetOfMembers :: [Type] -> Maybe [Int]
+offsetOfMembers [] = Nothing
+offsetOfMembers members = do
+  aligns <- mapM alignOf $ drop 1 members
+  sizes <- mapM sizeOf $ init members
+  pure $
+    scanl
+      (\prev_off (al, prev_sz) -> roundUp al (prev_off + prev_sz))
+      0
+      (zip aligns sizes)
+
+-- | @SizeOf@ of a structure with the given member types, which is the end of
+-- its last member rounded up to the structure's alignment. 'Nothing' if any
+-- member has no @SizeOf@, which includes a trailing runtime-sized array. Layout
+-- attributes are not taken into account.
+sizeOfStruct :: [Type] -> Maybe Int
+sizeOfStruct members = do
+  align <- alignOfStruct members
+  offsets <- offsetOfMembers members
+  last_size <- sizeOf $ last members
+  pure $ roundUp align (last offsets + last_size)
 
 type BinOp = T.Text
 

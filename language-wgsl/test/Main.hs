@@ -7,6 +7,15 @@ import Prettyprinter.Render.Text (renderStrict)
 import Test.Tasty
 import Test.Tasty.HUnit
 
+-- | The offsets, alignment and size of a structure, which the tests check
+-- together.
+structLayout :: [Type] -> (Maybe [Int], Maybe Int, Maybe Int)
+structLayout ts = (offsetOfMembers ts, alignOfStruct ts, sizeOfStruct ts)
+
+-- | The alignment and size of a type, which the tests check together.
+layout :: Type -> Maybe (Int, Int)
+layout t = (,) <$> alignOf t <*> sizeOf t
+
 -- | A convenient literal for tests that only need some expression.
 one :: Exp
 one = IntExp 1 AbstractInt
@@ -251,12 +260,119 @@ callTests =
           @?= "bitcast<vec2<f16>>(x)"
     ]
 
+-- | The alignment and size table.  See
+-- https://www.w3.org/TR/WGSL/#alignment-and-size.
+layoutTests :: TestTree
+layoutTests =
+  testGroup
+    "alignOf and sizeOf"
+    [ testCase "roundUp" $
+        map (uncurry roundUp) [(16, 12), (4, 4), (16, 0), (8, 9)]
+          @?= [16, 4, 0, 16],
+      -- bool is not host-shareable, but it does have a fixed footprint.
+      testCase "bool" $ layout (Prim Bool) @?= Just (4, 4),
+      testCase "i32" $ layout (Prim Int32) @?= Just (4, 4),
+      testCase "f16" $ layout (Prim Float16) @?= Just (2, 2),
+      testCase "atomic" $ layout (Prim (Atomic Int32)) @?= Just (4, 4),
+      testCase "vec2<f32>" $ layout (Prim (Vec2 Float32)) @?= Just (8, 8),
+      testCase "vec3<f32>" $ layout (Prim (Vec3 Float32)) @?= Just (16, 12),
+      testCase "vec4<f32>" $ layout (Prim (Vec4 Float32)) @?= Just (16, 16),
+      testCase "vec2<f16>" $ layout (Prim (Vec2 Float16)) @?= Just (4, 4),
+      testCase "vec3<f16>" $ layout (Prim (Vec3 Float16)) @?= Just (8, 6),
+      testCase "vec4<f16>" $ layout (Prim (Vec4 Float16)) @?= Just (8, 8),
+      testCase "named type" $ layout (Named "S") @?= Nothing,
+      testCase "pointer" $ layout (Pointer Int32 Function Nothing) @?= Nothing
+    ]
+
+-- | An array's size is its element count times the element stride.  See
+-- https://www.w3.org/TR/WGSL/#array-layout-examples.
+arrayLayoutTests :: TestTree
+arrayLayoutTests =
+  testGroup
+    "arrays"
+    [ testCase "element stride" $
+        map elementStride [Float32, Vec3 Float32, Float16]
+          @?= [4, 16, 2],
+      testCase "array<f32, 8>" $
+        layout (Array Float32 (Just (IntExp 8 AbstractInt))) @?= Just (4, 32),
+      -- The element is padded from 12 bytes to a stride of 16.
+      testCase "array<vec3<f32>, 8>" $
+        layout (Array (Vec3 Float32) (Just (IntExp 8 AbstractInt)))
+          @?= Just (16, 128),
+      testCase "runtime-sized array" $
+        (alignOf (Array Float32 Nothing), sizeOf (Array Float32 Nothing))
+          @?= (Just 4, Nothing),
+      testCase "overridable element count" $
+        layout (Array Float32 (Just (VarExp "n"))) @?= Nothing
+    ]
+
+-- | See https://www.w3.org/TR/WGSL/#structure-member-layout.
+structLayoutTests :: TestTree
+structLayoutTests =
+  testGroup
+    "structures"
+    [ -- struct A from the specification's example.
+      testCase "implicit padding" $
+        structLayout [Prim Float32, Prim Float32, Prim (Vec2 Float32), Prim Float32]
+          @?= (Just [0, 4, 8, 16], Just 8, Just 24),
+      -- The first four members of struct B from the same example.
+      testCase "vector alignment" $
+        structLayout
+          [Prim (Vec2 Float32), Prim (Vec3 Float32), Prim Float32, Prim Float32]
+          @?= (Just [0, 16, 28, 32], Just 16, Just 48),
+      testCase "single member" $
+        structLayout [Prim Int32] @?= (Just [0], Just 4, Just 4),
+      -- The offsets and alignment of a storage buffer's header are known even
+      -- though its size is not.
+      testCase "trailing runtime-sized array" $
+        structLayout [Prim UInt32, Array Float32 Nothing]
+          @?= (Just [0, 4], Just 4, Nothing),
+      -- A member without a size stops the offsets of later members from
+      -- being known, but the alignment still is.
+      testCase "member without a size" $
+        structLayout [Array Float32 Nothing, Prim UInt32]
+          @?= (Nothing, Just 4, Nothing),
+      testCase "no members" $
+        structLayout [] @?= (Nothing, Nothing, Nothing),
+      testCase "member without a layout" $
+        structLayout [Prim Int32, Named "S"]
+          @?= (Nothing, Nothing, Nothing)
+    ]
+
+-- | See https://www.w3.org/TR/WGSL/#host-shareable-types.
+hostShareableTests :: TestTree
+hostShareableTests =
+  testGroup
+    "hostShareable"
+    [ testCase "numeric scalar" $ hostShareable (Prim Int32) @?= True,
+      testCase "bool" $ hostShareable (Prim Bool) @?= False,
+      testCase "numeric vector" $ hostShareable (Prim (Vec3 Float32)) @?= True,
+      testCase "vector of bool" $ hostShareable (Prim (Vec3 Bool)) @?= False,
+      testCase "atomic" $ hostShareable (Prim (Atomic Int32)) @?= True,
+      testCase "runtime-sized array" $
+        hostShareable (Array Float32 Nothing) @?= True,
+      testCase "fixed-size array" $
+        hostShareable (Array Float32 (Just (IntExp 8 AbstractInt))) @?= True,
+      testCase "overridable element count" $
+        hostShareable (Array Float32 (Just (VarExp "n"))) @?= False,
+      testCase "named type" $ hostShareable (Named "S") @?= False,
+      testCase "pointer" $
+        hostShareable (Pointer Int32 Function Nothing) @?= False
+    ]
+
 tests :: TestTree
 tests =
   testGroup
     "Language.WGSL"
     [ testGroup "types" [pointerTests],
-      testGroup "memory" [accessModeTests],
+      testGroup
+        "memory"
+        [ accessModeTests,
+          layoutTests,
+          arrayLayoutTests,
+          structLayoutTests,
+          hostShareableTests
+        ],
       testGroup "expressions" [intLitTests, floatLitTests, callTests],
       testGroup "statements" [seqTests, assignTests, returnTests, forTests],
       testGroup "declarations" [varDeclTests, funDeclTests]

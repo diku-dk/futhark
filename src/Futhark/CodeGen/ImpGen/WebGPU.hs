@@ -216,9 +216,10 @@ genKernel kernel = do
           }
   addCode $ prettyText wgslFun
 
-  let (offsets, _align, size) =
-        -- dummy layout with single i32 instead of empty structs
-        fromMaybe ([], 4, 4) (WGSL.structLayout (ksScalars s))
+  -- Dummy layout with single i32 instead of empty structs.
+  let scalarMembers = map WGSL.Prim (ksScalars s)
+      offsets = fromMaybe [] $ WGSL.offsetOfMembers scalarMembers
+      size = fromMaybe 4 $ WGSL.sizeOfStruct scalarMembers
   let dynamicBlockDims = [(dim, n) | (dim, n, True) <- ksBlockDims s]
   let (sharedMemOverrides, sharedMemExps) = unzip $ ksSharedMem s
   let interface =
