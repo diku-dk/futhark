@@ -173,18 +173,20 @@ fn trunc_i64_i8(a: i64) -> i8 {
 }
 
 fn f16_to_u8(a: f16) -> i8 {
-  return norm_i8(i32(u32(a)));
+  return f32_to_u8(f32(a));
 }
 
 fn f32_to_u8(a: f32) -> i8 {
+  if (!futrts_fpto_in_range(a, 0.0f, 256.0f)) { return 0; }
   return norm_i8(i32(u32(a)));
 }
 
 fn f16_to_i8(a: f16) -> i8 {
-  return norm_i8(i32(a));
+  return f32_to_i8(f32(a));
 }
 
 fn f32_to_i8(a: f32) -> i8 {
+  if (!futrts_fpto_in_range(a, -128.0f, 128.0f)) { return 0; }
   return norm_i8(i32(a));
 }
 

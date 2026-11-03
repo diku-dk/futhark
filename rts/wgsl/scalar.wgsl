@@ -196,6 +196,12 @@ fn futrts_isnan32(x: f32) -> bool {
     return (exponent == 0xff && mantissa != 0);
 }
 
+// Check if float-to-integer conversion is defined. Futhark defines all other
+// conversions (NaN and out of range) to produce zero, whereas WGSL clamps.
+fn futrts_fpto_in_range(x: f32, lo: f32, hi: f32) -> bool {
+    return !futrts_isnan32(x) && x >= lo && x < hi;
+}
+
 fn futrts_isinf32(x: f32) -> bool {
     let exponent = (bitcast<u32>(x) >> 23) & 0xFF;
     let mantissa = bitcast<u32>(x) & 0x7fffff;

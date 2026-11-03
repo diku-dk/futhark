@@ -287,12 +287,14 @@ fn i64_to_f16(a: i64) -> f16 {
 }
 
 fn f32_to_u64(a: f32) -> i64 {
+  if (!futrts_fpto_in_range(a, 0.0f, 18446744073709551616.0f)) { return zero_i64; }
   let hi = floor(a / 4294967296.0f);
   let lo = a - hi * 4294967296.0f;
   return i64(bitcast<i32>(u32(lo)), bitcast<i32>(u32(hi)));
 }
 
 fn f32_to_i64(a: f32) -> i64 {
+  if (!futrts_fpto_in_range(a, -9223372036854775808.0f, 9223372036854775808.0f)) { return zero_i64; }
   if a < 0 { return neg_i64(f32_to_u64(-a)); }
   return f32_to_u64(a);
 }

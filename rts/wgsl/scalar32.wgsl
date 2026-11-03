@@ -99,11 +99,21 @@ fn usignum_i32(a: i32) -> i32 {
 }
 
 fn f16_to_u32(a: f16) -> i32 {
-  return bitcast<i32>(u32(a));
+  return f32_to_u32(f32(a));
 }
 
 fn f32_to_u32(a: f32) -> i32 {
+  if (!futrts_fpto_in_range(a, 0.0f, 4294967296.0f)) { return 0; }
   return bitcast<i32>(u32(a));
+}
+
+fn f16_to_i32(a: f16) -> i32 {
+  return f32_to_i32(f32(a));
+}
+
+fn f32_to_i32(a: f32) -> i32 {
+  if (!futrts_fpto_in_range(a, -2147483648.0f, 2147483648.0f)) { return 0; }
+  return i32(a);
 }
 
 fn u32_to_f16(a: i32) -> f16 {

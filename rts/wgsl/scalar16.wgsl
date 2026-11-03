@@ -147,18 +147,20 @@ fn trunc_i64_i16(a: i64) -> i16 {
 }
 
 fn f16_to_u16(a: f16) -> i16 {
-  return norm_i16(i32(u32(a)));
+  return f32_to_u16(f32(a));
 }
 
 fn f32_to_u16(a: f32) -> i16 {
+  if (!futrts_fpto_in_range(a, 0.0f, 65536.0f)) { return 0; }
   return norm_i16(i32(u32(a)));
 }
 
 fn f16_to_i16(a: f16) -> i16 {
-  return norm_i16(i32(a));
+  return f32_to_i16(f32(a));
 }
 
 fn f32_to_i16(a: f32) -> i16 {
+  if (!futrts_fpto_in_range(a, -32768.0f, 32768.0f)) { return 0; }
   return norm_i16(i32(a));
 }
 
