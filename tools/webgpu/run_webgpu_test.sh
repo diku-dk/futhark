@@ -20,4 +20,8 @@ if ! find "${PLAYWRIGHT_BROWSERS_PATH}" -maxdepth 1 -type d -name 'chromium-*' |
 fi
 
 node check-headless/check_webgpu.mjs
+# The workspace persists between CI runs, and the Makefile only
+# rebuilds when test1.fut changes, so stale outputs from an older
+# compiler must be removed explicitly.
+make -C test1 clean
 make -C test1 run
