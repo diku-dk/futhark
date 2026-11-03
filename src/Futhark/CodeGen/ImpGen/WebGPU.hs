@@ -513,8 +513,8 @@ genArrayAccess atomic t mem i packed = do
         then
           let packedIndex = packedElemIndex t i
               packedOffset = packedElemOffset t i
-           in [WGSL.UnOpExp WGSL.AddressOf (WGSL.IndexExp mem packedIndex), packedOffset]
-        else [WGSL.UnOpExp WGSL.AddressOf (WGSL.IndexExp mem i)]
+           in [WGSL.UnOpExp WGSL.AddressOf (WGSL.IndexExp (WGSL.VarExp mem) packedIndex), packedOffset]
+        else [WGSL.UnOpExp WGSL.AddressOf (WGSL.IndexExp (WGSL.VarExp mem) i)]
 
 genArrayFun :: WGSL.Ident -> PrimType -> Bool -> Bool -> WGSL.Ident
 genArrayFun fun t atomic shared =
@@ -538,7 +538,7 @@ genReadExp t s mem i = do
   i' <- indexExp i
 
   if (nativeAccessSpace s || nativeAccessType t || shared) && not atomic
-    then pure $ WGSL.IndexExp mem' i'
+    then pure $ WGSL.IndexExp (WGSL.VarExp mem') i'
     else
       let access = genArrayAccess atomic t mem' i' (not shared)
           fun = genArrayFun "read" t atomic shared
@@ -571,7 +571,7 @@ genArrayWrite t s mem i v = do
   v' <- v
 
   if (nativeAccessSpace s || nativeAccessType t || shared) && not atomic
-    then pure $ WGSL.Assign (WGSL.IndexExp mem' i') WGSL.SimpleAssign v'
+    then pure $ WGSL.Assign (WGSL.IndexExp (WGSL.VarExp mem') i') WGSL.SimpleAssign v'
     else
       let access = genArrayAccess atomic t mem' i' (not shared) ++ [v']
           fun = genArrayFun "write" t atomic shared
@@ -741,7 +741,7 @@ genWGSLStm (Write mem i t s _ v) = do
   atomic <- isAtomic mem'
   if atomic
     then genArrayWrite t s mem i (genWGSLExp v)
-    else pure $ WGSL.Assign (WGSL.IndexExp mem' i') WGSL.SimpleAssign v'
+    else pure $ WGSL.Assign (WGSL.IndexExp (WGSL.VarExp mem') i') WGSL.SimpleAssign v'
 genWGSLStm (SetScalar name e) =
   liftM2 assign (getIdent name) (genWGSLExp e)
 genWGSLStm (Read tgt mem i Bool s _) = genArrayRead Bool s tgt mem i
@@ -754,7 +754,7 @@ genWGSLStm (Read tgt mem i t s _) = do
   atomic <- isAtomic mem'
   if atomic
     then genArrayRead t s tgt mem i
-    else pure $ assign tgt' (WGSL.IndexExp mem' i')
+    else pure $ assign tgt' (WGSL.IndexExp (WGSL.VarExp mem') i')
 genWGSLStm stm@(SetMem {}) =
   compilerLimitation . docText $
     "WebGPU backend Cannot handle SetMem statement"
@@ -794,12 +794,12 @@ genWGSLStm (Op (ImpGPU.GetBlockId dest i)) = do
   destId <- getIdent dest
   pure $
     assign destId $
-      WGSL.bitcast WGSL.I32 (WGSL.IndexExp "workgroup_id" (WGSL.IntExp i WGSL.AbstractInt))
+      WGSL.bitcast WGSL.I32 (WGSL.IndexExp (WGSL.VarExp "workgroup_id") (WGSL.IntExp i WGSL.AbstractInt))
 genWGSLStm (Op (ImpGPU.GetLocalId dest i)) = do
   destId <- getIdent dest
   pure $
     assign destId $
-      WGSL.bitcast WGSL.I32 (WGSL.IndexExp "local_id" (WGSL.IntExp i WGSL.AbstractInt))
+      WGSL.bitcast WGSL.I32 (WGSL.IndexExp (WGSL.VarExp "local_id") (WGSL.IntExp i WGSL.AbstractInt))
 genWGSLStm (Op (ImpGPU.GetLocalSize dest i)) = do
   destId <- getIdent dest
   assign destId . WGSL.VarExp <$> builtinBlockSize i
@@ -825,10 +825,10 @@ genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicXor t dest mem i e))) =
 genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicCmpXchg _ dest mem i cmp val))) = do
   val' <- genWGSLExp val
   cmp' <- genWGSLExp cmp
-  i' <- WGSL.IndexExp <$> getIdent mem <*> indexExp i
+  i' <- WGSL.IndexExp . WGSL.VarExp <$> getIdent mem <*> indexExp i
   liftM2 assign (getIdent dest) (pure $ WGSL.FieldExp (call "atomicCompareExchangeWeak" [WGSL.UnOpExp WGSL.AddressOf i', cmp', val']) "old_value")
 genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicXchg _ dest mem i e))) = do
-  idx <- WGSL.IndexExp <$> getIdent mem <*> indexExp i
+  idx <- WGSL.IndexExp . WGSL.VarExp <$> getIdent mem <*> indexExp i
   val <- genWGSLExp e
   let xchg = call "atomicExchange" [WGSL.UnOpExp WGSL.AddressOf idx, val]
   assign <$> getIdent dest <*> pure xchg
@@ -867,7 +867,7 @@ genWGSLStm (Op (ImpGPU.UniformRead tgt mem i _ _)) = do
   i' <- indexExp i
   pure $
     assign tgt' $
-      call "workgroupUniformLoad" [WGSL.UnOpExp WGSL.AddressOf $ WGSL.IndexExp mem' i']
+      call "workgroupUniformLoad" [WGSL.UnOpExp WGSL.AddressOf $ WGSL.IndexExp (WGSL.VarExp mem') i']
 genWGSLStm (Op (ImpGPU.ErrorSync f)) = genWGSLStm $ Op (ImpGPU.Barrier f)
 genWGSLStm (Op ImpGPU.WarpSync {}) = error "genWGSLStm: WarpSync not handled."
 genWGSLStm GetUserParam {} = error "genWGSLStm: GetUserParam not handled."

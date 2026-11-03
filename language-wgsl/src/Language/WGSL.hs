@@ -469,7 +469,7 @@ data Exp
   | -- | A type used where the grammar expects an expression, which is where
     -- template arguments live.
     TypeExp Type
-  | IndexExp Ident Exp
+  | IndexExp Exp Exp
   | FieldExp Exp Ident
   deriving (Eq, Ord, Show)
 
@@ -888,7 +888,7 @@ instance Pretty Exp where
   pretty (CallExp f targs args) =
     pretty f <> templateList targs <> parens (commasep $ map pretty args)
   pretty (TypeExp t) = pretty t
-  pretty (IndexExp x i) = pretty x <> brackets (pretty i)
+  pretty (IndexExp e i) = pretty e <> brackets (pretty i)
   pretty (FieldExp x y) = pretty x <> "." <> pretty y
 
 instance Pretty Stmt where

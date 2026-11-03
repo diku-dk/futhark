@@ -176,7 +176,7 @@ assignTests =
       testCase "dereference" $
         render (Assign (UnOpExp Indirection (VarExp "p")) SimpleAssign (VarExp "x")) @?= "(*p) = x;",
       testCase "index" $
-        render (Assign (IndexExp "a" (IntExp 0 AbstractInt)) SimpleAssign (IntExp 1 AbstractInt))
+        render (Assign (IndexExp (VarExp "a") (IntExp 0 AbstractInt)) SimpleAssign (IntExp 1 AbstractInt))
           @?= "a[0] = 1;",
       testCase "member" $
         render (Assign (FieldExp (VarExp "s") "f") SimpleAssign (VarExp "y")) @?= "s.f = y;"
@@ -898,7 +898,7 @@ assignOpTests =
       testCase "phony assignment" $
         render (PhonyAssign (CallExp "f" [] [])) @?= "_ = f();",
       testCase "increment and decrement" $
-        map render [Increment (VarExp "x"), Decrement (IndexExp "a" one)]
+        map render [Increment (VarExp "x"), Decrement (IndexExp (VarExp "a") one)]
           @?= ["x++;", "a[1]--;"],
       testCase "const_assert" $
         render (ConstAssert (VarExp "c")) @?= "const_assert c;"
@@ -975,6 +975,38 @@ globalDeclTests =
         render (GlobalOverride [] "k" Nothing (Just one)) @?= "override k = 1;"
     ]
 
+-- | An index may be applied to any expression, and chained.  Swizzles use
+-- the same slot as member access, so 'FieldExp' spells them.  See
+-- https://www.w3.org/TR/WGSL/#component-reference-expr.
+indexTests :: TestTree
+indexTests =
+  testGroup
+    "indexing"
+    [ testCase "identifier" $
+        render (IndexExp (VarExp "a") (VarExp "i")) @?= "a[i]",
+      -- Indexing a nested array needs an index of an index.
+      testCase "chained" $
+        render (IndexExp (IndexExp (VarExp "a") (VarExp "i")) (VarExp "j"))
+          @?= "a[i][j]",
+      testCase "call result" $
+        render (IndexExp (CallExp "f" [] [VarExp "x"]) (VarExp "i")) @?= "f(x)[i]",
+      testCase "through a pointer" $
+        render (IndexExp (UnOpExp Indirection (VarExp "p")) (VarExp "i"))
+          @?= "(*p)[i]",
+      testCase "member" $
+        render (IndexExp (FieldExp (VarExp "s") "f") (VarExp "i")) @?= "s.f[i]",
+      testCase "swizzle of an index" $
+        render (FieldExp (IndexExp (VarExp "a") (VarExp "i")) "xyz") @?= "a[i].xyz",
+      testCase "as an assignment target" $
+        render
+          ( Assign
+              (IndexExp (IndexExp (VarExp "a") (VarExp "i")) (VarExp "j"))
+              SimpleAssign
+              one
+          )
+          @?= "a[i][j] = 1;"
+    ]
+
 tests :: TestTree
 tests =
   testGroup
@@ -993,7 +1025,7 @@ tests =
         ],
       testGroup
         "expressions"
-        [operatorTests, intLitTests, floatLitTests, callTests],
+        [operatorTests, intLitTests, floatLitTests, callTests, indexTests],
       testGroup
         "statements"
         [ sequenceTests,
