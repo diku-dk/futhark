@@ -441,9 +441,7 @@ def map_transpose_gpu2gpu(
 
     kernel.set_args(
         cl.LocalMemory(TR_TILE_DIM * (TR_TILE_DIM + 1) * elem_size),
-        dst,
         dst_offset,
-        src,
         src_offset,
         k32,
         m32,
@@ -453,6 +451,8 @@ def map_transpose_gpu2gpu(
         muly32,
         np.int32(0),
         np.int32(0),
+        dst,
+        src,
     )
     cl.enqueue_nd_range_kernel(self.queue, kernel, dims, group_dims)
 
@@ -490,13 +490,13 @@ def copy_elements_gpu2gpu(
     kernel = self.copy_kernels[elem_size]
     kernel.set_args(
         cl.LocalMemory(1),
-        dst,
         dst_offset,
-        src,
         src_offset,
         n,
         np.int32(r),
         *layout_args,
+        dst,
+        src,
     )
     w = 256
     dims = ((n + w - 1) // w * w,)
