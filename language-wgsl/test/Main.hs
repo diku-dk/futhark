@@ -589,6 +589,20 @@ memberLayoutTests =
       testCase "unrelated attribute" $
         alignOfMember (Field [Attrib "location" [IntExp 0 AbstractInt]] "m" F32)
           @?= Just 4,
+      -- The argument of @align or @size need only be a const-expression, and
+      -- one that is not a literal leaves the member's layout unknown.  It
+      -- must not fall back to the layout of the member's type.
+      testCase "alignment that is not a literal" $
+        ( alignOfMember (Field [Attrib "align" [VarExp "N"]] "m" F32),
+          sizeOfMember (Field [Attrib "size" [VarExp "N"]] "m" F32)
+        )
+          @?= (Nothing, Nothing),
+      testCase "structure with an unknown member alignment" $
+        structLayoutOf
+          [ Field [] "a" F32,
+            Field [Attrib "align" [VarExp "N"]] "b" F32
+          ]
+          @?= (Nothing, Nothing, Nothing),
       -- struct A from the specification's example with explicit member sizes:
       -- the @size(16) on the last member grows the structure from 24 to 32.
       testCase "explicit size" $

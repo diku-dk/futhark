@@ -221,9 +221,10 @@ roundDown :: Int -> Int -> Int
 roundDown k n = (n `div` k) * k
 
 -- | @AlignOf@ of a type, or 'Nothing' if it has none, which is the case for
--- pointers, named types and 'Other' types.  Note that this is defined for
--- types that are not 'hostShareable' but do have a fixed footprint, such as
--- @bool@.  See https://www.w3.org/TR/WGSL/#alignment-and-size.
+-- pointers and for the opaque texture and sampler types, and for a 'Named'
+-- type, which is not resolved here. Note that this is defined for types that
+-- are not 'hostShareable' but do have a fixed footprint, such as @bool@. See
+-- https://www.w3.org/TR/WGSL/#alignment-and-size.
 alignOf :: Type -> Maybe Int
 alignOf Bool = Just 4
 alignOf I32 = Just 4
@@ -340,30 +341,28 @@ hostShareable (DepthTexture _) = False
 hostShareable Sampler = False
 hostShareable SamplerComparison = False
 
--- | The value of the named attribute, if it is present with a literal
--- argument.
-attribValue :: Ident -> [Attrib] -> Maybe Int
-attribValue name = foldr f Nothing
-  where
-    f (Attrib n [IntExp k _]) _ | n == name = Just k
-    f _ rest = rest
-
 -- | @AlignOfMember@ of a structure member: the argument of its @\@align@
--- attribute if it has one, and otherwise the @AlignOf@ of its type.  See
+-- attribute if it has one, and otherwise the @AlignOf@ of its type. REturns
+-- 'Nothing' if the alignment is a non-literal. See
 -- https://www.w3.org/TR/WGSL/#structure-member-layout.
 alignOfMember :: Field -> Maybe Int
 alignOfMember (Field attribs _ t) =
-  case attribValue "align" attribs of
-    Just k -> Just k
-    Nothing -> alignOf t
+  case [args | Attrib name args <- attribs, name == "align"] of
+    [] -> alignOf t
+    [[IntExp k _]] -> Just k
+    _ -> Nothing
 
 -- | @SizeOfMember@ of a structure member: the argument of its @\@size@
--- attribute if it has one, and otherwise the @SizeOf@ of its type.
+-- attribute if it has one, and otherwise the @SizeOf@ of its type, with
+-- 'Nothing' arising as for 'alignOfMember'. WGSL requires the argument to be
+-- at least the @SizeOf@ of the member's type, which is not checked here. See
+-- https://www.w3.org/TR/WGSL/#structure-member-layout.
 sizeOfMember :: Field -> Maybe Int
 sizeOfMember (Field attribs _ t) =
-  case attribValue "size" attribs of
-    Just k -> Just k
-    Nothing -> sizeOf t
+  case [args | Attrib name args <- attribs, name == "size"] of
+    [] -> sizeOf t
+    [[IntExp k _]] -> Just k
+    _ -> Nothing
 
 -- | @AlignOf@ of a structure with the given members, which is the greatest
 -- @AlignOfMember@ of any of them. 'Nothing' if there are no members or if some
