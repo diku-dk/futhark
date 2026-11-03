@@ -250,7 +250,7 @@ genKernel kernel = do
       -- for more details.
       lsw <- builtinLockstepWidth
       addInitStmt $
-        WGSL.Let "_dummy_lockstep_width" (WGSL.VarExp lsw)
+        WGSL.Let "_dummy_lockstep_width" Nothing (WGSL.VarExp lsw)
 
       wgslBody <- genWGSLStms (ImpGPU.kernelBody kernel)
       mapM_ addBodyStmt wgslBody
@@ -290,12 +290,13 @@ generateDeviceFun fname device_func = do
       -- parameters.  A single result is returned directly; several results are
       -- written through pointer parameters, as WGSL functions return at most
       -- one value.
-      let declare (WGSL.Param v typ _) = WGSL.DeclareVar v typ
+      let declare (WGSL.Param v typ _) = WGSL.DeclareVar v (Just typ) Nothing
           outPtrParam (WGSL.Param v t a) =
             WGSL.Param (v <> "_out") (WGSL.Ptr t WGSL.Function Nothing) a
           writeOutPtr (WGSL.Param v _ _) =
             WGSL.Assign
               (WGSL.UnOpExp WGSL.Indirection (WGSL.VarExp (v <> "_out")))
+              WGSL.SimpleAssign
               (WGSL.VarExp v)
           (fun_params, fun_return, fun_body) = case out_params of
             [] -> (in_params, Nothing, body)
@@ -570,7 +571,7 @@ genArrayWrite t s mem i v = do
   v' <- v
 
   if (nativeAccessSpace s || nativeAccessType t || shared) && not atomic
-    then pure $ WGSL.Assign (WGSL.IndexExp mem' i') v'
+    then pure $ WGSL.Assign (WGSL.IndexExp mem' i') WGSL.SimpleAssign v'
     else
       let access = genArrayAccess atomic t mem' i' (not shared) ++ [v']
           fun = genArrayFun "write" t atomic shared
@@ -630,13 +631,13 @@ genCopy pt shape (dst, dst_space) (dst_offset, dst_strides) (src, src_space) (sr
           i
           zero
           (wgslCmpOp (CmpUlt Int64) (WGSL.VarExp i) n)
-          (WGSL.UpdateAssign (WGSL.VarExp i) $ wgslBinOp (Add Int64 OverflowWrap) (WGSL.VarExp i) one)
+          (WGSL.UpdateAssign (WGSL.VarExp i) WGSL.SimpleAssign $ wgslBinOp (Add Int64 OverflowWrap) (WGSL.VarExp i) one)
           (loops ins body)
       ]
 
 -- | Assign to a variable.
 assign :: WGSL.Ident -> WGSL.Exp -> WGSL.Stmt
-assign v = WGSL.Assign (WGSL.VarExp v)
+assign v = WGSL.Assign (WGSL.VarExp v) WGSL.SimpleAssign
 
 -- | Call a function with no template arguments.
 call :: WGSL.Ident -> [WGSL.Exp] -> WGSL.Exp
@@ -678,7 +679,7 @@ genWGSLStm (For iName bound body) = do
       i
       zero
       (lt (WGSL.VarExp i) boundExp)
-      (WGSL.UpdateAssign (WGSL.VarExp i) $ add (WGSL.VarExp i) one)
+      (WGSL.UpdateAssign (WGSL.VarExp i) WGSL.SimpleAssign $ add (WGSL.VarExp i) one)
       bodyStm
   where
     i = nameToIdent iName
@@ -717,11 +718,14 @@ genWGSLStm (DeclareMem name (Space "shared")) = do
       pure $ WGSL.Comment $ "discard declare_shared: " <> name'
 genWGSLStm (DeclareMem name (ScalarSpace vs pt)) =
   pure $
-    WGSL.DeclareVar (nameToIdent name) (WGSL.Array (wgslPrimType pt) (Just $ wgslProduct vs))
+    WGSL.DeclareVar
+      (nameToIdent name)
+      (Just $ WGSL.Array (wgslPrimType pt) (Just $ wgslProduct vs))
+      Nothing
 genWGSLStm s@(DeclareMem _ _) = unsupported s
 genWGSLStm (DeclareScalar name _ typ) =
   pure $
-    WGSL.DeclareVar (nameToIdent name) (wgslPrimType typ)
+    WGSL.DeclareVar (nameToIdent name) (Just $ wgslPrimType typ) Nothing
 genWGSLStm s@(DeclareArray {}) = unsupported s
 genWGSLStm s@(Allocate {}) = unsupported s
 genWGSLStm s@(Free _ _) = pure $ WGSL.Comment $ "free: " <> prettyText s
@@ -736,7 +740,7 @@ genWGSLStm (Write mem i t s _ v) = do
   atomic <- isAtomic mem'
   if atomic
     then genArrayWrite t s mem i (genWGSLExp v)
-    else pure $ WGSL.Assign (WGSL.IndexExp mem' i') v'
+    else pure $ WGSL.Assign (WGSL.IndexExp mem' i') WGSL.SimpleAssign v'
 genWGSLStm (SetScalar name e) =
   liftM2 assign (getIdent name) (genWGSLExp e)
 genWGSLStm (Read tgt mem i Bool s _) = genArrayRead Bool s tgt mem i
@@ -1111,7 +1115,7 @@ genScalarDecls = do
             _ -> e
 
       addScalar $ WGSL.Field [] name fieldPrimTyp
-      addInitStmt $ WGSL.DeclareVar name varPrimTyp
+      addInitStmt $ WGSL.DeclareVar name (Just varPrimTyp) Nothing
       addInitStmt $
         assign name (wrapCopy $ WGSL.FieldExp (WGSL.VarExp bufferName) name)
 
@@ -1288,12 +1292,12 @@ genConstAndBuiltinDecls = do
             addOverride hi WGSL.I32 zeroInit
             lift $ addMacroDef (nameFromText lo) (mkLo e)
             lift $ addMacroDef (nameFromText hi) (mkHi e)
-            addInitStmt $ WGSL.DeclareVar n wgslInt64
+            addInitStmt $ WGSL.DeclareVar n (Just wgslInt64) Nothing
             addInitStmt . assign n $ call "i64" [WGSL.VarExp lo, WGSL.VarExp hi]
           _ -> do
             addOverride lo WGSL.I32 zeroInit
             lift $ addMacroDef (nameFromText lo) e
-            addInitStmt $ WGSL.DeclareVar n wgslInt64
+            addInitStmt $ WGSL.DeclareVar n (Just wgslInt64) Nothing
             addInitStmt . assign n $ call "i64" [WGSL.VarExp lo, WGSL.IntExp 0 WGSL.AbstractInt]
 
   mapM_ mkConst consts

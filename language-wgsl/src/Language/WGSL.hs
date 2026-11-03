@@ -50,6 +50,7 @@ module Language.WGSL
 
     -- * Statements
     Stmt (..),
+    AssignOp (..),
     ForUpdate (..),
     SwitchClause (..),
     CaseSelector (..),
@@ -482,11 +483,23 @@ data Stmt
     Comment T.Text
   | -- | A compound statement, which introduces a new scope.
     Compound [Stmt]
-  | Let Ident Exp
-  | DeclareVar Ident Type
+  | -- | @let x = e@, with an optional type.
+    Let Ident (Maybe Type) Exp
+  | -- | @const x = e@, with an optional type.
+    Const Ident (Maybe Type) Exp
+  | -- | @var x : T = e@.  At least one of the type and the initialiser must be
+    -- present, or the type of the variable is not known.
+    DeclareVar Ident (Maybe Type) (Maybe Exp)
   | -- | The left-hand side must be an assignable expression.  See
     -- https://www.w3.org/TR/WGSL/#assignment.
-    Assign Exp Exp
+    Assign Exp AssignOp Exp
+  | -- | @_ = e@, which evaluates @e@ and discards the result.
+    PhonyAssign Exp
+  | Increment Exp
+  | Decrement Exp
+  | -- | A @const_assert@ statement.  'GlobalAssert' is its module-scope
+    -- counterpart.
+    ConstAssert Exp
   | -- | An @if@, its @else if@ clauses, and its optional @else@ clause.
     If Exp [Stmt] [(Exp, [Stmt])] (Maybe [Stmt])
   | Switch Exp (NonEmpty SwitchClause)
@@ -524,11 +537,32 @@ data CaseSelector
 data Continuing = Continuing [Stmt] (Maybe Exp)
   deriving (Eq, Ord, Show)
 
--- | The update of a @for@ loop, which the grammar restricts to an assignment
--- or a function call.  See https://www.w3.org/TR/WGSL/#for-statement.
+-- | The operator of an assignment: plain assignment, or one of the compound
+-- assignment operators.  See https://www.w3.org/TR/WGSL/#assignment.
+data AssignOp
+  = SimpleAssign
+  | AddAssign
+  | SubtractAssign
+  | MultiplyAssign
+  | DivideAssign
+  | RemainderAssign
+  | BitwiseAndAssign
+  | BitwiseOrAssign
+  | BitwiseExclusiveOrAssign
+  | ShiftLeftAssign
+  | ShiftRightAssign
+  deriving (Eq, Ord, Show)
+
+-- | The update of a @for@ loop, which the grammar restricts to the statements
+-- that update a variable, or to a function call. These mirror the
+-- correspondingly named statements. See
+-- https://www.w3.org/TR/WGSL/#for-statement.
 data ForUpdate
   = -- | The left-hand side must be an assignable expression.
-    UpdateAssign Exp Exp
+    UpdateAssign Exp AssignOp Exp
+  | UpdatePhonyAssign Exp
+  | UpdateIncrement Exp
+  | UpdateDecrement Exp
   | UpdateCall Ident [Exp] [Exp]
   deriving (Eq, Ord, Show)
 
@@ -857,9 +891,20 @@ instance Pretty Stmt where
   pretty Empty = ";"
   pretty (Comment c) = vsep (map ("//" <+>) (pretty <$> T.lines c))
   pretty (Compound body) = block body
-  pretty (Let x e) = "let" <+> pretty x <+> "=" <+> pretty e <> ";"
-  pretty (DeclareVar x t) = "var" <+> pretty x <+> ":" <+> pretty t <> ";"
-  pretty (Assign lhs e) = pretty lhs <+> "=" <+> pretty e <> ";"
+  pretty (Let x t e) =
+    "let" <+> optionallyTyped x t <+> "=" <+> pretty e <> ";"
+  pretty (Const x t e) =
+    "const" <+> optionallyTyped x t <+> "=" <+> pretty e <> ";"
+  pretty (DeclareVar x t e) =
+    "var"
+      <+> optionallyTyped x t
+      <> maybe mempty ((" =" <+>) . pretty) e
+      <> ";"
+  pretty (Assign lhs op e) = pretty lhs <+> pretty op <+> pretty e <> ";"
+  pretty (PhonyAssign e) = "_" <+> "=" <+> pretty e <> ";"
+  pretty (Increment e) = pretty e <> "++;"
+  pretty (Decrement e) = pretty e <> "--;"
+  pretty (ConstAssert e) = "const_assert" <+> pretty e <> ";"
   pretty (If cond th elifs el) =
     hsep $
       ["if" <+> pretty cond <+> block th]
@@ -919,13 +964,33 @@ instance Pretty Continuing where
 block :: [Stmt] -> Doc a
 block = braceBlock . map pretty
 
+-- | An @optionally_typed_ident@.
+optionallyTyped :: Ident -> Maybe Type -> Doc a
+optionallyTyped x t = pretty x <> maybe mempty ((" :" <+>) . pretty) t
+
+instance Pretty AssignOp where
+  pretty SimpleAssign = "="
+  pretty AddAssign = "+="
+  pretty SubtractAssign = "-="
+  pretty MultiplyAssign = "*="
+  pretty DivideAssign = "/="
+  pretty RemainderAssign = "%="
+  pretty BitwiseAndAssign = "&="
+  pretty BitwiseOrAssign = "|="
+  pretty BitwiseExclusiveOrAssign = "^="
+  pretty ShiftLeftAssign = "<<="
+  pretty ShiftRightAssign = ">>="
+
 -- | A brace-enclosed, indented sequence.
 braceBlock :: [Doc a] -> Doc a
 braceBlock [] = "{ }"
 braceBlock docs = "{" </> indent 2 (stack docs) </> "}"
 
 instance Pretty ForUpdate where
-  pretty (UpdateAssign lhs e) = pretty lhs <+> "=" <+> pretty e
+  pretty (UpdateAssign lhs op e) = pretty lhs <+> pretty op <+> pretty e
+  pretty (UpdatePhonyAssign e) = "_" <+> "=" <+> pretty e
+  pretty (UpdateIncrement e) = pretty e <> "++"
+  pretty (UpdateDecrement e) = pretty e <> "--"
   pretty (UpdateCall f targs args) =
     pretty f <> templateList targs <> parens (commasep $ map pretty args)
 

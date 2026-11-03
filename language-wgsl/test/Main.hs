@@ -172,14 +172,14 @@ assignTests =
   testGroup
     "Assign"
     [ testCase "variable" $
-        render (Assign (VarExp "x") (VarExp "y")) @?= "x = y;",
+        render (Assign (VarExp "x") SimpleAssign (VarExp "y")) @?= "x = y;",
       testCase "dereference" $
-        render (Assign (UnOpExp Indirection (VarExp "p")) (VarExp "x")) @?= "(*p) = x;",
+        render (Assign (UnOpExp Indirection (VarExp "p")) SimpleAssign (VarExp "x")) @?= "(*p) = x;",
       testCase "index" $
-        render (Assign (IndexExp "a" (IntExp 0 AbstractInt)) (IntExp 1 AbstractInt))
+        render (Assign (IndexExp "a" (IntExp 0 AbstractInt)) SimpleAssign (IntExp 1 AbstractInt))
           @?= "a[0] = 1;",
       testCase "member" $
-        render (Assign (FieldExp (VarExp "s") "f") (VarExp "y")) @?= "s.f = y;"
+        render (Assign (FieldExp (VarExp "s") "f") SimpleAssign (VarExp "y")) @?= "s.f = y;"
     ]
 
 -- | A return statement supplies a value exactly when the enclosing function
@@ -228,7 +228,7 @@ sequenceTests =
   testGroup
     "sequences"
     [ testCase "terminators" $
-        renderBody [Call "f" [] [], Let "x" one, Call "g" [] []]
+        renderBody [Call "f" [] [], Let "x" Nothing one, Call "g" [] []]
           @?= "f();\nlet x = 1;\ng();",
       -- The separator used to end up inside the comment.
       testCase "comment" $
@@ -243,7 +243,7 @@ sequenceTests =
       testCase "empty statement" $
         render (While (VarExp "c") [Empty]) @?= "while c {\n  ;\n}",
       testCase "block introduces a scope" $
-        render (Compound [Let "x" one]) @?= "{\n  let x = 1;\n}",
+        render (Compound [Let "x" Nothing one]) @?= "{\n  let x = 1;\n}",
       -- An absent else clause is not the same as an empty one.
       testCase "absent else" $
         render (If (VarExp "c") [] [] Nothing) @?= "if c { }",
@@ -263,7 +263,7 @@ forTests =
               "i"
               one
               (BinOpExp Less (VarExp "i") one)
-              (UpdateAssign (VarExp "i") one)
+              (UpdateAssign (VarExp "i") SimpleAssign one)
               [Call "f" [] []]
           )
           @?= "for (var i = 1; (i < 1); i = 1) {\n  f();\n}",
@@ -840,7 +840,7 @@ loopTests =
     [ testCase "without continuing" $
         render (Loop [Break] Nothing) @?= "loop {\n  break;\n}",
       testCase "with continuing" $
-        render (Loop [Call "f" [] []] (Just (Continuing [Assign (VarExp "i") one] Nothing)))
+        render (Loop [Call "f" [] []] (Just (Continuing [Assign (VarExp "i") SimpleAssign one] Nothing)))
           @?= "loop {\n  f();\n  continuing {\n    i = 1;\n  }\n}",
       testCase "with break if" $
         render (Loop [] (Just (Continuing [] (Just (VarExp "done")))))
@@ -848,6 +848,94 @@ loopTests =
       testCase "jumps" $
         map render [Break, Continue, Discard]
           @?= ["break;", "continue;", "discard;"]
+    ]
+
+-- | An assignment carries an operator, which may be a compound one.  See
+-- https://www.w3.org/TR/WGSL/#assignment.
+assignOpTests :: TestTree
+assignOpTests =
+  testGroup
+    "assignment operators"
+    [ testCase "every operator" $
+        map
+          (\op -> render (Assign (VarExp "x") op one))
+          [ SimpleAssign,
+            AddAssign,
+            SubtractAssign,
+            MultiplyAssign,
+            DivideAssign,
+            RemainderAssign,
+            BitwiseAndAssign,
+            BitwiseOrAssign,
+            BitwiseExclusiveOrAssign,
+            ShiftLeftAssign,
+            ShiftRightAssign
+          ]
+          @?= [ "x = 1;",
+                "x += 1;",
+                "x -= 1;",
+                "x *= 1;",
+                "x /= 1;",
+                "x %= 1;",
+                "x &= 1;",
+                "x |= 1;",
+                "x ^= 1;",
+                "x <<= 1;",
+                "x >>= 1;"
+              ],
+      testCase "phony assignment" $
+        render (PhonyAssign (CallExp "f" [] [])) @?= "_ = f();",
+      testCase "increment and decrement" $
+        map render [Increment (VarExp "x"), Decrement (IndexExp "a" one)]
+          @?= ["x++;", "a[1]--;"],
+      testCase "const_assert" $
+        render (ConstAssert (VarExp "c")) @?= "const_assert c;"
+    ]
+
+-- | A @let@, @const@ or @var@ names an optionally typed identifier, and a
+-- @var@ may have an initialiser.  See
+-- https://www.w3.org/TR/WGSL/#var-and-value.
+localDeclTests :: TestTree
+localDeclTests =
+  testGroup
+    "local declarations"
+    [ testCase "let" $
+        map render [Let "a" Nothing one, Let "a" (Just F32) one]
+          @?= ["let a = 1;", "let a : f32 = 1;"],
+      testCase "const" $
+        map render [Const "a" Nothing one, Const "a" (Just F32) one]
+          @?= ["const a = 1;", "const a : f32 = 1;"],
+      testCase "var" $
+        map
+          render
+          [ DeclareVar "a" (Just I32) Nothing,
+            DeclareVar "a" (Just I32) (Just one),
+            DeclareVar "a" Nothing (Just one)
+          ]
+          @?= ["var a : i32;", "var a : i32 = 1;", "var a = 1;"]
+    ]
+
+-- | The update of a @for@ loop may be any of the variable-updating
+-- statements, or a call.  See https://www.w3.org/TR/WGSL/#for-statement.
+forUpdateTests :: TestTree
+forUpdateTests =
+  testGroup
+    "for updates"
+    [ testCase "every form" $
+        map
+          (\u -> render (For "i" one (VarExp "c") u []))
+          [ UpdateAssign (VarExp "i") AddAssign one,
+            UpdatePhonyAssign (VarExp "i"),
+            UpdateIncrement (VarExp "i"),
+            UpdateDecrement (VarExp "i"),
+            UpdateCall "step" [] [VarExp "i"]
+          ]
+          @?= [ "for (var i = 1; c; i += 1) { }",
+                "for (var i = 1; c; _ = i) { }",
+                "for (var i = 1; c; i++) { }",
+                "for (var i = 1; c; i--) { }",
+                "for (var i = 1; c; step(i)) { }"
+              ]
     ]
 
 tests :: TestTree
@@ -877,7 +965,10 @@ tests =
           forTests,
           elseIfTests,
           switchTests,
-          loopTests
+          loopTests,
+          assignOpTests,
+          localDeclTests,
+          forUpdateTests
         ],
       testGroup
         "declarations"
