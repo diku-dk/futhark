@@ -10,10 +10,12 @@
 -- syntax module in the future.
 --
 -- Deviations from the specification: statements cannot carry attributes;
--- expressions are always fully parenthesised, so operator precedence is not
--- modelled; and 'Comment' is an addition, as WGSL has no comment statement.
+-- assignment targets are ordinary expressions, not a separate
+-- @lhs_expression@; expressions are always fully parenthesised, so operator
+-- precedence is not modelled; and 'Comment' is an addition, as WGSL has no
+-- comment statement.
 --
--- To produce WGSL code as text, use the 'Pretty' definition.
+-- To produce WGSL code as text, use the 'Pretty' instance.
 module Language.WGSL
   ( -- * Identifiers
     Ident,
@@ -984,13 +986,8 @@ instance Pretty Attrib where
     "@" <> pretty name <> parens (commasep $ map pretty args)
 
 instance Pretty Param where
-  pretty (Param attribs name typ)
-    | null attribs = pretty name <+> ":" <+> pretty typ
-    | otherwise =
-        stack
-          [ hsep (map pretty attribs),
-            pretty name <+> ":" <+> pretty typ
-          ]
+  pretty (Param attribs name typ) =
+    hsep $ map pretty attribs ++ [pretty name <+> ":" <+> pretty typ]
 
 prettyParams :: [Param] -> Doc a
 prettyParams [] = "()"
