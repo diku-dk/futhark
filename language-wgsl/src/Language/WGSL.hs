@@ -9,6 +9,10 @@
 -- but fine for code generation. I would not be opposed to adding a concrete
 -- syntax module in the future.
 --
+-- Deviations from the specification: statements cannot carry attributes;
+-- expressions are always fully parenthesised, so operator precedence is not
+-- modelled; and 'Comment' is an addition, as WGSL has no comment statement.
+--
 -- To produce WGSL code as text, use the 'Pretty' definition.
 module Language.WGSL
   ( -- * Identifiers
@@ -79,9 +83,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
 import Prettyprinter
 
--- | A WGSL identifier. We assume (but do not check) that these are valid WGSL
--- identifiers. The printer will certainly produce invalid WGSL if this
--- constraint is violated.
+-- | A WGSL identifier, which is not checked for validity.
 type Ident = T.Text
 
 -- | A type as it occurs in WGSL source. See
@@ -112,10 +114,9 @@ data Type
   | -- | A structure or type alias, referred to by name. Its definition is not
     -- known here, so it has no layout.
     Named Ident
-  | -- | A sampled texture type.  The sampled type must be @f32@, @i32@ or
-    -- @u32@.  See https://www.w3.org/TR/WGSL/#sampled-texture-type.
+  | -- | See https://www.w3.org/TR/WGSL/#sampled-texture-type.
     SampledTexture TextureDim Type
-  | -- | A multisampled texture type, which is only ever two-dimensional.  See
+  | -- | Always two-dimensional.  See
     -- https://www.w3.org/TR/WGSL/#multisampled-texture-type.
     MultisampledTexture Type
   | -- | An external sampled texture type.  See
@@ -133,7 +134,8 @@ data Type
     SamplerComparison
   deriving (Eq, Ord, Show)
 
--- | The dimensionality and arrangement of a sampled texture.
+-- | The dimensionality and arrangement of a sampled texture.  See
+-- https://www.w3.org/TR/WGSL/#sampled-texture-type.
 data TextureDim
   = Tex1d
   | Tex2d
@@ -143,7 +145,8 @@ data TextureDim
   | TexCubeArray
   deriving (Eq, Ord, Show)
 
--- | The dimensionality and arrangement of a storage texture.
+-- | The dimensionality and arrangement of a storage texture.  See
+-- https://www.w3.org/TR/WGSL/#texture-storage.
 data StorageTextureDim
   = StorageTex1d
   | StorageTex2d
@@ -151,7 +154,7 @@ data StorageTextureDim
   | StorageTex3d
   deriving (Eq, Ord, Show)
 
--- | A depth texture type, which is never parameterised.
+-- | A depth texture type.  See https://www.w3.org/TR/WGSL/#texture-depth.
 data DepthTexture
   = Depth2d
   | Depth2dArray
@@ -205,25 +208,18 @@ data TexelFormat
   | Rg11b10Ufloat
   deriving (Eq, Ord, Show)
 
--- | Round @n@ up to the next multiple of @k@, as WGSL specifies: @roundUp(k,
--- n)@ is @ceiling(n / k) * k@, defined for positive integers. The alignment and
--- size rules are phrased in terms of this function, so a caller computing its
--- own offsets or strides should round with it rather than by hand. See
--- https://www.w3.org/TR/WGSL/#roundup.
+-- | @roundUp(k, n)@, which is @ceiling(n / k) * k@, for positive integers.
+-- See https://www.w3.org/TR/WGSL/#roundup.
 roundUp :: Int -> Int -> Int
 roundUp k n = ((n + k - 1) `div` k) * k
 
--- | Round @n@ down to the previous multiple of @k@, as WGSL specifies:
--- @roundDown(k, n)@ is @floor(n / k) * k@, defined for positive integers. None
--- of the layout rules use it; the specification needs it only to size the array
--- of a buffer view. See https://www.w3.org/TR/WGSL/#rounddown.
+-- | @roundDown(k, n)@, which is @floor(n / k) * k@, for positive integers.
+-- See https://www.w3.org/TR/WGSL/#rounddown.
 roundDown :: Int -> Int -> Int
 roundDown k n = (n `div` k) * k
 
--- | @AlignOf@ of a type, or 'Nothing' if it has none, which is the case for
--- pointers and for the opaque texture and sampler types, and for a 'Named'
--- type, which is not resolved here. Note that this is defined for types that
--- are not 'hostShareable' but do have a fixed footprint, such as @bool@. See
+-- | @AlignOf@ of a type.  'Nothing' for pointers, texture and sampler types,
+-- and for a 'Named' type, which is not resolved here.  See
 -- https://www.w3.org/TR/WGSL/#alignment-and-size.
 alignOf :: Type -> Maybe Int
 alignOf Bool = Just 4
@@ -256,10 +252,9 @@ alignOf (DepthTexture _) = Nothing
 alignOf Sampler = Nothing
 alignOf SamplerComparison = Nothing
 
--- | @SizeOf@ of a type, or 'Nothing' if it has none.  An array has a size only
--- if its element count is a literal: a runtime-sized array has no size until a
--- buffer is bound, and an overridable count is not known until pipeline
--- creation.
+-- | @SizeOf@ of a type.  'Nothing' as for 'alignOf', and also for an array
+-- whose element count is not a literal.  See
+-- https://www.w3.org/TR/WGSL/#alignment-and-size.
 sizeOf :: Type -> Maybe Int
 sizeOf Bool = Just 4
 sizeOf I32 = Just 4
@@ -293,16 +288,13 @@ sizeOf (DepthTexture _) = Nothing
 sizeOf Sampler = Nothing
 sizeOf SamplerComparison = Nothing
 
--- | @StrideOf@ of an array with the given element type: the distance from the
--- start of one element to the start of the next, which is the element size
--- rounded up to the element alignment. See
+-- | @StrideOf@ of an array with the given element type.  See
 -- https://www.w3.org/TR/WGSL/#internal-value-layout.
 strideOf :: Type -> Maybe Int
 strideOf t = roundUp <$> alignOf t <*> sizeOf t
 
--- | Whether a type is host-shareable, and so may be the store type of a
--- uniform or storage buffer.  This is conservative: a named type is not
--- resolved here, so it is reported as not host-shareable.  See
+-- | Whether a type is host-shareable.  A 'Named' type is not resolved here,
+-- and so is reported as not host-shareable.  See
 -- https://www.w3.org/TR/WGSL/#host-shareable-types.
 hostShareable :: Type -> Bool
 -- bool is not a numeric scalar type, and a vector of bool is not a numeric
@@ -341,9 +333,8 @@ hostShareable (DepthTexture _) = False
 hostShareable Sampler = False
 hostShareable SamplerComparison = False
 
--- | @AlignOfMember@ of a structure member: the argument of its @\@align@
--- attribute if it has one, and otherwise the @AlignOf@ of its type. REturns
--- 'Nothing' if the alignment is a non-literal. See
+-- | @AlignOfMember@ of a structure member.  'Nothing' if its @\@align@
+-- argument is not a literal.  See
 -- https://www.w3.org/TR/WGSL/#structure-member-layout.
 alignOfMember :: Field -> Maybe Int
 alignOfMember (Field attribs _ t) =
@@ -352,10 +343,8 @@ alignOfMember (Field attribs _ t) =
     [[IntExp k _]] -> Just k
     _ -> Nothing
 
--- | @SizeOfMember@ of a structure member: the argument of its @\@size@
--- attribute if it has one, and otherwise the @SizeOf@ of its type, with
--- 'Nothing' arising as for 'alignOfMember'. WGSL requires the argument to be
--- at least the @SizeOf@ of the member's type, which is not checked here. See
+-- | @SizeOfMember@ of a structure member.  'Nothing' if its @\@size@
+-- argument is not a literal.  See
 -- https://www.w3.org/TR/WGSL/#structure-member-layout.
 sizeOfMember :: Field -> Maybe Int
 sizeOfMember (Field attribs _ t) =
@@ -364,18 +353,15 @@ sizeOfMember (Field attribs _ t) =
     [[IntExp k _]] -> Just k
     _ -> Nothing
 
--- | @AlignOf@ of a structure with the given members, which is the greatest
--- @AlignOfMember@ of any of them. 'Nothing' if there are no members or if some
--- member has no @AlignOfMember@. See
--- https://www.w3.org/TR/WGSL/#structure-member-layout.
+-- | @AlignOf@ of a structure with the given members.  'Nothing' if there are
+-- no members.  See https://www.w3.org/TR/WGSL/#structure-member-layout.
 alignOfStruct :: [Field] -> Maybe Int
 alignOfStruct [] = Nothing
 alignOfStruct members = maximum <$> mapM alignOfMember members
 
--- | @OffsetOfMember@ of every member of a structure with the given members.
--- These are known even when the structure has no @SizeOf@, as when its last
--- member is a runtime-sized array, because only the preceding members
--- contribute.
+-- | @OffsetOfMember@ of every member of a structure, which is known even when
+-- the structure has no @SizeOf@.  See
+-- https://www.w3.org/TR/WGSL/#structure-member-layout.
 offsetOfMembers :: [Field] -> Maybe [Int]
 offsetOfMembers [] = Nothing
 offsetOfMembers members = do
@@ -387,10 +373,9 @@ offsetOfMembers members = do
       0
       (zip aligns sizes)
 
--- | @SizeOf@ of a structure with the given members, which is the end of its
--- last member rounded up to the structure's alignment.  'Nothing' if any
--- member has no @SizeOfMember@, which includes a trailing runtime-sized
--- array.
+-- | @SizeOf@ of a structure with the given members.  'Nothing' if any member
+-- has no @SizeOfMember@.  See
+-- https://www.w3.org/TR/WGSL/#structure-member-layout.
 sizeOfStruct :: [Field] -> Maybe Int
 sizeOfStruct members = do
   struct_align <- alignOfStruct members
@@ -420,8 +405,7 @@ data BinOp
   | ShortCircuitOr
   deriving (Eq, Ord, Show)
 
--- | A unary operator.  'Indirection' and 'AddressOf' are the only ones that
--- may also appear in an assignment's left-hand side.
+-- | A unary operator.  See https://www.w3.org/TR/WGSL/#expressions.
 data UnOp
   = Negate
   | LogicalNegate
@@ -442,7 +426,7 @@ data IntLitType
   deriving (Eq, Ord, Show)
 
 -- | The type denoted by a floating point literal, which is determined by its
--- suffix.
+-- suffix.  See https://www.w3.org/TR/WGSL/#numeric-literals.
 data FloatLitType
   = -- | No suffix.
     AbstractFloat
@@ -452,6 +436,7 @@ data FloatLitType
     LitF16
   deriving (Eq, Ord, Show)
 
+-- | An expression.  See https://www.w3.org/TR/WGSL/#expressions.
 data Exp
   = BoolExp Bool
   | -- | An integer literal.  Prefer 'intExp', which checks that the value can
@@ -462,42 +447,35 @@ data Exp
   | VarExp Ident
   | BinOpExp BinOp Exp Exp
   | UnOpExp UnOp Exp
-  | -- | A call.  The first expression list is the template argument list of
-    -- the callee, as in @bitcast<i32>(x)@; it is usually empty.  See
-    -- https://www.w3.org/TR/WGSL/#syntax-call_phrase.
+  | -- | A call.  The first list is the callee's template arguments, as in
+    -- @bitcast<i32>(x)@.
     CallExp Ident [Exp] [Exp]
-  | -- | A type used where the grammar expects an expression, which is where
-    -- template arguments live.
+  | -- | A type in expression position, as a template argument is.
     TypeExp Type
   | IndexExp Exp Exp
   | FieldExp Exp Ident
   deriving (Eq, Ord, Show)
 
+-- | A statement.  See https://www.w3.org/TR/WGSL/#statements.
 data Stmt
   = -- | The empty statement.
     Empty
-  | -- | This technically is not a statement in WGSL, but it is useful for
-    -- legibility of generated code. Produces a line comment. The comment may
-    -- have linebreaks.
+  | -- | A line comment, which is not a statement in WGSL, but is useful in
+    -- generated code.  May contain linebreaks.
     Comment T.Text
-  | -- | A compound statement, which introduces a new scope.
-    Compound [Stmt]
+  | Compound [Stmt]
   | -- | @let x = e@, with an optional type.
     Let Ident (Maybe Type) Exp
   | -- | @const x = e@, with an optional type.
     Const Ident (Maybe Type) Exp
-  | -- | @var x : T = e@.  At least one of the type and the initialiser must be
-    -- present, or the type of the variable is not known.
+  | -- | @var x : T = e@.
     DeclareVar Ident (Maybe Type) (Maybe Exp)
-  | -- | The left-hand side must be an assignable expression.  See
-    -- https://www.w3.org/TR/WGSL/#assignment.
-    Assign Exp AssignOp Exp
-  | -- | @_ = e@, which evaluates @e@ and discards the result.
+  | Assign Exp AssignOp Exp
+  | -- | @_ = e@.
     PhonyAssign Exp
   | Increment Exp
   | Decrement Exp
-  | -- | A @const_assert@ statement.  'GlobalAssert' is its module-scope
-    -- counterpart.
+  | -- | @const_assert e@.  'GlobalAssert' is its module-scope counterpart.
     ConstAssert Exp
   | -- | An @if@, its @else if@ clauses, and its optional @else@ clause.
     If Exp [Stmt] [(Exp, [Stmt])] (Maybe [Stmt])
@@ -510,9 +488,7 @@ data Stmt
   | Continue
   | Discard
   | Call Ident [Exp] [Exp]
-  | -- | The expression must be present exactly when the enclosing function
-    -- has a return type.
-    Return (Maybe Exp)
+  | Return (Maybe Exp)
   deriving (Eq, Ord, Show)
 
 -- | A clause of a @switch@ statement.  See
@@ -520,12 +496,12 @@ data Stmt
 data SwitchClause
   = -- | A @case@ with one or more selectors.
     Case (NonEmpty CaseSelector) [Stmt]
-  | -- | A @default@ clause on its own.  Equivalently, 'Case' may list
-    -- 'CaseDefault' among its selectors.
+  | -- | A @default@ clause on its own.
     DefaultCase [Stmt]
   deriving (Eq, Ord, Show)
 
--- | A selector of a @case@ clause.
+-- | A selector of a @case@ clause.  See
+-- https://www.w3.org/TR/WGSL/#switch-statement.
 data CaseSelector
   = CaseExp Exp
   | CaseDefault
@@ -565,10 +541,13 @@ data ForUpdate
   | UpdateCall Ident [Exp] [Exp]
   deriving (Eq, Ord, Show)
 
+-- | An attribute.  See https://www.w3.org/TR/WGSL/#attributes.
 data Attrib = Attrib Ident [Exp]
   deriving (Eq, Ord, Show)
 
-data Param = Param Ident Type [Attrib]
+-- | A formal parameter of a function.  See
+-- https://www.w3.org/TR/WGSL/#function-declaration-sec.
+data Param = Param [Attrib] Ident Type
   deriving (Eq, Ord, Show)
 
 -- | A function declaration.  See
@@ -582,9 +561,12 @@ data FunDecl = FunDecl
   }
   deriving (Eq, Ord, Show)
 
+-- | A structure member.  See https://www.w3.org/TR/WGSL/#struct-types.
 data Field = Field [Attrib] Ident Type
   deriving (Eq, Ord, Show)
 
+-- | A structure declaration.  See
+-- https://www.w3.org/TR/WGSL/#struct-types.
 data StructDecl = StructDecl Ident [Field]
   deriving (Eq, Ord, Show)
 
@@ -593,10 +575,8 @@ data StructDecl = StructDecl Ident [Field]
 data AccessMode = Read | Write | ReadWrite
   deriving (Eq, Ord, Show)
 
--- | The address spaces that can be written in WGSL source.  The @handle@
--- address space is never written, so it is not represented.  Only @Storage@
--- supports more than one access mode.  See
--- https://www.w3.org/TR/WGSL/#address-spaces.
+-- | An address space.  The @handle@ space is never written in WGSL source, so
+-- it is not represented.  See https://www.w3.org/TR/WGSL/#address-spaces.
 data AddressSpace
   = Function
   | Private
@@ -615,8 +595,7 @@ data GlobalDecl
     -- defaults to the one of the address space when omitted.
     GlobalVar [Attrib] AddressSpace (Maybe AccessMode) Ident (Maybe Type) (Maybe Exp)
   | GlobalOverride [Attrib] Ident (Maybe Type) (Maybe Exp)
-  | -- | A module-scope @const@, which takes no attributes and must have an
-    -- initialiser.
+  | -- | A module-scope @const@, which takes no attributes.
     GlobalConst Ident (Maybe Type) Exp
   | -- | A type alias.
     GlobalAlias Ident Type
@@ -624,8 +603,7 @@ data GlobalDecl
     GlobalAssert Exp
   deriving (Eq, Ord, Show)
 
--- | A WGSL module.  Directives must precede all declarations, which this
--- representation enforces.  See
+-- | A WGSL module: its directives, then its declarations.  See
 -- https://www.w3.org/TR/WGSL/#wgsl-module-definition.
 data Module = Module [Directive] [GlobalDecl]
   deriving (Eq, Ord, Show)
@@ -634,13 +612,13 @@ data Module = Module [Directive] [GlobalDecl]
 data Directive
   = Enable (NonEmpty EnableExtension)
   | Requires (NonEmpty LanguageExtension)
-  | -- | A diagnostic filter.  The rule name is not a closed set, as
-    -- implementations may provide their own, so it is spelled out.
+  | -- | A diagnostic filter.  Rule names are not a closed set, so the rule is
+    -- given as an identifier.
     Diagnostic Severity Ident
   deriving (Eq, Ord, Show)
 
--- | The severity of a diagnostic, in the specification's order from greatest
--- to least.  See https://www.w3.org/TR/WGSL/#diagnostics.
+-- | The severity of a diagnostic.  See
+-- https://www.w3.org/TR/WGSL/#diagnostics.
 data Severity = Error | Warning | Info | Off
   deriving (Eq, Ord, Show)
 
@@ -674,6 +652,8 @@ data LanguageExtension
   | SwizzleAssignment
   deriving (Eq, Ord, Show)
 
+-- | The @\@group@ and @\@binding@ attributes for the given group and
+-- binding.
 bindingAttribs :: Int -> Int -> [Attrib]
 bindingAttribs grp binding =
   [ Attrib "group" [IntExp grp AbstractInt],
@@ -694,8 +674,7 @@ intExp v t
     magnitude = abs $ toInteger v
 
 -- | Construct a floating point literal, or 'Nothing' if the value cannot be
--- denoted by a literal of the given type. WGSL has no literal for infinities or
--- NaN, and the magnitude must not exceed the largest finite value of the type.
+-- denoted by a literal of the given type.
 floatExp :: Double -> FloatLitType -> Maybe Exp
 floatExp v t
   | isNaN v || isInfinite v = Nothing
@@ -1005,7 +984,7 @@ instance Pretty Attrib where
     "@" <> pretty name <> parens (commasep $ map pretty args)
 
 instance Pretty Param where
-  pretty (Param name typ attribs)
+  pretty (Param attribs name typ)
     | null attribs = pretty name <+> ":" <+> pretty typ
     | otherwise =
         stack

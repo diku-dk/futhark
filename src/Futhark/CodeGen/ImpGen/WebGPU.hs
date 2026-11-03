@@ -160,13 +160,13 @@ addScalar field = modify $ \s -> s {ksScalars = ksScalars s ++ [field]}
 entryParams :: [WGSL.Param]
 entryParams =
   [ WGSL.Param
+      [WGSL.Attrib "builtin" [WGSL.VarExp "workgroup_id"]]
       "workgroup_id"
-      (WGSL.Vec3 WGSL.U32)
-      [WGSL.Attrib "builtin" [WGSL.VarExp "workgroup_id"]],
+      (WGSL.Vec3 WGSL.U32),
     WGSL.Param
+      [WGSL.Attrib "builtin" [WGSL.VarExp "local_invocation_id"]]
       "local_id"
       (WGSL.Vec3 WGSL.U32)
-      [WGSL.Attrib "builtin" [WGSL.VarExp "local_invocation_id"]]
   ]
 
 builtinLockstepWidth :: KernelM WGSL.Ident
@@ -270,7 +270,7 @@ genFunParams =
     MemParam _ _ -> compilerLimitation "WebGPU backend cannot handle GPU functions with memory parameters."
     ScalarParam name tp -> do
       ident <- getIdent name
-      pure $ WGSL.Param ident (wgslPrimType tp) []
+      pure $ WGSL.Param [] ident (wgslPrimType tp)
 
 generateDeviceFun :: Name -> ImpGPU.Function ImpGPU.KernelOp -> KernelM ()
 generateDeviceFun fname device_func = do
@@ -290,17 +290,17 @@ generateDeviceFun fname device_func = do
       -- parameters.  A single result is returned directly; several results are
       -- written through pointer parameters, as WGSL functions return at most
       -- one value.
-      let declare (WGSL.Param v typ _) = WGSL.DeclareVar v (Just typ) Nothing
-          outPtrParam (WGSL.Param v t a) =
-            WGSL.Param (v <> "_out") (WGSL.Ptr t WGSL.Function Nothing) a
-          writeOutPtr (WGSL.Param v _ _) =
+      let declare (WGSL.Param _ v typ) = WGSL.DeclareVar v (Just typ) Nothing
+          outPtrParam (WGSL.Param a v t) =
+            WGSL.Param a (v <> "_out") (WGSL.Ptr t WGSL.Function Nothing)
+          writeOutPtr (WGSL.Param _ v _) =
             WGSL.Assign
               (WGSL.UnOpExp WGSL.Indirection (WGSL.VarExp (v <> "_out")))
               WGSL.SimpleAssign
               (WGSL.VarExp v)
           (fun_params, fun_return, fun_body) = case out_params of
             [] -> (in_params, Nothing, body)
-            [p@(WGSL.Param v typ _)] ->
+            [p@(WGSL.Param _ v typ)] ->
               ( in_params,
                 Just ([], typ),
                 [declare p] ++ body ++ [WGSL.Return $ Just $ WGSL.VarExp v]

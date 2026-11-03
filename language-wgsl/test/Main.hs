@@ -201,7 +201,7 @@ funDeclTests =
   testGroup
     "FunDecl"
     [ testCase "without return type" $
-        render (FunDecl "f" [] [Param "a" I32 []] Nothing [Call "g" [] [VarExp "a"]])
+        render (FunDecl "f" [] [Param [] "a" I32] Nothing [Call "g" [] [VarExp "a"]])
           @?= "fn f(\n  a : i32\n) {\n  g(a);\n}",
       testCase "with return type" $
         render
