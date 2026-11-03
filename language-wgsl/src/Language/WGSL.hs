@@ -8,15 +8,8 @@
 -- but fine for code generation. I would not be opposed to adding a concrete
 -- syntax module in the future.
 module Language.WGSL
-  ( Ident,
-    roundUp,
-    alignOf,
-    sizeOf,
-    elementStride,
-    hostShareable,
-    alignOfStruct,
-    offsetOfMembers,
-    sizeOfStruct,
+  ( -- * AST
+    Ident,
     Type (..),
     TextureDim (..),
     StorageTextureDim (..),
@@ -27,8 +20,6 @@ module Language.WGSL
     BinOp,
     UnOp,
     Exp (..),
-    intExp,
-    floatExp,
     Stmt (..),
     ForUpdate (..),
     Attrib (..),
@@ -39,9 +30,22 @@ module Language.WGSL
     Declaration (..),
     AccessMode (..),
     AddressSpace (..),
-    bindingAttribs,
-    bitcast,
     prettyDecls,
+
+    -- * Construction
+    intExp,
+    floatExp,
+    bitcast,
+    bindingAttribs,
+
+    -- * Alignment and size
+    alignOf,
+    sizeOf,
+    elementStride,
+    hostShareable,
+    alignOfStruct,
+    offsetOfMembers,
+    sizeOfStruct,
   )
 where
 

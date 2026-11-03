@@ -293,10 +293,7 @@ layoutTests :: TestTree
 layoutTests =
   testGroup
     "alignOf and sizeOf"
-    [ testCase "roundUp" $
-        map (uncurry roundUp) [(16, 12), (4, 4), (16, 0), (8, 9)]
-          @?= [16, 4, 0, 16],
-      -- bool is not host-shareable, but it does have a fixed footprint.
+    [ -- bool is not host-shareable, but it does have a fixed footprint.
       testCase "bool" $ layout Bool @?= Just (4, 4),
       testCase "i32" $ layout I32 @?= Just (4, 4),
       testCase "f16" $ layout F16 @?= Just (2, 2),
