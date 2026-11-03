@@ -613,8 +613,13 @@ data GlobalDecl
   | GlobalStruct StructDecl
   | -- | The access mode may only be given along with the address space, and
     -- defaults to the one of the address space when omitted.
-    GlobalVar [Attrib] AddressSpace (Maybe AccessMode) Ident Type
-  | GlobalOverride [Attrib] Ident Type (Maybe Exp)
+    GlobalVar [Attrib] AddressSpace (Maybe AccessMode) Ident (Maybe Type) (Maybe Exp)
+  | GlobalOverride [Attrib] Ident (Maybe Type) (Maybe Exp)
+  | -- | A module-scope @const@, which takes no attributes and must have an
+    -- initialiser.
+    GlobalConst Ident (Maybe Type) Exp
+  | -- | A type alias.
+    GlobalAlias Ident Type
   | -- | A module-scope @const_assert@.
     GlobalAssert Exp
   deriving (Eq, Ord, Show)
@@ -895,10 +900,7 @@ instance Pretty Stmt where
   pretty (Const x t e) =
     "const" <+> optionallyTyped x t <+> "=" <+> pretty e <> ";"
   pretty (DeclareVar x t e) =
-    "var"
-      <+> optionallyTyped x t
-      <> maybe mempty ((" =" <+>) . pretty) e
-      <> ";"
+    "var" <+> optionallyTyped x t <> prettyInit e <> ";"
   pretty (Assign lhs op e) = pretty lhs <+> pretty op <+> pretty e <> ";"
   pretty (PhonyAssign e) = "_" <+> "=" <+> pretty e <> ";"
   pretty (Increment e) = pretty e <> "++;"
@@ -966,6 +968,10 @@ block = braceBlock . map pretty
 -- | An @optionally_typed_ident@.
 optionallyTyped :: Ident -> Maybe Type -> Doc a
 optionallyTyped x t = pretty x <> maybe mempty ((" :" <+>) . pretty) t
+
+-- | An optional initialiser.
+prettyInit :: Maybe Exp -> Doc a
+prettyInit = maybe mempty ((" =" <+>) . pretty)
 
 instance Pretty AssignOp where
   pretty SimpleAssign = "="
@@ -1102,30 +1108,23 @@ instance Pretty Module where
 instance Pretty GlobalDecl where
   pretty (GlobalFun fun) = pretty fun
   pretty (GlobalStruct struct) = pretty struct
-  pretty (GlobalVar attribs as am name typ) =
+  pretty (GlobalVar attribs as am name typ e) =
     prettyAttribs attribs
       <> "var<"
       <> pretty as
       <> maybe "" ((", " <>) . pretty) am
       <> ">"
-      <+> pretty name
-      <+> ":"
-      <+> pretty typ
+      <+> optionallyTyped name typ
+      <> prettyInit e
       <> ";"
-  pretty (GlobalOverride attribs name typ Nothing) =
+  pretty (GlobalOverride attribs name typ e) =
     prettyAttribs attribs
       <> "override"
-      <+> pretty name
-      <+> ":"
-      <+> pretty typ
+      <+> optionallyTyped name typ
+      <> prettyInit e
       <> ";"
+  pretty (GlobalConst name typ e) =
+    "const" <+> optionallyTyped name typ <+> "=" <+> pretty e <> ";"
+  pretty (GlobalAlias name t) =
+    "alias" <+> pretty name <+> "=" <+> pretty t <> ";"
   pretty (GlobalAssert e) = "const_assert" <+> pretty e <> ";"
-  pretty (GlobalOverride attribs name typ (Just initial)) =
-    prettyAttribs attribs
-      <> "override"
-      <+> pretty name
-      <+> ":"
-      <+> pretty typ
-      <+> "="
-      <+> pretty initial
-      <> ";"

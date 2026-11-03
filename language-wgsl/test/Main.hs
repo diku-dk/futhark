@@ -79,19 +79,19 @@ globalVarTests =
   testGroup
     "GlobalVar"
     [ testCase "without access mode" $
-        render (GlobalVar [] Workgroup Nothing "x" I32)
+        render (GlobalVar [] Workgroup Nothing "x" (Just I32) Nothing)
           @?= "var<workgroup> x : i32;",
       testCase "with access mode" $
-        render (GlobalVar [] Storage (Just ReadWrite) "x" (Array I32 Nothing))
+        render (GlobalVar [] Storage (Just ReadWrite) "x" (Just (Array I32 Nothing)) Nothing)
           @?= "var<storage, read_write> x : array<i32>;",
       testCase "private" $
-        render (GlobalVar [] Private Nothing "x" F32)
+        render (GlobalVar [] Private Nothing "x" (Just F32) Nothing)
           @?= "var<private> x : f32;",
       testCase "immediate" $
-        render (GlobalVar [] Immediate Nothing "x" (Named "S"))
+        render (GlobalVar [] Immediate Nothing "x" (Just (Named "S")) Nothing)
           @?= "var<immediate> x : S;",
       testCase "with attributes" $
-        render (GlobalVar (bindingAttribs 0 1) Storage (Just Read) "x" (Array F32 Nothing))
+        render (GlobalVar (bindingAttribs 0 1) Storage (Just Read) "x" (Just (Array F32 Nothing)) Nothing)
           @?= "@group(0) @binding(1)\nvar<storage, read> x : array<f32>;"
     ]
 
@@ -643,10 +643,10 @@ attributeTests =
           @?= "struct S {\n  a : i32,\n  @size(16) b : f32\n}",
       testCase "override identifier" $
         render
-          (GlobalOverride [Attrib "id" [IntExp 7 AbstractInt]] "n" I32 Nothing)
+          (GlobalOverride [Attrib "id" [IntExp 7 AbstractInt]] "n" (Just I32) Nothing)
           @?= "@id(7)\noverride n : i32;",
       testCase "override without attributes" $
-        render (GlobalOverride [] "n" I32 (Just (IntExp 0 AbstractInt)))
+        render (GlobalOverride [] "n" (Just I32) (Just (IntExp 0 AbstractInt)))
           @?= "override n : i32 = 0;"
     ]
 
@@ -779,11 +779,11 @@ moduleTests =
         render
           ( Module
               [Enable (EnableF16 :| [])]
-              [GlobalVar [] Private Nothing "x" F16]
+              [GlobalVar [] Private Nothing "x" (Just F16) Nothing]
           )
           @?= "enable f16;\nvar<private> x : f16;",
       testCase "without directives" $
-        render (Module [] [GlobalVar [] Private Nothing "x" F32])
+        render (Module [] [GlobalVar [] Private Nothing "x" (Just F32) Nothing])
           @?= "var<private> x : f32;",
       testCase "const_assert" $
         render (Module [] [GlobalAssert (VarExp "c")])
@@ -950,6 +950,31 @@ forUpdateTests =
               ]
     ]
 
+-- | The remaining module-scope declarations.  See
+-- https://www.w3.org/TR/WGSL/#module-scope-declarations.
+globalDeclTests :: TestTree
+globalDeclTests =
+  testGroup
+    "other declarations"
+    [ testCase "alias" $
+        render (GlobalAlias "i16" I32) @?= "alias i16 = i32;",
+      testCase "const" $
+        map render [GlobalConst "N" Nothing one, GlobalConst "N" (Just I32) one]
+          @?= ["const N = 1;", "const N : i32 = 1;"],
+      -- A module-scope variable's type is optional, and one in the private
+      -- address space may have an initialiser.
+      testCase "variable initialiser" $
+        map
+          render
+          [ GlobalVar [] Private Nothing "x" (Just F32) Nothing,
+            GlobalVar [] Private Nothing "x" Nothing (Just one),
+            GlobalVar [] Private Nothing "x" (Just F32) (Just one)
+          ]
+          @?= ["var<private> x : f32;", "var<private> x = 1;", "var<private> x : f32 = 1;"],
+      testCase "override without a type" $
+        render (GlobalOverride [] "k" Nothing (Just one)) @?= "override k = 1;"
+    ]
+
 tests :: TestTree
 tests =
   testGroup
@@ -985,6 +1010,7 @@ tests =
       testGroup
         "declarations"
         [ globalVarTests,
+          globalDeclTests,
           funDeclTests,
           attributeTests,
           directiveTests,

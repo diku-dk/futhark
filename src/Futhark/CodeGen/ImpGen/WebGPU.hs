@@ -125,7 +125,7 @@ assignBindSlot = do
 -- module.
 addOverride :: WGSL.Ident -> WGSL.Type -> Maybe WGSL.Exp -> KernelM ()
 addOverride ident typ e = do
-  addDecl $ WGSL.GlobalOverride [] ident typ e
+  addDecl $ WGSL.GlobalOverride [] ident (Just typ) e
   modify $ \s -> s {ksOverrides = ksOverrides s ++ [ident]}
 
 -- | Register an override identifier as describing the given dimension of the
@@ -710,7 +710,8 @@ genWGSLStm (DeclareMem name (Space "shared")) = do
               (Just $ WGSL.VarExp sizeName)
 
       addOverride sizeName WGSL.I32 (Just $ WGSL.IntExp 0 WGSL.AbstractInt)
-      addDecl $ WGSL.GlobalVar [] WGSL.Workgroup Nothing moduleName bufType
+      addDecl $
+        WGSL.GlobalVar [] WGSL.Workgroup Nothing moduleName (Just bufType) Nothing
       when atomic $ addAtomicMem moduleName
       addRename name' moduleName
       pure $ WGSL.Comment $ "declare_shared: " <> name'
@@ -1131,7 +1132,13 @@ genScalarDecls = do
   slot <- assignBindSlot
   let bufferAttribs = WGSL.bindingAttribs 0 slot
   addDecl $
-    WGSL.GlobalVar bufferAttribs WGSL.Uniform Nothing bufferName (WGSL.Named structName)
+    WGSL.GlobalVar
+      bufferAttribs
+      WGSL.Uniform
+      Nothing
+      bufferName
+      (Just $ WGSL.Named structName)
+      Nothing
 
 atomicOpArray :: ImpGPU.AtomicOp -> VName
 atomicOpArray (ImpGPU.AtomicAdd _ _ n _ _) = n
@@ -1240,7 +1247,8 @@ genMemoryDecls = do
           WGSL.Storage
           (Just WGSL.ReadWrite)
           ident
-          (wgslBufferType typ Nothing)
+          (Just $ wgslBufferType typ Nothing)
+          Nothing
     rename (name, _) = mkGlobalIdent name >>= addRename name
 
 -- | Generate `override` declarations for kernel 'ConstUse's and
