@@ -1,6 +1,5 @@
 -- Reads can be delayed into kernel bodies and combining operators.
 -- ==
--- tags { no_webgpu }
 -- structure gpu {
 --   /Index 0
 --   /SegRed 1

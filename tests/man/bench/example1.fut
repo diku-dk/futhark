@@ -1,7 +1,6 @@
 -- How quickly can we reduce arrays?
 --
 -- ==
--- tags { no_webgpu }
 -- nobench input { 0i64 }
 -- output { 0i64 }
 -- input { 100i64 }

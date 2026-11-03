@@ -137,13 +137,21 @@ builtinKernels =
   M.fromList $ concatMap generateKernels builtinKernelTemplates
   where
     builtinKernelTemplates =
-      [ ("lmad_copy_NAME", copyInterface RTS.lmadCopy),
-        ("map_transpose_NAME", transposeInterface RTS.mapTranspose),
-        ("map_transpose_NAME_low_height", transposeInterface RTS.mapTransposeLowHeight),
-        ("map_transpose_NAME_low_width", transposeInterface RTS.mapTransposeLowWidth),
-        ("map_transpose_NAME_small", transposeInterface RTS.mapTransposeSmall),
-        ("map_transpose_NAME_large", transposeInterfaceLarge RTS.mapTransposeLarge)
+      [ ("lmad_copy_NAME", copyScalars, RTS.lmadCopy),
+        ("map_transpose_NAME", transposeScalars, RTS.mapTranspose),
+        ("map_transpose_NAME_low_height", transposeScalars, RTS.mapTransposeLowHeight),
+        ("map_transpose_NAME_low_width", transposeScalars, RTS.mapTransposeLowWidth),
+        ("map_transpose_NAME_small", transposeScalars, RTS.mapTransposeSmall),
+        ("map_transpose_NAME_large", transposeLargeScalars, RTS.mapTransposeLarge)
       ]
+
+    -- The offsets of the fields of the scalars struct, and its size, which
+    -- must be a multiple of 16 bytes for a uniform buffer.
+    transposeScalars = ([0, 8, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56], 64)
+    transposeLargeScalars = ([0, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 92], 96)
+    -- The 'r' field is aligned to 8 bytes despite being an i32, due to uniform
+    -- buffer alignment requirements.
+    copyScalars = ([0, 8 .. 216], 224)
 
     generateKernelProgram kernel name elemType atomic =
       let baseKernel =
@@ -153,8 +161,24 @@ builtinKernels =
        in RTS.wgslPrelude
             <> T.replace "NAME" name (T.replace "ELEM_TYPE" elemType baseKernel)
 
-    generateKernels (template, interface) =
-      [ (nameFromText (T.replace "NAME" name template), interface name elemType atomic)
+    generateKernels (template, (offsets, size), program) =
+      [ ( nameFromText (T.replace "NAME" name template),
+          KernelInterface
+            { safety = SafetyNone,
+              scalarsOffsets = offsets,
+              scalarsSize = size,
+              scalarsBindSlot = 0,
+              memBindSlots = [1, 2],
+              overrideNames = ["block_size_x", "block_size_y", "block_size_z"],
+              dynamicBlockDims =
+                [ (0, "block_size_x"),
+                  (1, "block_size_y"),
+                  (2, "block_size_z")
+                ],
+              sharedMemoryOverrides = [],
+              gpuProgram = generateKernelProgram program name elemType atomic
+            }
+        )
       | (name, elemType, atomic) <-
           [ ("1b", "i8", True),
             ("2b", "i16", True),
@@ -162,60 +186,6 @@ builtinKernels =
             ("8b", "i64", False)
           ]
       ]
-
-    transposeInterface program name elemType atomic =
-      KernelInterface
-        { safety = SafetyNone,
-          scalarsOffsets = [0, 8, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56],
-          scalarsSize = 64, -- uniform buffers must be multiple of 16 bytes
-          scalarsBindSlot = 0,
-          memBindSlots = [1, 2],
-          overrideNames = ["block_size_x", "block_size_y", "block_size_z"],
-          dynamicBlockDims =
-            [ (0, "block_size_x"),
-              (1, "block_size_y"),
-              (2, "block_size_z")
-            ],
-          sharedMemoryOverrides = [],
-          gpuProgram = generateKernelProgram program name elemType atomic
-        }
-
-    transposeInterfaceLarge program name elemType atomic =
-      KernelInterface
-        { safety = SafetyNone,
-          scalarsOffsets = [0, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 92],
-          scalarsSize = 96, -- uniform buffers must be multiple of 16 bytes
-          scalarsBindSlot = 0,
-          memBindSlots = [1, 2],
-          overrideNames = ["block_size_x", "block_size_y", "block_size_z"],
-          dynamicBlockDims =
-            [ (0, "block_size_x"),
-              (1, "block_size_y"),
-              (2, "block_size_z")
-            ],
-          sharedMemoryOverrides = [],
-          gpuProgram = generateKernelProgram program name elemType atomic
-        }
-
-    copyInterface program name elemType atomic =
-      KernelInterface
-        { safety = SafetyNone,
-          -- note that we need to align the 'r' field to 8-bytes
-          -- despite it being an i32 due to uniform buffer alignment
-          -- requirements
-          scalarsOffsets = [0, 8 .. 216],
-          scalarsSize = 224, -- uniform buffers must be multiple of 16 bytes
-          scalarsBindSlot = 0,
-          memBindSlots = [1, 2],
-          overrideNames = ["block_size_x", "block_size_y", "block_size_z"],
-          dynamicBlockDims =
-            [ (0, "block_size_x"),
-              (1, "block_size_y"),
-              (2, "block_size_z")
-            ],
-          sharedMemoryOverrides = [],
-          gpuProgram = generateKernelProgram program name elemType atomic
-        }
 
 mkBoilerplate ::
   T.Text ->

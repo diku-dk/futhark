@@ -1,7 +1,6 @@
 -- Parallel kernels cannot be migrated into sequential kernels and thus blocks
 -- the migration of parent statements.
 -- ==
--- tags { no_webgpu }
 -- structure gpu {
 --   /Loop/Loop/If 1
 -- }

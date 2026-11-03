@@ -1,5 +1,4 @@
 -- ==
--- tags { no_webgpu }
 -- input { "12" }
 
 type del 'a = #E a | #Del u8

@@ -4,7 +4,7 @@
 -- requires a giant amount of memory.  Oh well.
 --
 -- ==
--- tags { no_ispc no_webgpu }
+-- tags { no_ispc }
 -- input { 300i64 }
 -- output { [[220i32, 284i32]] }
 

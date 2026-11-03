@@ -1,6 +1,6 @@
 -- Maximum
 -- ==
--- tags { autodiff no_webgpu }
+-- tags { autodiff }
 --  entry: fwd_map fwd_vec rev_map rev_vec
 --  input {
 --    5i64

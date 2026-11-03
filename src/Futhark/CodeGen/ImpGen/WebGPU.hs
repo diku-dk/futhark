@@ -13,7 +13,6 @@ import Control.Monad.Trans.RWS
 import Control.Monad.Trans.State qualified as State
 import Data.Bifunctor (first, second)
 import Data.Bits qualified as Bits
-import Data.List qualified as L
 import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromMaybe)
 import Data.Set qualified as S
@@ -38,10 +37,9 @@ data WebGPUS = WebGPUS
     -- | Interface of kernels already generated into wsCode.
     wsKernels :: [(WGSL.Ident, KernelInterface)],
     wsNextBindSlot :: Int,
-    -- | TODO comment on this
+    -- | Device functions already generated.
     wsDevFuns :: S.Set Name,
-    wsFuns :: ImpGPU.Functions ImpGPU.HostOp,
-    wsFunsMayFail :: S.Set Name
+    wsFuns :: ImpGPU.Functions ImpGPU.HostOp
   }
 
 -- The monad in which we perform the overall translation.
@@ -57,6 +55,15 @@ addCode code =
 
 newtype KernelR = KernelR {krKernel :: ImpGPU.Kernel}
 
+-- | What we know about a memory block used by a kernel.
+data MemInfo = MemInfo
+  { -- | Workgroup (shared) memory, rather than a storage buffer.
+    memShared :: Bool,
+    -- | Accessed atomically somewhere in the kernel, which means all accesses
+    -- must be atomic.
+    memAtomic :: Bool
+  }
+
 data KernelState = KernelState
   { -- Kernel declarations and body
     ksDecls :: [WGSL.GlobalDecl],
@@ -69,12 +76,15 @@ data KernelState = KernelState
     -- These describe the kernel interface.
     ksOverrides :: [WGSL.Ident],
     ksBlockDims :: [(Int, WGSL.Ident, Bool)],
-    -- TODO: Might be nice to combine sharedMem and atomicMem into some more
-    -- general information about memory in scope
-    ksSharedMem :: [(WGSL.Ident, Exp)],
-    ksAtomicMem :: [WGSL.Ident],
+    -- | Memory blocks declared by the kernel, by their (renamed) identifier.
+    ksMem :: M.Map WGSL.Ident MemInfo,
+    -- | Overrides giving the sizes of shared memory blocks, and the expressions
+    -- computing them at launch.
+    ksSharedMemSizes :: [(WGSL.Ident, Exp)],
     ksScalars :: [WGSL.StructMember],
-    ksBindSlots :: [Int]
+    ksBindSlots :: [Int],
+    -- | Workgroup variables used by 'uniformValue', by type.
+    ksUniformSlots :: M.Map PrimType WGSL.Ident
   }
 
 type KernelM = RWST KernelR () KernelState WebGPUM
@@ -131,26 +141,28 @@ addOverride ident typ e = do
 -- block size of the current kernel.
 addBlockDim :: Int -> WGSL.Ident -> Bool -> KernelM ()
 addBlockDim dim ident dynamic =
-  modify $ \s -> s {ksBlockDims = (dim, ident, dynamic) : ksBlockDims s}
+  modify $ \s -> s {ksBlockDims = ksBlockDims s ++ [(dim, ident, dynamic)]}
 
 -- | Registers an override identifier as describing the size of a shared memory
 -- buffer, with the expression being evaluated to get the size when launching
 -- the kernel.
-addSharedMem :: WGSL.Ident -> Exp -> KernelM ()
-addSharedMem ident e =
-  modify $ \s -> s {ksSharedMem = (ident, e) : ksSharedMem s}
+addSharedMemSize :: WGSL.Ident -> Exp -> KernelM ()
+addSharedMemSize ident e =
+  modify $ \s -> s {ksSharedMemSizes = (ident, e) : ksSharedMemSizes s}
 
-addAtomicMem :: WGSL.Ident -> KernelM ()
-addAtomicMem ident = modify $ \s -> s {ksAtomicMem = ident : ksAtomicMem s}
+addMem :: WGSL.Ident -> MemInfo -> KernelM ()
+addMem ident info = modify $ \s -> s {ksMem = M.insert ident info $ ksMem s}
 
--- | Whether the identifier is the name of a shared memory allocation.
--- TODO: Should probably store the allocation name in the state instead of
--- reconstructing the _size name here.
+-- | Memory not declared by 'addMem' (such as 'ScalarSpace' arrays) is neither
+-- shared nor atomic.
+memInfo :: WGSL.Ident -> KernelM MemInfo
+memInfo ident = gets $ M.findWithDefault (MemInfo False False) ident . ksMem
+
 isShared :: WGSL.Ident -> KernelM Bool
-isShared ident = any (\(sz, _) -> sz == ident <> "_size") <$> gets ksSharedMem
+isShared = fmap memShared . memInfo
 
 isAtomic :: WGSL.Ident -> KernelM Bool
-isAtomic ident = elem ident <$> gets ksAtomicMem
+isAtomic = fmap memAtomic . memInfo
 
 -- | Add a scalar struct field.
 addScalar :: WGSL.StructMember -> KernelM ()
@@ -188,10 +200,11 @@ genKernel kernel = do
             ksNameReplacements = mempty,
             ksOverrides = mempty,
             ksBlockDims = mempty,
-            ksAtomicMem = mempty,
-            ksSharedMem = mempty,
+            ksMem = mempty,
+            ksSharedMemSizes = mempty,
             ksScalars = mempty,
-            ksBindSlots = mempty
+            ksBindSlots = mempty,
+            ksUniformSlots = mempty
           }
 
   ((), s, ()) <- runRWST gen (KernelR kernel) initial
@@ -220,7 +233,7 @@ genKernel kernel = do
       offsets = fromMaybe [] $ WGSL.offsetOfMembers scalarMembers
       size = fromMaybe 4 $ WGSL.sizeOfStruct scalarMembers
   let dynamicBlockDims = [(dim, n) | (dim, n, True) <- ksBlockDims s]
-  let (sharedMemOverrides, sharedMemExps) = unzip $ ksSharedMem s
+  let (sharedMemOverrides, sharedMemExps) = unzip $ ksSharedMemSizes s
   let interface =
         KernelInterface
           { safety = SafetyNone, -- TODO
@@ -254,14 +267,8 @@ genKernel kernel = do
       wgslBody <- genWGSLStms (ImpGPU.kernelBody kernel)
       mapM_ addBodyStmt wgslBody
 
-calledInKernelOp :: ImpGPU.KernelOp -> S.Set Name
-calledInKernelOp = const mempty
-
 lookupFunction :: Name -> WebGPUS -> Maybe (ImpGPU.Function ImpGPU.HostOp)
 lookupFunction fname = lookup fname . unFunctions . wsFuns
-
-functionMayFail :: Name -> WebGPUS -> Bool
-functionMayFail fname = S.member fname . wsFunsMayFail
 
 genFunParams :: [Param] -> KernelM [WGSL.Param]
 genFunParams =
@@ -275,49 +282,44 @@ generateDeviceFun :: Name -> ImpGPU.Function ImpGPU.KernelOp -> KernelM ()
 generateDeviceFun fname device_func = do
   when (any memParam $ functionInput device_func) $
     compilerLimitation "WebGPU backend cannot generate GPU functions that use arrays."
-  ws <- lift State.get
   ks <- get
   r <- ask
   (body, _, _) <- lift $ runRWST (genWGSLStms (functionBody device_func)) r ks
 
-  if functionMayFail fname ws
-    then compilerLimitation "WebGPU backend Cannot handle GPU functions that may fail."
-    else do
-      in_params <- genFunParams (functionInput device_func)
-      out_params <- genFunParams (functionOutput device_func)
-      -- The body assigns the results to variables named after the output
-      -- parameters.  A single result is returned directly; several results are
-      -- written through pointer parameters, as WGSL functions return at most
-      -- one value.
-      let declare (WGSL.Param _ v typ) = WGSL.Var v (Just typ) Nothing
-          outPtrParam (WGSL.Param a v t) =
-            WGSL.Param a (v <> "_out") (WGSL.Ptr t WGSL.Function Nothing)
-          writeOutPtr (WGSL.Param _ v _) =
-            WGSL.Assign
-              (WGSL.ExpUnary WGSL.Indirection (WGSL.ExpIdent (v <> "_out")))
-              WGSL.AssignSimple
-              (WGSL.ExpIdent v)
-          (fun_params, fun_return, fun_body) = case out_params of
-            [] -> (in_params, Nothing, body)
-            [p@(WGSL.Param _ v typ)] ->
-              ( in_params,
-                Just ([], typ),
-                [declare p] ++ body ++ [WGSL.Return $ Just $ WGSL.ExpIdent v]
-              )
-            _ ->
-              ( in_params ++ map outPtrParam out_params,
-                Nothing,
-                map declare out_params ++ body ++ map writeOutPtr out_params
-              )
-      let wgslFun =
-            WGSL.FunctionDecl
-              { WGSL.functionName = "futrts_" <> textToIdent (nameToText fname),
-                WGSL.functionAttributes = mempty,
-                WGSL.functionParams = fun_params,
-                WGSL.functionReturn = fun_return,
-                WGSL.functionBody = fun_body
-              }
-       in prependDecl $ WGSL.GlobalFunction wgslFun
+  in_params <- genFunParams (functionInput device_func)
+  out_params <- genFunParams (functionOutput device_func)
+  -- The body assigns the results to variables named after the output
+  -- parameters.  A single result is returned directly; several results are
+  -- written through pointer parameters, as WGSL functions return at most one
+  -- value.
+  let declare (WGSL.Param _ v typ) = WGSL.Var v (Just typ) Nothing
+      outPtrParam (WGSL.Param a v t) =
+        WGSL.Param a (v <> "_out") (WGSL.Ptr t WGSL.Function Nothing)
+      writeOutPtr (WGSL.Param _ v _) =
+        WGSL.Assign
+          (WGSL.ExpUnary WGSL.Indirection (WGSL.ExpIdent (v <> "_out")))
+          WGSL.AssignSimple
+          (WGSL.ExpIdent v)
+      (fun_params, fun_return, fun_body) = case out_params of
+        [] -> (in_params, Nothing, body)
+        [p@(WGSL.Param _ v typ)] ->
+          ( in_params,
+            Just ([], typ),
+            [declare p] ++ body ++ [WGSL.Return $ Just $ WGSL.ExpIdent v]
+          )
+        _ ->
+          ( in_params ++ map outPtrParam out_params,
+            Nothing,
+            map declare out_params ++ body ++ map writeOutPtr out_params
+          )
+  prependDecl . WGSL.GlobalFunction $
+    WGSL.FunctionDecl
+      { WGSL.functionName = "futrts_" <> textToIdent (nameToText fname),
+        WGSL.functionAttributes = mempty,
+        WGSL.functionParams = fun_params,
+        WGSL.functionReturn = fun_return,
+        WGSL.functionBody = fun_body
+      }
 
   lift $ State.modify $ \s ->
     s
@@ -338,7 +340,7 @@ ensureDeviceFun fname host_func = do
 
 genDeviceFuns :: ImpGPU.KernelCode -> KernelM ()
 genDeviceFuns code = do
-  let called = calledFuncs calledInKernelOp code
+  let called = calledFuncs (const mempty) code
   forM_ (S.toList called) $ \fname -> do
     def <- lift $ State.gets $ lookupFunction fname
     case def of
@@ -390,8 +392,7 @@ kernelsToWebGPU prog =
             wsKernels = mempty,
             wsNextBindSlot = 0,
             wsDevFuns = mempty,
-            wsFuns = defFuns prog,
-            wsFunsMayFail = S.empty
+            wsFuns = defFuns prog
           }
 
       ((consts', funs'), translation) =
@@ -434,63 +435,37 @@ wgslPrimType Bool = WGSL.Bool
 -- TODO: Make sure we do not ever codegen statements involving Unit variables
 wgslPrimType Unit = WGSL.F16 -- error "TODO: no unit in WGSL"
 
-wgslBufferType :: (PrimType, Bool, Signedness) -> Maybe WGSL.Expression -> WGSL.Type
-wgslBufferType (Bool, _, _) = WGSL.Array $ WGSL.Atomic wgslInt8
-wgslBufferType (IntType Int8, _, _) = WGSL.Array $ WGSL.Atomic wgslInt8
-wgslBufferType (IntType Int16, _, _) = WGSL.Array $ WGSL.Atomic wgslInt16
-wgslBufferType (IntType Int32, False, _) = WGSL.Array WGSL.I32
-wgslBufferType (IntType Int32, True, _) =
-  WGSL.Array $ WGSL.Atomic WGSL.I32
-wgslBufferType (FloatType Float32, True, _) =
-  WGSL.Array $ WGSL.Atomic WGSL.I32
-wgslBufferType (FloatType Float16, True, _) =
-  WGSL.Array $ WGSL.Atomic WGSL.I32
-wgslBufferType (t, _, _) = WGSL.Array $ wgslPrimType t
+-- | Types smaller than a word, which storage buffers can only hold packed into
+-- 32-bit words, and only modify atomically, as neighbouring elements may be
+-- written concurrently.
+packedType :: PrimType -> Bool
+packedType t = t `elem` [Bool, IntType Int8, IntType Int16]
 
-wgslSharedBufferType ::
-  (PrimType, Bool, Signedness) ->
-  Maybe WGSL.Expression ->
-  WGSL.Type
-wgslSharedBufferType (Bool, _, _) = WGSL.Array WGSL.Bool
-wgslSharedBufferType (IntType Int8, True, _) = WGSL.Array $ WGSL.Atomic WGSL.I32
-wgslSharedBufferType (IntType Int16, True, _) = WGSL.Array $ WGSL.Atomic WGSL.I32
-wgslSharedBufferType (IntType Int8, False, _) = WGSL.Array WGSL.I32
-wgslSharedBufferType (IntType Int16, False, _) = WGSL.Array WGSL.I32
-wgslSharedBufferType (IntType Int32, False, _) = WGSL.Array WGSL.I32
-wgslSharedBufferType (IntType Int32, True, Signed) =
-  WGSL.Array $ WGSL.Atomic WGSL.I32
-wgslSharedBufferType (IntType Int32, True, Unsigned) =
-  WGSL.Array $ WGSL.Atomic WGSL.U32
-wgslSharedBufferType (FloatType Float32, True, _) =
-  WGSL.Array $ WGSL.Atomic WGSL.I32
-wgslSharedBufferType (FloatType Float16, True, _) =
-  WGSL.Array $ WGSL.Atomic WGSL.I32
-wgslSharedBufferType (t, _, _) = WGSL.Array $ wgslPrimType t
+-- | The type of a storage buffer, given the type of its elements and whether
+-- they are accessed atomically. Atomic buffers are arrays of words (an atomic
+-- i64 occupies two; see 'i64Words').
+wgslBufferType :: (PrimType, Bool) -> Maybe WGSL.Expression -> WGSL.Type
+wgslBufferType (t, atomic)
+  | atomic || packedType t = WGSL.Array $ WGSL.Atomic WGSL.I32
+  | otherwise = WGSL.Array $ wgslPrimType t
 
-packedElemIndex :: PrimType -> WGSL.Expression -> WGSL.Expression
-packedElemIndex Bool i = WGSL.ExpBinary WGSL.Divide i (WGSL.ExpInt 4 WGSL.AbstractInt)
-packedElemIndex (IntType Int8) i = WGSL.ExpBinary WGSL.Divide i (WGSL.ExpInt 4 WGSL.AbstractInt)
-packedElemIndex (IntType Int16) i = WGSL.ExpBinary WGSL.Divide i (WGSL.ExpInt 2 WGSL.AbstractInt)
-packedElemIndex (IntType Int32) i = i
-packedElemIndex (FloatType Float16) i = WGSL.ExpBinary WGSL.Divide i (WGSL.ExpInt 2 WGSL.AbstractInt)
-packedElemIndex (FloatType Float32) i = i
-packedElemIndex _ _ = error "CodeGen.ImpGen.WebGPU:packedElemIndex: Unsupported Type"
+-- | Like 'wgslBufferType', but for workgroup memory, which can hold any type
+-- natively.
+wgslSharedBufferType :: (PrimType, Bool) -> Maybe WGSL.Expression -> WGSL.Type
+wgslSharedBufferType (t, atomic)
+  | atomic = WGSL.Array $ WGSL.Atomic WGSL.I32
+  | otherwise = WGSL.Array $ wgslPrimType t
 
-packedElemOffset :: PrimType -> WGSL.Expression -> WGSL.Expression
-packedElemOffset Bool i = WGSL.ExpBinary WGSL.Remainder i (WGSL.ExpInt 4 WGSL.AbstractInt)
-packedElemOffset (IntType Int8) i = WGSL.ExpBinary WGSL.Remainder i (WGSL.ExpInt 4 WGSL.AbstractInt)
-packedElemOffset (IntType Int16) i = WGSL.ExpBinary WGSL.Remainder i (WGSL.ExpInt 2 WGSL.AbstractInt)
-packedElemOffset (IntType Int32) _ = WGSL.ExpInt 0 WGSL.AbstractInt
-packedElemOffset (FloatType Float16) i = WGSL.ExpBinary WGSL.Remainder i (WGSL.ExpInt 2 WGSL.AbstractInt)
-packedElemOffset (FloatType Float32) _ = WGSL.ExpInt 0 WGSL.AbstractInt
-packedElemOffset _ _ = error "CodeGen.ImpGen.WebGPU:packedElemOffset: Unsupported Type"
-
-nativeAccessType :: PrimType -> Bool
-nativeAccessType (IntType Int64) = True
-nativeAccessType (IntType Int32) = True
-nativeAccessType (FloatType Float32) = True
-nativeAccessType (FloatType Float16) = True
-nativeAccessType _ = False
+-- | How many elements of this type are stored in each word of an atomic
+-- buffer.
+elemsPerWord :: PrimType -> Int
+elemsPerWord Bool = 4
+elemsPerWord (IntType Int8) = 4
+elemsPerWord (IntType Int16) = 2
+elemsPerWord (FloatType Float16) = 2
+elemsPerWord (IntType Int32) = 1
+elemsPerWord (FloatType Float32) = 1
+elemsPerWord t = error $ "elemsPerWord: unsupported type " <> prettyString t
 
 nativeAccessSpace :: Space -> Bool
 nativeAccessSpace (ScalarSpace _ _) = True
@@ -504,25 +479,23 @@ genArrayAccess ::
   WGSL.Expression ->
   Bool ->
   [WGSL.Expression]
-genArrayAccess atomic t mem i packed = do
-  if not atomic
-    then [WGSL.ExpUnary WGSL.AddressOf (WGSL.ExpIdent mem), i]
-    else
-      if packed
-        then
-          let packedIndex = packedElemIndex t i
-              packedOffset = packedElemOffset t i
-           in [WGSL.ExpUnary WGSL.AddressOf (WGSL.ExpIndex (WGSL.ExpIdent mem) packedIndex), packedOffset]
-        else [WGSL.ExpUnary WGSL.AddressOf (WGSL.ExpIndex (WGSL.ExpIdent mem) i)]
+genArrayAccess atomic t mem i packed
+  | not atomic = [WGSL.ExpUnary WGSL.AddressOf (WGSL.ExpIdent mem), i]
+  | packed = [elemPtr word_i, word_offset]
+  | otherwise = [elemPtr i]
+  where
+    elemPtr = WGSL.ExpUnary WGSL.AddressOf . WGSL.ExpIndex (WGSL.ExpIdent mem)
+    (word_i, word_offset) = case elemsPerWord t of
+      1 -> (i, WGSL.ExpInt 0 WGSL.AbstractInt)
+      n ->
+        ( WGSL.ExpBinary WGSL.Divide i (WGSL.ExpInt n WGSL.AbstractInt),
+          WGSL.ExpBinary WGSL.Remainder i (WGSL.ExpInt n WGSL.AbstractInt)
+        )
 
 genArrayFun :: WGSL.Ident -> PrimType -> Bool -> Bool -> WGSL.Ident
-genArrayFun fun t atomic shared =
-  if atomic
-    then
-      let scope = if shared then "_shared" else "_global"
-          prefix = if atomic then "atomic_" else ""
-       in prefix <> fun <> "_" <> prettyText t <> scope
-    else fun <> "_" <> prettyText t
+genArrayFun fun t atomic shared
+  | atomic = "atomic_" <> fun <> "_" <> prettyText t <> if shared then "_shared" else "_global"
+  | otherwise = fun <> "_" <> prettyText t
 
 genReadExp ::
   PrimType ->
@@ -536,12 +509,18 @@ genReadExp t s mem i = do
   atomic <- isAtomic mem'
   i' <- indexExp i
 
-  if (nativeAccessSpace s || nativeAccessType t || shared) && not atomic
-    then pure $ WGSL.ExpIndex (WGSL.ExpIdent mem') i'
+  if atomic && t == IntType Int64
+    then
+      let (lo, hi) = i64Words mem' i'
+          load w = call "atomicLoad" [WGSL.ExpUnary WGSL.AddressOf w]
+       in pure $ call "i64" [load lo, load hi]
     else
-      let access = genArrayAccess atomic t mem' i' (not shared)
-          fun = genArrayFun "read" t atomic shared
-       in pure $ call fun access
+      if (nativeAccessSpace s || not (packedType t) || shared) && not atomic
+        then pure $ WGSL.ExpIndex (WGSL.ExpIdent mem') i'
+        else
+          let access = genArrayAccess atomic t mem' i' (not shared)
+              fun = genArrayFun "read" t atomic shared
+           in pure $ call fun access
 
 genArrayRead ::
   PrimType ->
@@ -569,12 +548,35 @@ genArrayWrite t s mem i v = do
   i' <- indexExp i
   v' <- v
 
-  if (nativeAccessSpace s || nativeAccessType t || shared) && not atomic
-    then pure $ WGSL.Assign (WGSL.ExpIndex (WGSL.ExpIdent mem') i') WGSL.AssignSimple v'
+  if atomic && t == IntType Int64
+    then
+      let (lo, hi) = i64Words mem' i'
+          tmp = WGSL.ExpIdent "i64_tmp"
+          store w j =
+            callStm "atomicStore" [WGSL.ExpUnary WGSL.AddressOf w, WGSL.ExpIndex tmp (WGSL.ExpInt j WGSL.AbstractInt)]
+       in pure $ WGSL.Compound [WGSL.Let "i64_tmp" Nothing v', store lo 0, store hi 1]
     else
-      let access = genArrayAccess atomic t mem' i' (not shared) ++ [v']
-          fun = genArrayFun "write" t atomic shared
-       in pure $ callStm fun access
+      if (nativeAccessSpace s || not (packedType t) || shared) && not atomic
+        then pure $ WGSL.Assign (WGSL.ExpIndex (WGSL.ExpIdent mem') i') WGSL.AssignSimple v'
+        else
+          let access = genArrayAccess atomic t mem' i' (not shared) ++ [v']
+              fun = genArrayFun "write" t atomic shared
+           in pure $ callStm fun access
+
+-- | WGSL has no 64-bit atomics, so an i64 buffer that is accessed atomically is
+-- an array of word pairs (low, high), and each half is accessed atomically by
+-- itself. This suffices for the only operations we support, which are reads
+-- and writes ('ImpGPU.AtomicWrite') that must be visible to other threads once
+-- these have synchronised with the writer, e.g. through an atomic counter, as
+-- the value is then not concurrently modified. Returns the two words of the
+-- element at the given index.
+i64Words :: WGSL.Ident -> WGSL.Expression -> (WGSL.Expression, WGSL.Expression)
+i64Words mem i =
+  ( WGSL.ExpIndex (WGSL.ExpIdent mem) lo,
+    WGSL.ExpIndex (WGSL.ExpIdent mem) (WGSL.ExpBinary WGSL.Add lo (WGSL.ExpInt 1 WGSL.AbstractInt))
+  )
+  where
+    lo = WGSL.ExpBinary WGSL.Multiply (WGSL.ExpInt 2 WGSL.AbstractInt) i
 
 genAtomicOp ::
   WGSL.Ident ->
@@ -608,30 +610,30 @@ genCopy ::
   KernelM WGSL.Statement
 genCopy pt shape (dst, dst_space) (dst_offset, dst_strides) (src, src_space) (src_offset, src_strides) = do
   shape' <- mapM (genWGSLExp . untyped . unCount) shape
-  body <- do
-    let dst_i = dst_offset + sum (zipWith (*) is' dst_strides)
-        src_i = src_offset + sum (zipWith (*) is' src_strides)
-        read' = genReadExp pt src_space src src_i
-     in pure <$> genArrayWrite pt dst_space dst dst_i read'
-
-  pure . WGSL.Compound $ loops (zip iis shape') body
+  let dst_i = dst_offset + sum (zipWith (*) is' dst_strides)
+      src_i = src_offset + sum (zipWith (*) is' src_strides)
+  body <- genArrayWrite pt dst_space dst dst_i $ genReadExp pt src_space src src_i
+  pure . WGSL.Compound $ foldr loop [body] (zip iis shape')
   where
-    (zero, one) = (WGSL.ExpIdent "zero_i64", WGSL.ExpIdent "one_i64")
     is = map (VName "i") [0 .. length shape - 1]
     is' :: [Count Elements (TExp Int64)]
     is' = map (elements . le64) is
     iis = map nameToIdent is
+    loop (i, n) body = [forLoop Int64 i n body]
 
-    loops :: [(WGSL.Ident, WGSL.Expression)] -> [WGSL.Statement] -> [WGSL.Statement]
-    loops [] body = body
-    loops ((i, n) : ins) body =
-      [ WGSL.For
-          i
-          zero
-          (wgslCmpOp (CmpUlt Int64) (WGSL.ExpIdent i) n)
-          (WGSL.UpdateAssign (WGSL.ExpIdent i) WGSL.AssignSimple $ wgslBinOp (Add Int64 OverflowWrap) (WGSL.ExpIdent i) one)
-          (loops ins body)
-      ]
+-- | @for (var i = 0; i < bound; i++) { body }@, for an unsigned bound of the
+-- given type.
+forLoop :: IntType -> WGSL.Ident -> WGSL.Expression -> [WGSL.Statement] -> WGSL.Statement
+forLoop t i bound =
+  WGSL.For
+    i
+    zero
+    (wgslCmpOp (CmpUlt t) (WGSL.ExpIdent i) bound)
+    (WGSL.UpdateAssign (WGSL.ExpIdent i) WGSL.AssignSimple $ wgslBinOp (Add t OverflowWrap) (WGSL.ExpIdent i) one)
+  where
+    (zero, one) = case t of
+      Int64 -> (WGSL.ExpIdent "zero_i64", WGSL.ExpIdent "one_i64")
+      _ -> (WGSL.ExpInt 0 WGSL.AbstractInt, WGSL.ExpInt 1 WGSL.AbstractInt)
 
 -- | Assign to a variable.
 assign :: WGSL.Ident -> WGSL.Expression -> WGSL.Statement
@@ -655,6 +657,41 @@ wgslProduct ((Constant (IntValue v)) : vs) =
   wgslBinOp (Mul Int32 OverflowWrap) (WGSL.ExpInt (valueIntegral v) WGSL.AbstractInt) (wgslProduct vs)
 wgslProduct _ = error "wgslProduct: non-constant product"
 
+-- | Whether the WGSL translation of this code contains a barrier. Besides
+-- 'ImpGPU.isBarrier', this includes 'ImpGPU.UniformRead', as
+-- @workgroupUniformLoad@ is a barrier.
+hasBarrier :: Code ImpGPU.KernelOp -> Bool
+hasBarrier = any $ \op -> ImpGPU.isBarrier op || isUniformRead op
+  where
+    isUniformRead ImpGPU.UniformRead {} = True
+    isUniformRead _ = False
+
+-- | Produce statements and an expression that yields the value of the given
+-- expression in a form that WGSL's uniformity analysis considers uniform. The
+-- analysis treats any value read from workgroup memory or a read_write storage
+-- buffer as non-uniform, and so rejects barriers under conditions that Futhark
+-- guarantees to be uniform across the block. Rather than replicate the analysis,
+-- conditions of control flow containing a barrier always go through
+-- @workgroupUniformLoad@ (see 'hasBarrier'). All threads write the value to a
+-- per-kernel workgroup variable; the preceding barrier ensures no thread is
+-- still reading a previous value from it, as the spec does not say whether the
+-- barrier in @workgroupUniformLoad@ precedes or follows the load.
+uniformValue :: PrimType -> WGSL.Expression -> KernelM ([WGSL.Statement], WGSL.Expression)
+uniformValue t e = do
+  slots <- gets ksUniformSlots
+  slot <- case M.lookup t slots of
+    Just slot -> pure slot
+    Nothing -> do
+      slot <- mkGlobalIdent $ "uniform_" <> prettyText t
+      addDecl $
+        WGSL.GlobalVariable [] WGSL.Workgroup Nothing slot (Just $ wgslPrimType t) Nothing
+      modify $ \s -> s {ksUniformSlots = M.insert t slot $ ksUniformSlots s}
+      pure slot
+  pure
+    ( [callStm "workgroupBarrier" [], assign slot e],
+      call "workgroupUniformLoad" [WGSL.ExpUnary WGSL.AddressOf $ WGSL.ExpIdent slot]
+    )
+
 -- | The statements of a code tree, with sequencing flattened away.
 codeStms :: Code ImpGPU.KernelOp -> [Code ImpGPU.KernelOp]
 codeStms Skip = []
@@ -672,28 +709,31 @@ genWGSLStm c@(_ :>>: _) = WGSL.Compound <$> genWGSLStms c
 genWGSLStm (For iName bound body) = do
   boundExp <- genWGSLExp bound
   bodyStm <- genWGSLStms body
-  pure $
-    WGSL.For
-      i
-      zero
-      (lt (WGSL.ExpIdent i) boundExp)
-      (WGSL.UpdateAssign (WGSL.ExpIdent i) WGSL.AssignSimple $ add (WGSL.ExpIdent i) one)
-      bodyStm
+  let loop bound' = forLoop boundIntType i bound' bodyStm
+  if hasBarrier body
+    then do
+      (pre, uniform_bound) <- uniformValue (IntType boundIntType) boundExp
+      let bound_ident = i <> "_bound"
+      pure . WGSL.Compound $
+        pre
+          ++ [ WGSL.Let bound_ident Nothing uniform_bound,
+               loop $ WGSL.ExpIdent bound_ident
+             ]
+    else pure $ loop boundExp
   where
     i = nameToIdent iName
     boundIntType = case primExpType bound of
       IntType t -> t
       _ -> error "non-integer Exp for loop bound"
-    add = wgslBinOp $ Add boundIntType OverflowWrap
-    lt = wgslCmpOp $ CmpUlt boundIntType
-    (zero, one) = case boundIntType of
-      Int64 -> (WGSL.ExpIdent "zero_i64", WGSL.ExpIdent "one_i64")
-      _ -> (WGSL.ExpInt 0 WGSL.AbstractInt, WGSL.ExpInt 1 WGSL.AbstractInt)
-genWGSLStm (While cond body) =
-  liftM2
-    WGSL.While
-    (genWGSLExp $ untyped cond)
-    (genWGSLStms body)
+genWGSLStm (While cond body) = do
+  cond' <- genWGSLExp $ untyped cond
+  body' <- genWGSLStms body
+  if hasBarrier body
+    then do
+      (pre, uniform_cond) <- uniformValue Bool cond'
+      let exit = WGSL.If (WGSL.ExpUnary WGSL.LogicalNegate uniform_cond) [WGSL.Break] [] Nothing
+      pure $ WGSL.Loop (pre ++ [exit] ++ body') Nothing
+    else pure $ WGSL.While cond' body'
 genWGSLStm (DeclareMem name (Space "shared")) = do
   let name' = nameToIdent name
   moduleName <- mkGlobalIdent name'
@@ -701,7 +741,7 @@ genWGSLStm (DeclareMem name (Space "shared")) = do
 
   maybeElemPrimType <- findSingleMemoryType name
   case maybeElemPrimType of
-    Just elemPrimType@(_, atomic, _) -> do
+    Just elemPrimType@(_, atomic) -> do
       let bufType =
             wgslSharedBufferType
               elemPrimType
@@ -710,7 +750,7 @@ genWGSLStm (DeclareMem name (Space "shared")) = do
       addOverride sizeName WGSL.I32 (Just $ WGSL.ExpInt 0 WGSL.AbstractInt)
       addDecl $
         WGSL.GlobalVariable [] WGSL.Workgroup Nothing moduleName (Just bufType) Nothing
-      when atomic $ addAtomicMem moduleName
+      addMem moduleName $ MemInfo {memShared = True, memAtomic = atomic}
       addRename name' moduleName
       pure $ WGSL.Comment $ "declare_shared: " <> name'
     Nothing ->
@@ -729,58 +769,38 @@ genWGSLStm s@(DeclareArray {}) = unsupported s
 genWGSLStm s@(Allocate {}) = unsupported s
 genWGSLStm s@(Free _ _) = pure $ WGSL.Comment $ "free: " <> prettyText s
 genWGSLStm (Copy pt shape dst dst_lmad src src_lmad) = genCopy pt shape dst dst_lmad src src_lmad
-genWGSLStm (Write mem i Bool s _ v) = genArrayWrite Bool s mem i (genWGSLExp v)
-genWGSLStm (Write mem i (IntType Int8) s _ v) = genArrayWrite (IntType Int8) s mem i (genWGSLExp v)
-genWGSLStm (Write mem i (IntType Int16) s _ v) = genArrayWrite (IntType Int16) s mem i (genWGSLExp v)
-genWGSLStm (Write mem i t s _ v) = do
-  mem' <- getIdent mem
-  i' <- indexExp i
-  v' <- genWGSLExp v
-  atomic <- isAtomic mem'
-  if atomic
-    then genArrayWrite t s mem i (genWGSLExp v)
-    else pure $ WGSL.Assign (WGSL.ExpIndex (WGSL.ExpIdent mem') i') WGSL.AssignSimple v'
+genWGSLStm (Write mem i t s _ v) = genArrayWrite t s mem i (genWGSLExp v)
 genWGSLStm (SetScalar name e) =
   liftM2 assign (getIdent name) (genWGSLExp e)
-genWGSLStm (Read tgt mem i Bool s _) = genArrayRead Bool s tgt mem i
-genWGSLStm (Read tgt mem i (IntType Int8) s _) = genArrayRead (IntType Int8) s tgt mem i
-genWGSLStm (Read tgt mem i (IntType Int16) s _) = genArrayRead (IntType Int16) s tgt mem i
-genWGSLStm (Read tgt mem i t s _) = do
-  tgt' <- getIdent tgt
-  mem' <- getIdent mem
-  i' <- indexExp i
-  atomic <- isAtomic mem'
-  if atomic
-    then genArrayRead t s tgt mem i
-    else pure $ assign tgt' (WGSL.ExpIndex (WGSL.ExpIdent mem') i')
+genWGSLStm (Read tgt mem i t s _) = genArrayRead t s tgt mem i
 genWGSLStm stm@(SetMem {}) =
   compilerLimitation . docText $
     "WebGPU backend Cannot handle SetMem statement"
       </> indent 2 (align (pretty stm))
       </> "in GPU kernel."
-genWGSLStm (Call [dest] f args) = do
-  fun <- call . ("futrts_" <>) <$> getIdent f
-  let getArg (ExpArg e) = genWGSLExp e
-      getArg (MemArg n) = WGSL.ExpIdent <$> getIdent n
-  argExps <- mapM getArg args
-  assign <$> getIdent dest <*> pure (fun argExps)
+-- See 'generateDeviceFun' for how results are returned.
 genWGSLStm (Call dests f args) = do
   fname <- ("futrts_" <>) <$> getIdent f
-  outIdents <- mapM getIdent dests
-
-  let getArg (ExpArg e) = genWGSLExp e
-      getArg (MemArg n) = WGSL.ExpIdent <$> getIdent n
-
-  argExps <- mapM getArg args
-  outExps <- mapM (pure . WGSL.ExpUnary WGSL.AddressOf . WGSL.ExpIdent) outIdents
-
-  pure $ callStm fname (argExps ++ outExps)
+  args' <- mapM getArg args
+  dests' <- mapM getIdent dests
+  pure $ case dests' of
+    [dest] -> assign dest $ call fname args'
+    _ -> callStm fname $ args' ++ map (WGSL.ExpUnary WGSL.AddressOf . WGSL.ExpIdent) dests'
+  where
+    getArg (ExpArg e) = genWGSLExp e
+    getArg (MemArg n) = WGSL.ExpIdent <$> getIdent n
 genWGSLStm (If cond cThen cElse) = do
   cond' <- genWGSLExp $ untyped cond
   cThen' <- genWGSLStms cThen
   cElse' <- genWGSLStms cElse
-  pure . WGSL.If cond' cThen' [] $
-    if null cElse' then Nothing else Just cElse'
+  let branch cond'' =
+        WGSL.If cond'' cThen' [] $
+          if null cElse' then Nothing else Just cElse'
+  if hasBarrier cThen || hasBarrier cElse
+    then do
+      (pre, uniform_cond) <- uniformValue Bool cond'
+      pure $ WGSL.Compound $ pre ++ [branch uniform_cond]
+    else pure $ branch cond'
 genWGSLStm s@(Assert {}) = pure $ WGSL.Comment $ "assert: " <> prettyText s
 genWGSLStm (Meta (MetaComment c)) =
   pure $ WGSL.Comment c
@@ -804,6 +824,16 @@ genWGSLStm (Op (ImpGPU.GetLocalSize dest i)) = do
 genWGSLStm (Op (ImpGPU.GetLockstepWidth dest)) = do
   destId <- getIdent dest
   assign destId . WGSL.ExpIdent <$> builtinLockstepWidth
+-- WGSL has no 64-bit atomics. An atomic write is only a write that must be
+-- visible to other threads, and this is supported (see 'i64Words'), but
+-- read-modify-write operations are not.
+genWGSLStm (Op (ImpGPU.Atomic _ op))
+  | ImpGPU.atomicOpType op == IntType Int64,
+    not (isWrite op) =
+      compilerLimitation "WebGPU backend does not support 64-bit atomic operations."
+  where
+    isWrite ImpGPU.AtomicWrite {} = True
+    isWrite _ = False
 genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicAdd t dest mem i e))) =
   genAtomicOp "add" (IntType t) dest mem i e
 genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicSMax t dest mem i e))) =
@@ -843,8 +873,11 @@ genWGSLStm (Op (ImpGPU.SharedAlloc name size)) = do
 
   maybeElemPrimType <- findSingleMemoryType name
   case maybeElemPrimType of
-    Just (elemPrimType, _, _) -> do
-      let elemSize = primByteSize elemPrimType :: Int32
+    Just (elemPrimType, atomic) -> do
+      -- The atomic words of an i64 buffer are i32s (see 'i64Words').
+      let elemSize
+            | atomic, elemPrimType == IntType Int64 = 4
+            | otherwise = primByteSize elemPrimType :: Int32
       -- WGSL does not permit arrays with zero elements, but the
       -- allocation is empty whenever the kernel has no work to do.
       let sizeExp =
@@ -855,7 +888,7 @@ genWGSLStm (Op (ImpGPU.SharedAlloc name size)) = do
                   ~/~ ValueExp (IntValue $ Int32Value elemSize)
               )
 
-      addSharedMem sizeName sizeExp
+      addSharedMemSize sizeName sizeExp
       pure $ WGSL.Comment $ "shared_alloc: " <> name'
     Nothing ->
       pure $ WGSL.Comment $ "discard shared_alloc: " <> name'
@@ -1138,85 +1171,34 @@ genScalarDecls = do
       (Just $ WGSL.Named structName)
       Nothing
 
-atomicOpArray :: ImpGPU.AtomicOp -> VName
-atomicOpArray (ImpGPU.AtomicAdd _ _ n _ _) = n
-atomicOpArray (ImpGPU.AtomicFAdd _ _ n _ _) = n
-atomicOpArray (ImpGPU.AtomicSMax _ _ n _ _) = n
-atomicOpArray (ImpGPU.AtomicSMin _ _ n _ _) = n
-atomicOpArray (ImpGPU.AtomicUMax _ _ n _ _) = n
-atomicOpArray (ImpGPU.AtomicUMin _ _ n _ _) = n
-atomicOpArray (ImpGPU.AtomicAnd _ _ n _ _) = n
-atomicOpArray (ImpGPU.AtomicOr _ _ n _ _) = n
-atomicOpArray (ImpGPU.AtomicXor _ _ n _ _) = n
-atomicOpArray (ImpGPU.AtomicCmpXchg _ _ n _ _ _) = n
-atomicOpArray (ImpGPU.AtomicXchg _ _ n _ _) = n
-atomicOpArray (ImpGPU.AtomicWrite _ n _ _) = n
-
--- We declare all our variables as the signed type and re-interpret when
--- necessary for operations.
-atomicOpType :: ImpGPU.AtomicOp -> (PrimType, Signedness)
-atomicOpType (ImpGPU.AtomicAdd t _ _ _ _) = (IntType t, Signed)
-atomicOpType (ImpGPU.AtomicFAdd t _ _ _ _) = (FloatType t, Signed)
-atomicOpType (ImpGPU.AtomicSMax t _ _ _ _) = (IntType t, Signed)
-atomicOpType (ImpGPU.AtomicSMin t _ _ _ _) = (IntType t, Signed)
-atomicOpType (ImpGPU.AtomicUMax t _ _ _ _) = (IntType t, Signed)
-atomicOpType (ImpGPU.AtomicUMin t _ _ _ _) = (IntType t, Signed)
-atomicOpType (ImpGPU.AtomicAnd t _ _ _ _) = (IntType t, Signed)
-atomicOpType (ImpGPU.AtomicOr t _ _ _ _) = (IntType t, Signed)
-atomicOpType (ImpGPU.AtomicXor t _ _ _ _) = (IntType t, Signed)
-atomicOpType (ImpGPU.AtomicCmpXchg t _ _ _ _ _) = (t, Signed)
-atomicOpType (ImpGPU.AtomicXchg t _ _ _ _) = (t, Signed)
-atomicOpType (ImpGPU.AtomicWrite t _ _ _) = (t, Signed)
-
 -- | Internally, memory buffers are untyped but WGSL requires us to annotate the
 -- binding with a type. Search the kernel body for any reads and writes to the
--- given buffer and return all types it is accessed at.
--- The bool indicates an atomic type. The Signedness is only relevant for atomic
--- types as described for `atomicOpType`.
-findMemoryTypes :: VName -> KernelM [(PrimType, Bool, Signedness)]
+-- given buffer and return all types it is accessed at, and whether the access
+-- is atomic.
+findMemoryTypes :: VName -> KernelM [(PrimType, Bool)]
 findMemoryTypes name = S.elems . find <$> asks (ImpGPU.kernelBody . krKernel)
   where
-    find (ImpGPU.Write n _ t _ _ _) | n == name = S.singleton (t, False, Signed)
-    find (ImpGPU.Read _ n _ t _ _) | n == name = S.singleton (t, False, Signed)
-    find (ImpGPU.Copy t _ (n, _) _ _ _) | n == name = S.singleton (t, False, Signed)
-    find (ImpGPU.Copy t _ _ _ (n, _) _) | n == name = S.singleton (t, False, Signed)
+    find (ImpGPU.Write n _ t _ _ _) | n == name = S.singleton (t, False)
+    find (ImpGPU.Read _ n _ t _ _) | n == name = S.singleton (t, False)
+    find (ImpGPU.Copy t _ (n, _) _ _ _) | n == name = S.singleton (t, False)
+    find (ImpGPU.Copy t _ _ _ (n, _) _) | n == name = S.singleton (t, False)
     find (Op (ImpGPU.Atomic _ op))
-      | atomicOpArray op == name =
-          let (t, sgn) = atomicOpType op
-           in S.singleton (t, True, sgn)
+      | ImpGPU.atomicOpMem op == name = S.singleton (ImpGPU.atomicOpType op, True)
     find (s1 :>>: s2) = find s1 <> find s2
     find (For _ _ body) = find body
     find (While _ body) = find body
     find (If _ s1 s2) = find s1 <> find s2
     find _ = S.empty
 
-findSingleMemoryType :: VName -> KernelM (Maybe (PrimType, Bool, Signedness))
+-- | The single type at which the kernel accesses the buffer, and whether any
+-- access is atomic, in which case all accesses must be (see 'isAtomic').
+findSingleMemoryType :: VName -> KernelM (Maybe (PrimType, Bool))
 findSingleMemoryType name = do
   types <- findMemoryTypes name
-  let prims = nubOrd $ map (\(t, _, _) -> t) types
-  case prims of
+  case nubOrd $ map fst types of
     [] -> pure Nothing
-    [prim] -> do
-      -- Only used at one primitive type. If it is an integer <=32 bit and there
-      -- are atomic accesses, make it the appropriate atomic type. Otherwise,
-      -- make sure there is only one type combination total.
-      let atomic = L.find (\(_, a, _) -> a) types
-      case atomic of
-        Just (_, _, sgn)
-          | canBeAtomic prim ->
-              if all (\(_, _, s) -> s == sgn) types
-                then pure $ Just (prim, True, sgn)
-                else error "Atomic type used at multiple signednesses"
-        Just (t, _, _) ->
-          error $ "Atomics not supported for values of type " <> show t
-        Nothing -> pure $ Just (prim, False, Signed)
+    [t] -> pure $ Just (t, any snd types)
     _tooMany -> error "Buffer used at multiple types"
-  where
-    canBeAtomic (IntType Int64) = False
-    canBeAtomic (IntType _) = True
-    canBeAtomic (FloatType _) = True
-    canBeAtomic Bool = True
-    canBeAtomic _ = False
 
 -- | Generate binding declarations for memory buffers used by kernel. Produces
 -- additional name replacements because it makes the binding names unique.
@@ -1237,8 +1219,7 @@ genMemoryDecls = do
     moduleDecl (name, typ) = do
       ident <- mkGlobalIdent name
       slot <- assignBindSlot
-      let (_, atomic, _) = typ
-      when atomic $ addAtomicMem ident
+      addMem ident $ MemInfo {memShared = False, memAtomic = snd typ}
       addDecl $
         WGSL.GlobalVariable
           (WGSL.bindingAttribs 0 slot)
@@ -1255,23 +1236,16 @@ genConstAndBuiltinDecls :: KernelM ()
 genConstAndBuiltinDecls = do
   kernel <- asks krKernel
 
-  -- Start off with handling the block size parameters.
-  let blockDimExps = zip [0 ..] $ ImpGPU.kernelBlockSize kernel
-  blockDimNames <- mapM (builtinBlockSize . fst) blockDimExps
-  let blockDims = zip blockDimExps blockDimNames
-  let constBlockDims = [(i, n, e) | ((i, Right e), n) <- blockDims]
-  let dynBlockDims = [(i, n, e) | ((i, Left e), n) <- blockDims]
-
-  forM_ blockDimNames $
-    \n -> addOverride n WGSL.I32 zeroInit
-
-  -- KernelConstExp block dims get generated into the general macro/override
-  -- machinery.
-  lift $
-    mapM_ (uncurry addMacroDef) [(nameFromText n, e) | (_, n, e) <- constBlockDims]
-
-  mapM_ (\(i, n, _e) -> addBlockDim i n True) dynBlockDims
-  mapM_ (\(i, n, _e) -> addBlockDim i n False) constBlockDims
+  -- Start off with handling the block size parameters. Constant block
+  -- dimensions get generated into the general macro/override machinery.
+  forM_ (zip [0 ..] $ ImpGPU.kernelBlockSize kernel) $ \(i, size) -> do
+    n <- builtinBlockSize i
+    addOverride n WGSL.I32 zeroInit
+    case size of
+      Left _ -> addBlockDim i n True
+      Right e -> do
+        lift $ addMacroDef (nameFromText n) e
+        addBlockDim i n False
 
   -- Next we generate builtin override declarations.
   lsWidth <- builtinLockstepWidth
@@ -1291,20 +1265,19 @@ genConstAndBuiltinDecls = do
   let mkConst (name, e) = do
         let n = nameToIdent name
         lo <- mkGlobalIdent (n <> "_lo")
-        hi <- mkGlobalIdent (n <> "_hi")
-        case primExpType e of
+        addOverride lo WGSL.I32 zeroInit
+        hi_exp <- case primExpType e of
           IntType Int64 -> do
-            addOverride lo WGSL.I32 zeroInit
+            hi <- mkGlobalIdent (n <> "_hi")
             addOverride hi WGSL.I32 zeroInit
             lift $ addMacroDef (nameFromText lo) (mkLo e)
             lift $ addMacroDef (nameFromText hi) (mkHi e)
-            addInitStmt $ WGSL.Var n (Just wgslInt64) Nothing
-            addInitStmt . assign n $ call "i64" [WGSL.ExpIdent lo, WGSL.ExpIdent hi]
+            pure $ WGSL.ExpIdent hi
           _ -> do
-            addOverride lo WGSL.I32 zeroInit
             lift $ addMacroDef (nameFromText lo) e
-            addInitStmt $ WGSL.Var n (Just wgslInt64) Nothing
-            addInitStmt . assign n $ call "i64" [WGSL.ExpIdent lo, WGSL.ExpInt 0 WGSL.AbstractInt]
+            pure $ WGSL.ExpInt 0 WGSL.AbstractInt
+        addInitStmt $ WGSL.Var n (Just wgslInt64) Nothing
+        addInitStmt . assign n $ call "i64" [WGSL.ExpIdent lo, hi_exp]
 
   mapM_ mkConst consts
   where

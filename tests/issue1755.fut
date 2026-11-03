@@ -1,5 +1,4 @@
 -- ==
--- tags { no_webgpu }
 -- input{} auto output
 
 type turn = bool
