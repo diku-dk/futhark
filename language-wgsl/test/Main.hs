@@ -180,7 +180,7 @@ funDeclTests =
   testGroup
     "FunDecl"
     [ testCase "without return type" $
-        render (FunDecl "f" [] [Param "a" (Prim Int32) []] Nothing (Call "g" [VarExp "a"]))
+        render (FunDecl "f" [] [Param "a" (Prim Int32) []] Nothing (Call "g" [] [VarExp "a"]))
           @?= "\nfn f(\n  a : i32\n) {\n  g(a);\n}",
       testCase "with return type" $
         render (FunDecl "f" [] [] (Just ([], Prim Int32)) (Return (Just (IntExp 1 AbstractInt))))
@@ -204,14 +204,14 @@ seqTests =
   testGroup
     "Seq"
     [ testCase "terminators" $
-        render (stmts [Call "f" [], Let "x" one, Call "g" []])
+        render (stmts [Call "f" [] [], Let "x" one, Call "g" [] []])
           @?= "f();\nlet x = 1;\ng();",
       -- The separator used to end up inside the comment.
       testCase "comment" $
-        render (stmts [Call "f" [], Comment "note", Call "g" []])
+        render (stmts [Call "f" [] [], Comment "note", Call "g" [] []])
           @?= "f();\n// note\ng();",
       testCase "compound statement" $
-        render (stmts [If (VarExp "c") (Call "f" []) Skip, Call "g" []])
+        render (stmts [If (VarExp "c") (Call "f" [] []) Skip, Call "g" [] []])
           @?= "if c {\n  f();\n}\ng();"
     ]
 
@@ -222,11 +222,33 @@ forTests =
   testGroup
     "For"
     [ testCase "assignment update" $
-        render (For "i" one (BinOpExp "<" (VarExp "i") one) (UpdateAssign (VarExp "i") one) (Call "f" []))
+        render (For "i" one (BinOpExp "<" (VarExp "i") one) (UpdateAssign (VarExp "i") one) (Call "f" [] []))
           @?= "for (var i = 1; (i < 1); i = 1) {\n  f();\n}",
       testCase "call update" $
-        render (For "i" one (VarExp "c") (UpdateCall "step" [VarExp "i"]) Skip)
+        render (For "i" one (VarExp "c") (UpdateCall "step" [] [VarExp "i"]) Skip)
           @?= "for (var i = 1; c; step(i)) {\n  ;\n}"
+    ]
+
+-- | A callee may carry a template argument list.  See
+-- https://www.w3.org/TR/WGSL/#syntax-call_phrase.
+callTests :: TestTree
+callTests =
+  testGroup
+    "CallExp"
+    [ testCase "without template arguments" $
+        render (CallExp "f" [] [VarExp "x"]) @?= "f(x)",
+      testCase "without arguments" $
+        render (CallExp "atomicLoad" [] []) @?= "atomicLoad()",
+      testCase "with a type argument" $
+        render (CallExp "vec2" [TypeExp (Prim Float32)] [one, one])
+          @?= "vec2<f32>(1, 1)",
+      testCase "bitcast" $
+        render (bitcast (Prim Int32) (VarExp "x")) @?= "bitcast<i32>(x)",
+      -- The template argument list end is disambiguated by the grammar, so a
+      -- nested list needs no space between the closing delimiters.
+      testCase "nested template arguments" $
+        render (bitcast (Prim (Vec2 Float16)) (VarExp "x"))
+          @?= "bitcast<vec2<f16>>(x)"
     ]
 
 tests :: TestTree
@@ -235,7 +257,7 @@ tests =
     "Language.WGSL"
     [ testGroup "types" [pointerTests],
       testGroup "memory" [accessModeTests],
-      testGroup "expressions" [intLitTests, floatLitTests],
+      testGroup "expressions" [intLitTests, floatLitTests, callTests],
       testGroup "statements" [seqTests, assignTests, returnTests, forTests],
       testGroup "declarations" [varDeclTests, funDeclTests]
     ]

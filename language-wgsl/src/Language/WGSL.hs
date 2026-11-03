@@ -32,7 +32,7 @@ module Language.WGSL
     AddressSpace (..),
     stmts,
     bindingAttribs,
-    to_i32,
+    bitcast,
     prettyDecls,
   )
 where
@@ -135,7 +135,13 @@ data Exp
   | VarExp Ident
   | BinOpExp BinOp Exp Exp
   | UnOpExp UnOp Exp
-  | CallExp Ident [Exp]
+  | -- | A call.  The first expression list is the template argument list of
+    -- the callee, as in @bitcast<i32>(x)@; it is usually empty.  See
+    -- https://www.w3.org/TR/WGSL/#syntax-call_phrase.
+    CallExp Ident [Exp] [Exp]
+  | -- | A type used where the grammar expects an expression, which is where
+    -- template arguments live.
+    TypeExp Type
   | IndexExp Ident Exp
   | FieldExp Exp Ident
 
@@ -154,7 +160,7 @@ data Stmt
   | If Exp Stmt Stmt
   | For Ident Exp Exp ForUpdate Stmt
   | While Exp Stmt
-  | Call Ident [Exp]
+  | Call Ident [Exp] [Exp]
   | -- | The expression must be present exactly when the enclosing function
     -- has a return type.
     Return (Maybe Exp)
@@ -164,7 +170,7 @@ data Stmt
 data ForUpdate
   = -- | The left-hand side must be an assignable expression.
     UpdateAssign Exp Exp
-  | UpdateCall Ident [Exp]
+  | UpdateCall Ident [Exp] [Exp]
 
 data Attrib = Attrib Ident [Exp]
 
@@ -251,10 +257,17 @@ floatExp v t
       F32 -> Just 3.40282346638528859812e38
       F16 -> Just 65504
 
-to_i32 :: Exp -> Exp
-to_i32 e = CallExp "bitcast<i32>" [e]
+-- | Reinterpret the bits of an expression as another type.  See
+-- https://www.w3.org/TR/WGSL/#bitcast-builtin.
+bitcast :: Type -> Exp -> Exp
+bitcast t e = CallExp "bitcast" [TypeExp t] [e]
 
 --- Prettyprinting definitions
+
+-- | A template argument list, which is omitted when empty.
+templateList :: [Exp] -> Doc a
+templateList [] = mempty
+templateList args = "<" <> commasep (map pretty args) <> ">"
 
 -- | Separate with commas.
 commasep :: [Doc a] -> Doc a
@@ -308,7 +321,9 @@ instance Pretty Exp where
   pretty (VarExp x) = pretty x
   pretty (UnOpExp op e) = parens (pretty op <> pretty e)
   pretty (BinOpExp op e1 e2) = parens (pretty e1 <+> pretty op <+> pretty e2)
-  pretty (CallExp f args) = pretty f <> parens (commasep $ map pretty args)
+  pretty (CallExp f targs args) =
+    pretty f <> templateList targs <> parens (commasep $ map pretty args)
+  pretty (TypeExp t) = pretty t
   pretty (IndexExp x i) = pretty x <> brackets (pretty i)
   pretty (FieldExp x y) = pretty x <> "." <> pretty y
 
@@ -362,13 +377,15 @@ instance Pretty Stmt where
       <+> "{"
         </> indent 2 (pretty body)
         </> "}"
-  pretty (Call f args) = pretty f <> parens (commasep $ map pretty args) <> ";"
+  pretty (Call f targs args) =
+    pretty f <> templateList targs <> parens (commasep $ map pretty args) <> ";"
   pretty (Return Nothing) = "return;"
   pretty (Return (Just e)) = "return" <+> pretty e <> ";"
 
 instance Pretty ForUpdate where
   pretty (UpdateAssign lhs e) = pretty lhs <+> "=" <+> pretty e
-  pretty (UpdateCall f args) = pretty f <> parens (commasep $ map pretty args)
+  pretty (UpdateCall f targs args) =
+    pretty f <> templateList targs <> parens (commasep $ map pretty args)
 
 instance Pretty Attrib where
   pretty (Attrib name []) = "@" <> pretty name
