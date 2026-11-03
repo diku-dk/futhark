@@ -802,9 +802,15 @@ genWGSLStm (Op (ImpGPU.SharedAlloc name size)) = do
   case maybeElemPrimType of
     Just (elemPrimType, _, _) -> do
       let elemSize = primByteSize elemPrimType :: Int32
+      -- WGSL does not permit arrays with zero elements, but the
+      -- allocation is empty whenever the kernel has no work to do.
       let sizeExp =
-            zExt Int32 (untyped (unCount size))
-              ~/~ ValueExp (IntValue $ Int32Value elemSize)
+            BinOpExp
+              (SMax Int32)
+              (ValueExp (IntValue $ Int32Value 1))
+              ( zExt Int32 (untyped (unCount size))
+                  ~/~ ValueExp (IntValue $ Int32Value elemSize)
+              )
 
       addSharedMem sizeName sizeExp
       pure $ WGSL.Comment $ "shared_alloc: " <> name'
