@@ -835,7 +835,7 @@ genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicFAdd t dest mem i e))) = genAtomic
 genWGSLStm (Op (ImpGPU.Barrier ImpGPU.FenceLocal)) =
   pure $ callStm "workgroupBarrier" []
 genWGSLStm (Op (ImpGPU.Barrier ImpGPU.FenceGlobal)) =
-  pure $ callStm "storageBarrier" []
+  pure $ WGSL.Compound [callStm "storageBarrier" [], callStm "workgroupBarrier" []]
 genWGSLStm s@(Op (ImpGPU.MemFence _)) = unsupported s
 genWGSLStm (Op (ImpGPU.SharedAlloc name size)) = do
   let name' = nameToIdent name
