@@ -60,7 +60,7 @@ newtype KernelR = KernelR {krKernel :: ImpGPU.Kernel}
 
 data KernelState = KernelState
   { -- Kernel declarations and body
-    ksDecls :: [WGSL.Declaration],
+    ksDecls :: [WGSL.GlobalDecl],
     ksInits :: [WGSL.Stmt],
     ksBody :: [WGSL.Stmt],
     -- | Identifier replacement map. We have to rename some identifiers; when
@@ -92,10 +92,10 @@ mkGlobalIdent ident = do
   kernelName <- asks (textToIdent . nameToText . ImpGPU.kernelName . krKernel)
   pure $ kernelName <> "_" <> ident
 
-addDecl :: WGSL.Declaration -> KernelM ()
+addDecl :: WGSL.GlobalDecl -> KernelM ()
 addDecl decl = modify $ \s -> s {ksDecls = ksDecls s ++ [decl]}
 
-prependDecl :: WGSL.Declaration -> KernelM ()
+prependDecl :: WGSL.GlobalDecl -> KernelM ()
 prependDecl decl = modify $ \s -> s {ksDecls = decl : ksDecls s}
 
 addInitStmt :: WGSL.Stmt -> KernelM ()
@@ -125,7 +125,7 @@ assignBindSlot = do
 -- module.
 addOverride :: WGSL.Ident -> WGSL.Type -> Maybe WGSL.Exp -> KernelM ()
 addOverride ident typ e = do
-  addDecl $ WGSL.OverrideDecl ident typ e
+  addDecl $ WGSL.GlobalOverride ident typ e
   modify $ \s -> s {ksOverrides = ksOverrides s ++ [ident]}
 
 -- | Register an override identifier as describing the given dimension of the
@@ -317,7 +317,7 @@ generateDeviceFun fname device_func = do
                 WGSL.funReturn = fun_return,
                 WGSL.funBody = fun_body
               }
-       in prependDecl $ WGSL.FunctionDecl wgslFun
+       in prependDecl $ WGSL.GlobalFun wgslFun
 
   lift $ State.modify $ \s ->
     s
@@ -709,7 +709,7 @@ genWGSLStm (DeclareMem name (Space "shared")) = do
               (Just $ WGSL.VarExp sizeName)
 
       addOverride sizeName WGSL.I32 (Just $ WGSL.IntExp 0 WGSL.AbstractInt)
-      addDecl $ WGSL.VarDecl [] WGSL.Workgroup Nothing moduleName bufType
+      addDecl $ WGSL.GlobalVar [] WGSL.Workgroup Nothing moduleName bufType
       when atomic $ addAtomicMem moduleName
       addRename name' moduleName
       pure $ WGSL.Comment $ "declare_shared: " <> name'
@@ -1121,13 +1121,13 @@ genScalarDecls = do
         [] -> [("_dummy_scalar", WGSL.I32)]
         sclrs -> sclrs
   addDecl $
-    WGSL.StructDecl $
-      WGSL.Struct structName (map (uncurry WGSL.Field) scalarFields)
+    WGSL.GlobalStruct $
+      WGSL.StructDecl structName (map (uncurry WGSL.Field) scalarFields)
 
   slot <- assignBindSlot
   let bufferAttribs = WGSL.bindingAttribs 0 slot
   addDecl $
-    WGSL.VarDecl bufferAttribs WGSL.Uniform Nothing bufferName (WGSL.Named structName)
+    WGSL.GlobalVar bufferAttribs WGSL.Uniform Nothing bufferName (WGSL.Named structName)
 
 atomicOpArray :: ImpGPU.AtomicOp -> VName
 atomicOpArray (ImpGPU.AtomicAdd _ _ n _ _) = n
@@ -1231,7 +1231,7 @@ genMemoryDecls = do
       let (_, atomic, _) = typ
       when atomic $ addAtomicMem ident
       addDecl $
-        WGSL.VarDecl
+        WGSL.GlobalVar
           (WGSL.bindingAttribs 0 slot)
           WGSL.Storage
           (Just WGSL.ReadWrite)

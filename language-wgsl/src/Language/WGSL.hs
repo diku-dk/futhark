@@ -8,37 +8,22 @@
 -- but fine for code generation. I would not be opposed to adding a concrete
 -- syntax module in the future.
 module Language.WGSL
-  ( -- * AST
+  ( -- * Identifiers
     Ident,
+
+    -- * Types
     Type (..),
     TextureDim (..),
     StorageTextureDim (..),
     DepthTexture (..),
     TexelFormat (..),
-    IntLitType (..),
-    FloatLitType (..),
-    BinOp (..),
-    UnOp (..),
-    Exp (..),
-    Stmt (..),
-    ForUpdate (..),
-    Attrib (..),
-    Param (..),
-    FunDecl (..),
-    Field (..),
-    Struct (..),
-    Declaration (..),
+
+    -- * Memory
     AccessMode (..),
     AddressSpace (..),
-    prettyDecls,
 
-    -- * Construction
-    intExp,
-    floatExp,
-    bitcast,
-    bindingAttribs,
-
-    -- * Alignment and size
+    -- ** Alignment and size
+    roundUp,
     alignOf,
     sizeOf,
     elementStride,
@@ -46,9 +31,44 @@ module Language.WGSL
     alignOfStruct,
     offsetOfMembers,
     sizeOfStruct,
+
+    -- * Expressions
+    Exp (..),
+    BinOp (..),
+    UnOp (..),
+    IntLitType (..),
+    FloatLitType (..),
+    intExp,
+    floatExp,
+    bitcast,
+
+    -- * Statements
+    Stmt (..),
+    ForUpdate (..),
+
+    -- * Declarations
+    Attrib (..),
+    bindingAttribs,
+    Param (..),
+    FunDecl (..),
+    Field (..),
+    StructDecl (..),
+    GlobalDecl (..),
+
+    -- * Modules
+    Module (..),
+    Directive (..),
+    Severity (..),
+    EnableExtension (..),
+    LanguageExtension (..),
+
+    -- * Prettyprinting
+    prettyDecls,
   )
 where
 
+import Data.List.NonEmpty (NonEmpty)
+import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
 import Prettyprinter
 
@@ -178,7 +198,11 @@ data TexelFormat
   | Rg11b10Ufloat
   deriving (Eq, Ord, Show)
 
--- | @roundUp(k, n)@, as used by the layout rules.
+-- | Round @n@ up to the next multiple of @k@, as WGSL specifies: @roundUp(k,
+-- n)@ is @ceiling(n / k) * k@, defined for positive integers. The alignment and
+-- size rules are phrased in terms of this function, so a caller computing its
+-- own offsets or strides should round with it rather than by hand. See
+-- https://www.w3.org/TR/WGSL/#roundup.
 roundUp :: Int -> Int -> Int
 roundUp k n = ((n + k - 1) `div` k) * k
 
@@ -464,7 +488,7 @@ data FunDecl = FunDecl
 data Field = Field Ident Type
   deriving (Eq, Ord, Show)
 
-data Struct = Struct Ident [Field]
+data StructDecl = StructDecl Ident [Field]
   deriving (Eq, Ord, Show)
 
 -- | The access modes supported by a memory view.  See
@@ -487,13 +511,65 @@ data AddressSpace
 
 -- | A module-scope declaration.  See
 -- https://www.w3.org/TR/WGSL/#module-scope-declarations.
-data Declaration
-  = FunctionDecl FunDecl
-  | StructDecl Struct
+data GlobalDecl
+  = GlobalFun FunDecl
+  | GlobalStruct StructDecl
   | -- | The access mode may only be given along with the address space, and
     -- defaults to the one of the address space when omitted.
-    VarDecl [Attrib] AddressSpace (Maybe AccessMode) Ident Type
-  | OverrideDecl Ident Type (Maybe Exp)
+    GlobalVar [Attrib] AddressSpace (Maybe AccessMode) Ident Type
+  | GlobalOverride Ident Type (Maybe Exp)
+  | -- | A module-scope @const_assert@.
+    GlobalAssert Exp
+  deriving (Eq, Ord, Show)
+
+-- | A WGSL module.  Directives must precede all declarations, which this
+-- representation enforces.  See
+-- https://www.w3.org/TR/WGSL/#wgsl-module-definition.
+data Module = Module [Directive] [GlobalDecl]
+  deriving (Eq, Ord, Show)
+
+-- | A directive.  See https://www.w3.org/TR/WGSL/#directives.
+data Directive
+  = Enable (NonEmpty EnableExtension)
+  | Requires (NonEmpty LanguageExtension)
+  | -- | A diagnostic filter.  The rule name is not a closed set, as
+    -- implementations may provide their own, so it is spelled out.
+    Diagnostic Severity Ident
+  deriving (Eq, Ord, Show)
+
+-- | The severity of a diagnostic, in the specification's order from greatest
+-- to least.  See https://www.w3.org/TR/WGSL/#diagnostics.
+data Severity = Error | Warning | Info | Off
+  deriving (Eq, Ord, Show)
+
+-- | An extension that an @enable@ directive may enable.  See
+-- https://www.w3.org/TR/WGSL/#enable-extensions.
+data EnableExtension
+  = EnableF16
+  | EnableClipDistances
+  | EnableDualSourceBlending
+  | EnableSubgroups
+  | EnablePrimitiveIndex
+  | EnableSubgroupSizeControl
+  deriving (Eq, Ord, Show)
+
+-- | A language extension that a @requires@ directive may require.  See
+-- https://www.w3.org/TR/WGSL/#language-extensions.
+data LanguageExtension
+  = ReadonlyAndReadwriteStorageTextures
+  | Packed4x8IntegerDotProduct
+  | UnrestrictedPointerParameters
+  | PointerCompositeAccess
+  | UniformBufferStandardLayout
+  | SubgroupId
+  | SubgroupUniformity
+  | TextureAndSamplerLet
+  | TextureFormatsTier1
+  | LinearIndexing
+  | ImmediateAddressSpace
+  | FragmentDepth
+  | BufferView
+  | SwizzleAssignment
   deriving (Eq, Ord, Show)
 
 bindingAttribs :: Int -> Int -> [Attrib]
@@ -794,8 +870,8 @@ prettyAttribs attribs = hsep (map pretty attribs) <> line
 instance Pretty Field where
   pretty (Field name typ) = pretty name <+> ":" <+> pretty typ
 
-instance Pretty Struct where
-  pretty (Struct name fields) =
+instance Pretty StructDecl where
+  pretty (StructDecl name fields) =
     "struct"
       <+> pretty name
       <+> "{"
@@ -815,10 +891,55 @@ instance Pretty AddressSpace where
   pretty Workgroup = "workgroup"
   pretty Function = "function"
 
-instance Pretty Declaration where
-  pretty (FunctionDecl fun) = pretty fun
-  pretty (StructDecl struct) = pretty struct
-  pretty (VarDecl attribs as am name typ) =
+instance Pretty Severity where
+  pretty Error = "error"
+  pretty Warning = "warning"
+  pretty Info = "info"
+  pretty Off = "off"
+
+instance Pretty EnableExtension where
+  pretty EnableF16 = "f16"
+  pretty EnableClipDistances = "clip_distances"
+  pretty EnableDualSourceBlending = "dual_source_blending"
+  pretty EnableSubgroups = "subgroups"
+  pretty EnablePrimitiveIndex = "primitive_index"
+  pretty EnableSubgroupSizeControl = "subgroup_size_control"
+
+instance Pretty LanguageExtension where
+  pretty ReadonlyAndReadwriteStorageTextures =
+    "readonly_and_readwrite_storage_textures"
+  pretty Packed4x8IntegerDotProduct = "packed_4x8_integer_dot_product"
+  pretty UnrestrictedPointerParameters = "unrestricted_pointer_parameters"
+  pretty PointerCompositeAccess = "pointer_composite_access"
+  pretty UniformBufferStandardLayout = "uniform_buffer_standard_layout"
+  pretty SubgroupId = "subgroup_id"
+  pretty SubgroupUniformity = "subgroup_uniformity"
+  pretty TextureAndSamplerLet = "texture_and_sampler_let"
+  pretty TextureFormatsTier1 = "texture_formats_tier1"
+  pretty LinearIndexing = "linear_indexing"
+  pretty ImmediateAddressSpace = "immediate_address_space"
+  pretty FragmentDepth = "fragment_depth"
+  pretty BufferView = "buffer_view"
+  pretty SwizzleAssignment = "swizzle_assignment"
+
+instance Pretty Directive where
+  pretty (Enable exts) =
+    "enable" <+> commasep (map pretty (NE.toList exts)) <> ";"
+  pretty (Requires exts) =
+    "requires" <+> commasep (map pretty (NE.toList exts)) <> ";"
+  pretty (Diagnostic severity rule) =
+    "diagnostic"
+      <> parens (pretty severity <> "," <+> pretty rule)
+      <> ";"
+
+instance Pretty Module where
+  pretty (Module directives decls) =
+    stack $ map pretty directives ++ map pretty decls
+
+instance Pretty GlobalDecl where
+  pretty (GlobalFun fun) = pretty fun
+  pretty (GlobalStruct struct) = pretty struct
+  pretty (GlobalVar attribs as am name typ) =
     prettyAttribs attribs
       <> "var<"
       <> pretty as
@@ -828,9 +949,10 @@ instance Pretty Declaration where
       <+> ":"
       <+> pretty typ
       <> ";"
-  pretty (OverrideDecl name typ Nothing) =
+  pretty (GlobalOverride name typ Nothing) =
     "override" <+> pretty name <+> ":" <+> pretty typ <> ";"
-  pretty (OverrideDecl name typ (Just initial)) =
+  pretty (GlobalAssert e) = "const_assert" <+> pretty e <> ";"
+  pretty (GlobalOverride name typ (Just initial)) =
     "override"
       <+> pretty name
       <+> ":"
@@ -839,5 +961,5 @@ instance Pretty Declaration where
       <+> pretty initial
       <> ";"
 
-prettyDecls :: [Declaration] -> Doc a
+prettyDecls :: [GlobalDecl] -> Doc a
 prettyDecls decls = stack (map pretty decls)

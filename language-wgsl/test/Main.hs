@@ -1,6 +1,7 @@
 module Main (main) where
 
 import Data.List (nub)
+import Data.List.NonEmpty (NonEmpty (..))
 import Data.Text qualified as T
 import Language.WGSL
 import Prettyprinter (Pretty, defaultLayoutOptions, layoutPretty, pretty, vsep)
@@ -67,24 +68,24 @@ accessModeTests =
 -- | The address space of a module-scope variable is given as a template list
 -- after the @var@ keyword, with the access mode second if present.  See
 -- https://www.w3.org/TR/WGSL/#var-decls.
-varDeclTests :: TestTree
-varDeclTests =
+globalVarTests :: TestTree
+globalVarTests =
   testGroup
-    "VarDecl"
+    "GlobalVar"
     [ testCase "without access mode" $
-        render (VarDecl [] Workgroup Nothing "x" I32)
+        render (GlobalVar [] Workgroup Nothing "x" I32)
           @?= "var<workgroup> x : i32;",
       testCase "with access mode" $
-        render (VarDecl [] Storage (Just ReadWrite) "x" (Array I32 Nothing))
+        render (GlobalVar [] Storage (Just ReadWrite) "x" (Array I32 Nothing))
           @?= "var<storage, read_write> x : array<i32>;",
       testCase "private" $
-        render (VarDecl [] Private Nothing "x" F32)
+        render (GlobalVar [] Private Nothing "x" F32)
           @?= "var<private> x : f32;",
       testCase "immediate" $
-        render (VarDecl [] Immediate Nothing "x" (Named "S"))
+        render (GlobalVar [] Immediate Nothing "x" (Named "S"))
           @?= "var<immediate> x : S;",
       testCase "with attributes" $
-        render (VarDecl (bindingAttribs 0 1) Storage (Just Read) "x" (Array F32 Nothing))
+        render (GlobalVar (bindingAttribs 0 1) Storage (Just Read) "x" (Array F32 Nothing))
           @?= "@group(0) @binding(1)\nvar<storage, read> x : array<f32>;"
     ]
 
@@ -640,6 +641,78 @@ operatorTests =
           @?= ["(-a)", "(!a)", "(~a)", "(*a)", "(&a)"]
     ]
 
+-- | Directives precede all declarations in a module.  See
+-- https://www.w3.org/TR/WGSL/#directives.
+directiveTests :: TestTree
+directiveTests =
+  testGroup
+    "directives"
+    [ testCase "enable" $
+        render (Enable (EnableF16 :| [])) @?= "enable f16;",
+      testCase "enable several" $
+        render (Enable (EnableF16 :| [EnableSubgroups]))
+          @?= "enable f16, subgroups;",
+      testCase "every enable extension" $
+        map
+          (render . (\e -> Enable (e :| [])))
+          [ EnableF16,
+            EnableClipDistances,
+            EnableDualSourceBlending,
+            EnableSubgroups,
+            EnablePrimitiveIndex,
+            EnableSubgroupSizeControl
+          ]
+          @?= [ "enable f16;",
+                "enable clip_distances;",
+                "enable dual_source_blending;",
+                "enable subgroups;",
+                "enable primitive_index;",
+                "enable subgroup_size_control;"
+              ],
+      testCase "requires" $
+        render (Requires (TextureFormatsTier1 :| [PointerCompositeAccess]))
+          @?= "requires texture_formats_tier1, pointer_composite_access;",
+      testCase "diagnostic" $
+        render (Diagnostic Off "derivative_uniformity")
+          @?= "diagnostic(off, derivative_uniformity);",
+      testCase "severities" $
+        map (render . (`Diagnostic` "r")) [Error, Warning, Info, Off]
+          @?= [ "diagnostic(error, r);",
+                "diagnostic(warning, r);",
+                "diagnostic(info, r);",
+                "diagnostic(off, r);"
+              ]
+    ]
+
+-- | A module is its directives followed by its declarations.  The f16 type
+-- cannot legally be used without the directive that enables it, which is the
+-- reason a module needs a representation of its own.
+moduleTests :: TestTree
+moduleTests =
+  testGroup
+    "Module"
+    [ testCase "directives first" $
+        render
+          ( Module
+              [Enable (EnableF16 :| [])]
+              [GlobalVar [] Private Nothing "x" F16]
+          )
+          @?= "enable f16;\nvar<private> x : f16;",
+      testCase "without directives" $
+        render (Module [] [GlobalVar [] Private Nothing "x" F32])
+          @?= "var<private> x : f32;",
+      testCase "const_assert" $
+        render (Module [] [GlobalAssert (VarExp "c")])
+          @?= "const_assert c;",
+      testCase "structure" $
+        render
+          ( Module
+              []
+              [GlobalStruct (StructDecl "S" [Field "a" I32, Field "b" F32])]
+          )
+          @?= "struct S {\n  a : i32,\n  b : f32\n}"
+    ]
+
 tests :: TestTree
 tests =
   testGroup
@@ -661,7 +734,9 @@ tests =
       testGroup
         "statements"
         [sequenceTests, assignTests, returnTests, forTests],
-      testGroup "declarations" [varDeclTests, funDeclTests]
+      testGroup
+        "declarations"
+        [globalVarTests, funDeclTests, directiveTests, moduleTests]
     ]
 
 main :: IO ()
