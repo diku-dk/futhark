@@ -48,10 +48,24 @@ ENVIRONMENT VARIABLES
 BUGS
 ====
 
-Entry points that take 64-bit integer arguments may fail if they
-need to wait for the GPU, for example to read back a result.  This is
-due to a limitation in Emscripten's support for asynchronous
-operations.
+The WebGPU backend has various restrictions. Some of these are due to
+fundamental limitations in WebGPU and are unlikely to be resolved. The following
+are the main restrictions that a Futhark programmer will notice.
+
+* ``f64`` is not supported.  Programs that use it fail to compile.
+
+* Reductions and histograms on 64-bit integers, including functions such as
+  ``i64.sum``, fail to compile.
+
+* Some programs that produce arrays with ``if`` or ``loop`` inside parallel code
+  fail to compile.
+
+* Errors in parallel code, such as out-of-bounds indexing, division by zero, and
+  failed assertions, are not detected. The program instead produces unspecified
+  results.
+
+* Programs only run on devices that support the ``shader-f16`` feature, even if
+  they do not use ``f16``.
 
 SEE ALSO
 ========
