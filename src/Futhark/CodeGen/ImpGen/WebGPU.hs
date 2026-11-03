@@ -452,21 +452,21 @@ wgslSharedBufferType (FloatType Float16, True, _) =
 wgslSharedBufferType (t, _, _) = WGSL.Array $ wgslPrimType t
 
 packedElemIndex :: PrimType -> WGSL.Exp -> WGSL.Exp
-packedElemIndex Bool i = WGSL.BinOpExp "/" i (WGSL.IntExp 4)
-packedElemIndex (IntType Int8) i = WGSL.BinOpExp "/" i (WGSL.IntExp 4)
-packedElemIndex (IntType Int16) i = WGSL.BinOpExp "/" i (WGSL.IntExp 2)
+packedElemIndex Bool i = WGSL.BinOpExp "/" i (WGSL.IntExp 4 WGSL.AbstractInt)
+packedElemIndex (IntType Int8) i = WGSL.BinOpExp "/" i (WGSL.IntExp 4 WGSL.AbstractInt)
+packedElemIndex (IntType Int16) i = WGSL.BinOpExp "/" i (WGSL.IntExp 2 WGSL.AbstractInt)
 packedElemIndex (IntType Int32) i = i
-packedElemIndex (FloatType Float16) i = WGSL.BinOpExp "/" i (WGSL.IntExp 2)
+packedElemIndex (FloatType Float16) i = WGSL.BinOpExp "/" i (WGSL.IntExp 2 WGSL.AbstractInt)
 packedElemIndex (FloatType Float32) i = i
 packedElemIndex _ _ = error "CodeGen.ImpGen.WebGPU:packedElemIndex: Unsupported Type"
 
 packedElemOffset :: PrimType -> WGSL.Exp -> WGSL.Exp
-packedElemOffset Bool i = WGSL.BinOpExp "%" i (WGSL.IntExp 4)
-packedElemOffset (IntType Int8) i = WGSL.BinOpExp "%" i (WGSL.IntExp 4)
-packedElemOffset (IntType Int16) i = WGSL.BinOpExp "%" i (WGSL.IntExp 2)
-packedElemOffset (IntType Int32) _ = WGSL.IntExp 0
-packedElemOffset (FloatType Float16) i = WGSL.BinOpExp "%" i (WGSL.IntExp 2)
-packedElemOffset (FloatType Float32) _ = WGSL.IntExp 0
+packedElemOffset Bool i = WGSL.BinOpExp "%" i (WGSL.IntExp 4 WGSL.AbstractInt)
+packedElemOffset (IntType Int8) i = WGSL.BinOpExp "%" i (WGSL.IntExp 4 WGSL.AbstractInt)
+packedElemOffset (IntType Int16) i = WGSL.BinOpExp "%" i (WGSL.IntExp 2 WGSL.AbstractInt)
+packedElemOffset (IntType Int32) _ = WGSL.IntExp 0 WGSL.AbstractInt
+packedElemOffset (FloatType Float16) i = WGSL.BinOpExp "%" i (WGSL.IntExp 2 WGSL.AbstractInt)
+packedElemOffset (FloatType Float32) _ = WGSL.IntExp 0 WGSL.AbstractInt
 packedElemOffset _ _ = error "CodeGen.ImpGen.WebGPU:packedElemOffset: Unsupported Type"
 
 nativeAccessType :: PrimType -> Bool
@@ -621,10 +621,10 @@ unsupported :: Code ImpGPU.KernelOp -> KernelM WGSL.Stmt
 unsupported stmt = pure $ WGSL.Comment $ "Unsupported stmt: " <> prettyText stmt
 
 wgslProduct :: [SubExp] -> WGSL.Exp
-wgslProduct [] = WGSL.IntExp 1
-wgslProduct [Constant (IntValue v)] = WGSL.IntExp $ valueIntegral v
+wgslProduct [] = WGSL.IntExp 1 WGSL.AbstractInt
+wgslProduct [Constant (IntValue v)] = WGSL.IntExp (valueIntegral v) WGSL.AbstractInt
 wgslProduct ((Constant (IntValue v)) : vs) =
-  wgslBinOp (Mul Int32 OverflowWrap) (WGSL.IntExp $ valueIntegral v) (wgslProduct vs)
+  wgslBinOp (Mul Int32 OverflowWrap) (WGSL.IntExp (valueIntegral v) WGSL.AbstractInt) (wgslProduct vs)
 wgslProduct _ = error "wgslProduct: non-constant product"
 
 genWGSLStm :: Code ImpGPU.KernelOp -> KernelM WGSL.Stmt
@@ -649,7 +649,7 @@ genWGSLStm (For iName bound body) = do
     lt = wgslCmpOp $ CmpUlt boundIntType
     (zero, one) = case boundIntType of
       Int64 -> (WGSL.VarExp "zero_i64", WGSL.VarExp "one_i64")
-      _ -> (WGSL.IntExp 0, WGSL.IntExp 1)
+      _ -> (WGSL.IntExp 0 WGSL.AbstractInt, WGSL.IntExp 1 WGSL.AbstractInt)
 genWGSLStm (While cond body) =
   liftM2
     WGSL.While
@@ -668,7 +668,7 @@ genWGSLStm (DeclareMem name (Space "shared")) = do
               elemPrimType
               (Just $ WGSL.VarExp sizeName)
 
-      addOverride sizeName (WGSL.Prim WGSL.Int32) (Just $ WGSL.IntExp 0)
+      addOverride sizeName (WGSL.Prim WGSL.Int32) (Just $ WGSL.IntExp 0 WGSL.AbstractInt)
       addDecl $ WGSL.VarDecl [] WGSL.Workgroup moduleName bufType
       when atomic $ addAtomicMem moduleName
       addRename name' moduleName
@@ -749,12 +749,12 @@ genWGSLStm (Op (ImpGPU.GetBlockId dest i)) = do
   destId <- getIdent dest
   pure $
     WGSL.Assign destId $
-      WGSL.to_i32 (WGSL.IndexExp "workgroup_id" (WGSL.IntExp i))
+      WGSL.to_i32 (WGSL.IndexExp "workgroup_id" (WGSL.IntExp i WGSL.AbstractInt))
 genWGSLStm (Op (ImpGPU.GetLocalId dest i)) = do
   destId <- getIdent dest
   pure $
     WGSL.Assign destId $
-      WGSL.to_i32 (WGSL.IndexExp "local_id" (WGSL.IntExp i))
+      WGSL.to_i32 (WGSL.IndexExp "local_id" (WGSL.IntExp i WGSL.AbstractInt))
 genWGSLStm (Op (ImpGPU.GetLocalSize dest i)) = do
   destId <- getIdent dest
   WGSL.Assign destId . WGSL.VarExp <$> builtinBlockSize i
@@ -992,31 +992,37 @@ wgslConvOp op a = WGSL.CallExp (fun op) [a]
 
 intLiteral :: IntValue -> WGSL.Exp
 intLiteral (Int8Value v) =
-  WGSL.CallExp "norm_i8" [WGSL.IntExp $ fromIntegral v]
+  WGSL.CallExp "norm_i8" [WGSL.IntExp (fromIntegral v) WGSL.AbstractInt]
 intLiteral (Int16Value v) =
-  WGSL.CallExp "norm_i16" [WGSL.IntExp $ fromIntegral v]
+  WGSL.CallExp "norm_i16" [WGSL.IntExp (fromIntegral v) WGSL.AbstractInt]
 intLiteral (Int64Value v) = WGSL.CallExp "i64" [low, high]
   where
     -- Helper function transforming a Int64 -> Int32 -> WGSL.Exp.
     -- If we just do Int64 -> WGSL.Exp directly, low/high can end
     -- up being larger than what fits in an i32.
     toWGSLInt :: Int64 -> WGSL.Exp
-    toWGSLInt x = WGSL.IntExp $ fromIntegral (fromIntegral x :: Int32)
+    toWGSLInt x = WGSL.IntExp (fromIntegral (fromIntegral x :: Int32)) WGSL.AbstractInt
     low = toWGSLInt $ v Bits..&. 0xffffffff
     high = toWGSLInt $ (v `Bits.shift` (-32)) Bits..&. 0xffffffff
-intLiteral v = WGSL.IntExp (valueIntegral v)
+intLiteral v =
+  fromMaybe (compilerLimitation msg) $
+    WGSL.intExp (valueIntegral v) WGSL.AbstractInt
+  where
+    msg = "WebGPU backend cannot represent integer literal: " <> prettyText v
 
-handleSpecialFloats :: T.Text -> Double -> WGSL.Exp
-handleSpecialFloats s v
+handleSpecialFloats :: T.Text -> WGSL.FloatLitType -> Double -> WGSL.Exp
+handleSpecialFloats s t v
   | isInfinite v, v > 0 = WGSL.CallExp (s <> "_inf") []
   | isInfinite v, v < 0 = WGSL.CallExp (s <> "_neg_inf") []
   | isNaN v = WGSL.CallExp (s <> "_nan") []
-  | otherwise = WGSL.FloatExp v
+  | otherwise = fromMaybe (compilerLimitation msg) $ WGSL.floatExp v t
+  where
+    msg = "WebGPU backend cannot represent " <> s <> " literal: " <> prettyText v
 
 genFloatExp :: FloatValue -> WGSL.Exp
-genFloatExp (Float16Value v) = handleSpecialFloats "f16" (convFloat v)
-genFloatExp (Float32Value v) = handleSpecialFloats "f32" (convFloat v)
-genFloatExp (Float64Value v) = handleSpecialFloats "f64" v
+genFloatExp (Float16Value v) = handleSpecialFloats "f16" WGSL.F16 (convFloat v)
+genFloatExp (Float32Value v) = handleSpecialFloats "f32" WGSL.F32 (convFloat v)
+genFloatExp (Float64Value v) = handleSpecialFloats "f64" WGSL.AbstractFloat v
 
 genWGSLExp :: Exp -> KernelM WGSL.Exp
 genWGSLExp (LeafExp name _) = WGSL.VarExp <$> getIdent name
@@ -1254,12 +1260,12 @@ genConstAndBuiltinDecls = do
               WGSL.Seq
                 (WGSL.DeclareVar n (WGSL.Prim wgslInt64))
                 ( WGSL.Assign n $
-                    WGSL.CallExp "i64" [WGSL.VarExp lo, WGSL.IntExp 0]
+                    WGSL.CallExp "i64" [WGSL.VarExp lo, WGSL.IntExp 0 WGSL.AbstractInt]
                 )
 
   mapM_ mkConst consts
   where
-    zeroInit = Just $ WGSL.IntExp 0
+    zeroInit = Just $ WGSL.IntExp 0 WGSL.AbstractInt
 
 nameToIdent :: VName -> WGSL.Ident
 nameToIdent = zEncodeText . prettyText

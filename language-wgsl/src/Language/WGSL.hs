@@ -15,7 +15,11 @@ module Language.WGSL
     Type (..),
     BinOp,
     UnOp,
+    IntLitType (..),
+    FloatLitType (..),
     Exp (..),
+    intExp,
+    floatExp,
     Stmt (..),
     Attrib (..),
     Param (..),
@@ -36,6 +40,9 @@ import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Prettyprinter
 
+-- | A WGSL identifier. We assume (but do not check) that these are valid WGSL
+-- identifiers. The printer will certainly produce invalid WGSL if this
+-- constraint is violated.
 type Ident = T.Text
 
 data PrimType
@@ -95,10 +102,36 @@ type BinOp = T.Text
 
 type UnOp = T.Text
 
+-- | The type denoted by an integer literal, which is determined by its
+-- suffix.  See https://www.w3.org/TR/WGSL/#numeric-literals.
+data IntLitType
+  = -- | No suffix: the literal denotes an @AbstractInt@.
+    AbstractInt
+  | -- | The @i@ suffix.
+    I32
+  | -- | The @u@ suffix.
+    U32
+  deriving (Eq, Ord, Show)
+
+-- | The type denoted by a floating point literal, which is determined by its
+-- suffix.  See https://www.w3.org/TR/WGSL/#numeric-literals.
+data FloatLitType
+  = -- | No suffix: the literal denotes an @AbstractFloat@.
+    AbstractFloat
+  | -- | The @f@ suffix.
+    F32
+  | -- | The @h@ suffix.  Using it requires the @enable f16;@ directive.
+    F16
+  deriving (Eq, Ord, Show)
+
 data Exp
   = BoolExp Bool
-  | IntExp Int
-  | FloatExp Double
+  | -- | An integer literal.  Prefer 'intExp', which checks that the value is
+    -- representable.
+    IntExp Int IntLitType
+  | -- | A floating point literal.  Prefer 'floatExp', which checks that the
+    -- value is representable.
+    FloatExp Double FloatLitType
   | VarExp Ident
   | BinOpExp BinOp Exp Exp
   | UnOpExp UnOp Exp
@@ -153,7 +186,37 @@ stmts (s : ss) = Seq s (stmts ss)
 
 bindingAttribs :: Int -> Int -> [Attrib]
 bindingAttribs grp binding =
-  [Attrib "group" [IntExp grp], Attrib "binding" [IntExp binding]]
+  [ Attrib "group" [IntExp grp AbstractInt],
+    Attrib "binding" [IntExp binding AbstractInt]
+  ]
+
+-- | Construct an integer literal, or 'Nothing' if the value cannot be denoted
+-- by a literal of the given type.
+intExp :: Int -> IntLitType -> Maybe Exp
+intExp v t
+  | representable = Just $ IntExp v t
+  | otherwise = Nothing
+  where
+    representable = case t of
+      AbstractInt -> magnitude <= 2 ^ (63 :: Int) - 1
+      I32 -> magnitude <= 2 ^ (31 :: Int) - 1
+      U32 -> toInteger v >= 0 && toInteger v <= 2 ^ (32 :: Int) - 1
+    magnitude = abs $ toInteger v
+
+-- | Construct a floating point literal, or 'Nothing' if the value cannot be
+-- denoted by a literal of the given type. WGSL has no literal for infinities or
+-- NaN, and the magnitude must not exceed the largest finite value of the type.
+floatExp :: Double -> FloatLitType -> Maybe Exp
+floatExp v t
+  | isNaN v || isInfinite v = Nothing
+  | maybe False (abs v >) largestFinite = Nothing
+  | otherwise = Just $ FloatExp v t
+  where
+    largestFinite = case t of
+      -- Any finite Double is an AbstractFloat.
+      AbstractFloat -> Nothing
+      F32 -> Just 3.40282346638528859812e38
+      F16 -> Just 65504
 
 to_i32 :: Exp -> Exp
 to_i32 e = CallExp "bitcast<i32>" [e]
@@ -197,11 +260,21 @@ instance Pretty Type where
   pretty (Named t) = pretty t
   pretty (Pointer t as am) = "ptr<" <> pretty as <> ", " <> pretty t <> maybe "" ((", " <>) . pretty) am <> ">"
 
+intSuffix :: IntLitType -> Doc a
+intSuffix AbstractInt = mempty
+intSuffix I32 = "i"
+intSuffix U32 = "u"
+
+floatSuffix :: FloatLitType -> Doc a
+floatSuffix AbstractFloat = mempty
+floatSuffix F32 = "f"
+floatSuffix F16 = "h"
+
 instance Pretty Exp where
   pretty (BoolExp True) = "true"
   pretty (BoolExp False) = "false"
-  pretty (IntExp x) = pretty x
-  pretty (FloatExp x) = pretty x
+  pretty (IntExp x t) = pretty x <> intSuffix t
+  pretty (FloatExp x t) = pretty x <> floatSuffix t
   pretty (VarExp x) = pretty x
   pretty (UnOpExp op e) = parens (pretty op <> pretty e)
   pretty (BinOpExp op e1 e2) = parens (pretty e1 <+> pretty op <+> pretty e2)
