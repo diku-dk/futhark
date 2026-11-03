@@ -295,7 +295,7 @@ generateDeviceFun fname device_func = do
             WGSL.Param (v <> "_out") (WGSL.Ptr t WGSL.Function Nothing) a
           writeOutPtr (WGSL.Param v _ _) =
             WGSL.Assign
-              (WGSL.UnOpExp "*" (WGSL.VarExp (v <> "_out")))
+              (WGSL.UnOpExp WGSL.Indirection (WGSL.VarExp (v <> "_out")))
               (WGSL.VarExp v)
           (fun_params, fun_return, fun_body) = case out_params of
             [] -> (in_params, Nothing, body)
@@ -468,20 +468,20 @@ wgslSharedBufferType (FloatType Float16, True, _) =
 wgslSharedBufferType (t, _, _) = WGSL.Array $ wgslPrimType t
 
 packedElemIndex :: PrimType -> WGSL.Exp -> WGSL.Exp
-packedElemIndex Bool i = WGSL.BinOpExp "/" i (WGSL.IntExp 4 WGSL.AbstractInt)
-packedElemIndex (IntType Int8) i = WGSL.BinOpExp "/" i (WGSL.IntExp 4 WGSL.AbstractInt)
-packedElemIndex (IntType Int16) i = WGSL.BinOpExp "/" i (WGSL.IntExp 2 WGSL.AbstractInt)
+packedElemIndex Bool i = WGSL.BinOpExp WGSL.Divide i (WGSL.IntExp 4 WGSL.AbstractInt)
+packedElemIndex (IntType Int8) i = WGSL.BinOpExp WGSL.Divide i (WGSL.IntExp 4 WGSL.AbstractInt)
+packedElemIndex (IntType Int16) i = WGSL.BinOpExp WGSL.Divide i (WGSL.IntExp 2 WGSL.AbstractInt)
 packedElemIndex (IntType Int32) i = i
-packedElemIndex (FloatType Float16) i = WGSL.BinOpExp "/" i (WGSL.IntExp 2 WGSL.AbstractInt)
+packedElemIndex (FloatType Float16) i = WGSL.BinOpExp WGSL.Divide i (WGSL.IntExp 2 WGSL.AbstractInt)
 packedElemIndex (FloatType Float32) i = i
 packedElemIndex _ _ = error "CodeGen.ImpGen.WebGPU:packedElemIndex: Unsupported Type"
 
 packedElemOffset :: PrimType -> WGSL.Exp -> WGSL.Exp
-packedElemOffset Bool i = WGSL.BinOpExp "%" i (WGSL.IntExp 4 WGSL.AbstractInt)
-packedElemOffset (IntType Int8) i = WGSL.BinOpExp "%" i (WGSL.IntExp 4 WGSL.AbstractInt)
-packedElemOffset (IntType Int16) i = WGSL.BinOpExp "%" i (WGSL.IntExp 2 WGSL.AbstractInt)
+packedElemOffset Bool i = WGSL.BinOpExp WGSL.Remainder i (WGSL.IntExp 4 WGSL.AbstractInt)
+packedElemOffset (IntType Int8) i = WGSL.BinOpExp WGSL.Remainder i (WGSL.IntExp 4 WGSL.AbstractInt)
+packedElemOffset (IntType Int16) i = WGSL.BinOpExp WGSL.Remainder i (WGSL.IntExp 2 WGSL.AbstractInt)
 packedElemOffset (IntType Int32) _ = WGSL.IntExp 0 WGSL.AbstractInt
-packedElemOffset (FloatType Float16) i = WGSL.BinOpExp "%" i (WGSL.IntExp 2 WGSL.AbstractInt)
+packedElemOffset (FloatType Float16) i = WGSL.BinOpExp WGSL.Remainder i (WGSL.IntExp 2 WGSL.AbstractInt)
 packedElemOffset (FloatType Float32) _ = WGSL.IntExp 0 WGSL.AbstractInt
 packedElemOffset _ _ = error "CodeGen.ImpGen.WebGPU:packedElemOffset: Unsupported Type"
 
@@ -506,14 +506,14 @@ genArrayAccess ::
   [WGSL.Exp]
 genArrayAccess atomic t mem i packed = do
   if not atomic
-    then [WGSL.UnOpExp "&" (WGSL.VarExp mem), i]
+    then [WGSL.UnOpExp WGSL.AddressOf (WGSL.VarExp mem), i]
     else
       if packed
         then
           let packedIndex = packedElemIndex t i
               packedOffset = packedElemOffset t i
-           in [WGSL.UnOpExp "&" (WGSL.IndexExp mem packedIndex), packedOffset]
-        else [WGSL.UnOpExp "&" (WGSL.IndexExp mem i)]
+           in [WGSL.UnOpExp WGSL.AddressOf (WGSL.IndexExp mem packedIndex), packedOffset]
+        else [WGSL.UnOpExp WGSL.AddressOf (WGSL.IndexExp mem i)]
 
 genArrayFun :: WGSL.Ident -> PrimType -> Bool -> Bool -> WGSL.Ident
 genArrayFun fun t atomic shared =
@@ -769,7 +769,7 @@ genWGSLStm (Call dests f args) = do
       getArg (MemArg n) = WGSL.VarExp <$> getIdent n
 
   argExps <- mapM getArg args
-  outExps <- mapM (pure . WGSL.UnOpExp "&" . WGSL.VarExp) outIdents
+  outExps <- mapM (pure . WGSL.UnOpExp WGSL.AddressOf . WGSL.VarExp) outIdents
 
   pure $ callStm fname (argExps ++ outExps)
 genWGSLStm (If cond cThen cElse) = do
@@ -821,11 +821,11 @@ genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicCmpXchg _ dest mem i cmp val))) = 
   val' <- genWGSLExp val
   cmp' <- genWGSLExp cmp
   i' <- WGSL.IndexExp <$> getIdent mem <*> indexExp i
-  liftM2 assign (getIdent dest) (pure $ WGSL.FieldExp (call "atomicCompareExchangeWeak" [WGSL.UnOpExp "&" i', cmp', val']) "old_value")
+  liftM2 assign (getIdent dest) (pure $ WGSL.FieldExp (call "atomicCompareExchangeWeak" [WGSL.UnOpExp WGSL.AddressOf i', cmp', val']) "old_value")
 genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicXchg _ dest mem i e))) = do
   idx <- WGSL.IndexExp <$> getIdent mem <*> indexExp i
   val <- genWGSLExp e
-  let xchg = call "atomicExchange" [WGSL.UnOpExp "&" idx, val]
+  let xchg = call "atomicExchange" [WGSL.UnOpExp WGSL.AddressOf idx, val]
   assign <$> getIdent dest <*> pure xchg
 genWGSLStm (Op (ImpGPU.Atomic s (ImpGPU.AtomicWrite t mem i v))) = genArrayWrite t s mem i (genWGSLExp v)
 genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicFAdd t dest mem i e))) = genAtomicOp "fadd" (FloatType t) dest mem i e
@@ -862,7 +862,7 @@ genWGSLStm (Op (ImpGPU.UniformRead tgt mem i _ _)) = do
   i' <- indexExp i
   pure $
     assign tgt' $
-      call "workgroupUniformLoad" [WGSL.UnOpExp "&" $ WGSL.IndexExp mem' i']
+      call "workgroupUniformLoad" [WGSL.UnOpExp WGSL.AddressOf $ WGSL.IndexExp mem' i']
 genWGSLStm (Op (ImpGPU.ErrorSync f)) = genWGSLStm $ Op (ImpGPU.Barrier f)
 genWGSLStm (Op ImpGPU.WarpSync {}) = error "genWGSLStm: WarpSync not handled."
 genWGSLStm GetUserParam {} = error "genWGSLStm: GetUserParam not handled."
@@ -877,31 +877,31 @@ call2Suffix :: WGSL.Ident -> IntType -> WGSL.Exp -> WGSL.Exp -> WGSL.Exp
 call2Suffix f t a b = call (f <> "_" <> prettyText t) [a, b]
 
 wgslBinOp :: BinOp -> WGSL.Exp -> WGSL.Exp -> WGSL.Exp
-wgslBinOp (Add Int32 _) = WGSL.BinOpExp "+"
+wgslBinOp (Add Int32 _) = WGSL.BinOpExp WGSL.Add
 wgslBinOp (Add t _) = call2Suffix "add" t
-wgslBinOp (FAdd _) = WGSL.BinOpExp "+"
-wgslBinOp (Sub Int32 _) = WGSL.BinOpExp "-"
+wgslBinOp (FAdd _) = WGSL.BinOpExp WGSL.Add
+wgslBinOp (Sub Int32 _) = WGSL.BinOpExp WGSL.Subtract
 wgslBinOp (Sub t _) = call2Suffix "sub" t
-wgslBinOp (FSub _) = WGSL.BinOpExp "-"
-wgslBinOp (Mul Int32 _) = WGSL.BinOpExp "*"
+wgslBinOp (FSub _) = WGSL.BinOpExp WGSL.Subtract
+wgslBinOp (Mul Int32 _) = WGSL.BinOpExp WGSL.Multiply
 wgslBinOp (Mul t _) = call2Suffix "mul" t
-wgslBinOp (FMul _) = WGSL.BinOpExp "*"
+wgslBinOp (FMul _) = WGSL.BinOpExp WGSL.Multiply
 -- Division is always safe in WGSL, so we can ignore the Safety parameter.
 wgslBinOp (UDiv t _) = call2Suffix "udiv" t
 wgslBinOp (UCeilDiv t _) = call2Suffix "uceil_div" t
 wgslBinOp (SDiv t _) = call2Suffix "sdiv" t
 wgslBinOp (SCeilDiv t _) = call2Suffix "sceil_div" t
-wgslBinOp (FDiv _) = WGSL.BinOpExp "/"
-wgslBinOp (FMod _) = WGSL.BinOpExp "%"
+wgslBinOp (FDiv _) = WGSL.BinOpExp WGSL.Divide
+wgslBinOp (FMod _) = WGSL.BinOpExp WGSL.Remainder
 wgslBinOp (UMod t _) = call2Suffix "umod" t
 wgslBinOp (SMod t _) = call2Suffix "smod" t
 wgslBinOp (SQuot Int8 _) = call2 "squot_i8"
 wgslBinOp (SQuot Int16 _) = call2 "squot_i16"
-wgslBinOp (SQuot Int32 _) = WGSL.BinOpExp "/"
+wgslBinOp (SQuot Int32 _) = WGSL.BinOpExp WGSL.Divide
 wgslBinOp (SQuot Int64 _) = call2 "squot_i64"
-wgslBinOp (SRem Int8 _) = WGSL.BinOpExp "%"
-wgslBinOp (SRem Int16 _) = WGSL.BinOpExp "%"
-wgslBinOp (SRem Int32 _) = WGSL.BinOpExp "%"
+wgslBinOp (SRem Int8 _) = WGSL.BinOpExp WGSL.Remainder
+wgslBinOp (SRem Int16 _) = WGSL.BinOpExp WGSL.Remainder
+wgslBinOp (SRem Int32 _) = WGSL.BinOpExp WGSL.Remainder
 wgslBinOp (SRem Int64 _) = call2 "srem_i64"
 wgslBinOp (SMin Int64) = call2 "smin_i64"
 wgslBinOp (SMin _) = call2 "min"
@@ -914,9 +914,9 @@ wgslBinOp (FMax _) = call2 "max"
 wgslBinOp (Shl t) = call2Suffix "shl" t
 wgslBinOp (LShr t) = call2Suffix "lshr" t
 wgslBinOp (AShr t) = call2Suffix "ashr" t
-wgslBinOp (And _) = WGSL.BinOpExp "&"
-wgslBinOp (Or _) = WGSL.BinOpExp "|"
-wgslBinOp (Xor _) = WGSL.BinOpExp "^"
+wgslBinOp (And _) = WGSL.BinOpExp WGSL.BitwiseAnd
+wgslBinOp (Or _) = WGSL.BinOpExp WGSL.BitwiseOr
+wgslBinOp (Xor _) = WGSL.BinOpExp WGSL.BitwiseExclusiveOr
 wgslBinOp (SPow t) = call2Suffix "pow" t
 wgslBinOp (UPow t) = call2Suffix "pow" t
 wgslBinOp (FPow _) = call2 "pow"
@@ -928,27 +928,27 @@ wgslBinOp LogOr = call2 "log_or"
 -- operators for smaller integers. The same applies for i16.
 wgslCmpOp :: CmpOp -> WGSL.Exp -> WGSL.Exp -> WGSL.Exp
 wgslCmpOp (CmpEq (IntType Int64)) = call2 "eq_i64"
-wgslCmpOp (CmpEq _) = WGSL.BinOpExp "=="
+wgslCmpOp (CmpEq _) = WGSL.BinOpExp WGSL.Equal
 wgslCmpOp (CmpUlt Int64) = call2 "ult_i64"
 wgslCmpOp (CmpUlt _) = call2 "ult_i32"
 wgslCmpOp (CmpUle Int64) = call2 "ule_i64"
 wgslCmpOp (CmpUle _) = call2 "ule_i32"
 wgslCmpOp (CmpSlt Int64) = call2 "slt_i64"
-wgslCmpOp (CmpSlt _) = WGSL.BinOpExp "<"
+wgslCmpOp (CmpSlt _) = WGSL.BinOpExp WGSL.Less
 wgslCmpOp (CmpSle Int64) = call2 "sle_i64"
-wgslCmpOp (CmpSle _) = WGSL.BinOpExp "<="
-wgslCmpOp (FCmpLt _) = WGSL.BinOpExp "<"
-wgslCmpOp (FCmpLe _) = WGSL.BinOpExp "<="
+wgslCmpOp (CmpSle _) = WGSL.BinOpExp WGSL.LessEqual
+wgslCmpOp (FCmpLt _) = WGSL.BinOpExp WGSL.Less
+wgslCmpOp (FCmpLe _) = WGSL.BinOpExp WGSL.LessEqual
 wgslCmpOp CmpLlt = call2 "llt"
 wgslCmpOp CmpLle = call2 "lle"
 
 -- Similarly to CmpOps above, the defaults work for smaller integers already
 -- given our representation.
 wgslUnOp :: UnOp -> WGSL.Exp -> WGSL.Exp
-wgslUnOp (Neg (FloatType _)) = WGSL.UnOpExp "-"
+wgslUnOp (Neg (FloatType _)) = WGSL.UnOpExp WGSL.Negate
 wgslUnOp (Neg (IntType t)) = call1 $ "neg_" <> prettyText t
-wgslUnOp (Neg _) = WGSL.UnOpExp "!"
-wgslUnOp (Complement _) = WGSL.UnOpExp "~"
+wgslUnOp (Neg _) = WGSL.UnOpExp WGSL.LogicalNegate
+wgslUnOp (Complement _) = WGSL.UnOpExp WGSL.BitwiseComplement
 wgslUnOp (Abs Int64) = call1 "abs_i64"
 wgslUnOp (Abs _) = call1 "abs"
 wgslUnOp (FAbs _) = call1 "abs"

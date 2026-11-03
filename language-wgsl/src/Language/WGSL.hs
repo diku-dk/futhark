@@ -17,8 +17,8 @@ module Language.WGSL
     TexelFormat (..),
     IntLitType (..),
     FloatLitType (..),
-    BinOp,
-    UnOp,
+    BinOp (..),
+    UnOp (..),
     Exp (..),
     Stmt (..),
     ForUpdate (..),
@@ -336,9 +336,37 @@ sizeOfStruct members = do
   last_size <- sizeOf $ last members
   pure $ roundUp struct_align (last offsets + last_size)
 
-type BinOp = T.Text
+-- | A binary operator. See https://www.w3.org/TR/WGSL/#expressions.
+data BinOp
+  = Add
+  | Subtract
+  | Multiply
+  | Divide
+  | Remainder
+  | BitwiseAnd
+  | BitwiseOr
+  | BitwiseExclusiveOr
+  | ShiftLeft
+  | ShiftRight
+  | Less
+  | LessEqual
+  | Greater
+  | GreaterEqual
+  | Equal
+  | NotEqual
+  | ShortCircuitAnd
+  | ShortCircuitOr
+  deriving (Eq, Ord, Show)
 
-type UnOp = T.Text
+-- | A unary operator.  'Indirection' and 'AddressOf' are the only ones that
+-- may also appear in an assignment's left-hand side.
+data UnOp
+  = Negate
+  | LogicalNegate
+  | BitwiseComplement
+  | Indirection
+  | AddressOf
+  deriving (Eq, Ord, Show)
 
 -- | The type denoted by an integer literal, which is determined by its
 -- suffix.  See https://www.w3.org/TR/WGSL/#numeric-literals.
@@ -645,6 +673,33 @@ floatSuffix :: FloatLitType -> Doc a
 floatSuffix AbstractFloat = mempty
 floatSuffix LitF32 = "f"
 floatSuffix LitF16 = "h"
+
+instance Pretty BinOp where
+  pretty Add = "+"
+  pretty Subtract = "-"
+  pretty Multiply = "*"
+  pretty Divide = "/"
+  pretty Remainder = "%"
+  pretty BitwiseAnd = "&"
+  pretty BitwiseOr = "|"
+  pretty BitwiseExclusiveOr = "^"
+  pretty ShiftLeft = "<<"
+  pretty ShiftRight = ">>"
+  pretty Less = "<"
+  pretty LessEqual = "<="
+  pretty Greater = ">"
+  pretty GreaterEqual = ">="
+  pretty Equal = "=="
+  pretty NotEqual = "!="
+  pretty ShortCircuitAnd = "&&"
+  pretty ShortCircuitOr = "||"
+
+instance Pretty UnOp where
+  pretty Negate = "-"
+  pretty LogicalNegate = "!"
+  pretty BitwiseComplement = "~"
+  pretty Indirection = "*"
+  pretty AddressOf = "&"
 
 instance Pretty Exp where
   pretty (BoolExp True) = "true"

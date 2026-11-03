@@ -167,7 +167,7 @@ assignTests =
     [ testCase "variable" $
         render (Assign (VarExp "x") (VarExp "y")) @?= "x = y;",
       testCase "dereference" $
-        render (Assign (UnOpExp "*" (VarExp "p")) (VarExp "x")) @?= "(*p) = x;",
+        render (Assign (UnOpExp Indirection (VarExp "p")) (VarExp "x")) @?= "(*p) = x;",
       testCase "index" $
         render (Assign (IndexExp "a" (IntExp 0 AbstractInt)) (IntExp 1 AbstractInt))
           @?= "a[0] = 1;",
@@ -255,7 +255,7 @@ forTests =
           ( For
               "i"
               one
-              (BinOpExp "<" (VarExp "i") one)
+              (BinOpExp Less (VarExp "i") one)
               (UpdateAssign (VarExp "i") one)
               [Call "f" [] []]
           )
@@ -586,6 +586,60 @@ hostShareableTests =
         hostShareable (Ptr I32 Function Nothing) @?= False
     ]
 
+-- | Operators are a closed set, spelled as the grammar spells them.  See
+-- https://www.w3.org/TR/WGSL/#expressions.
+operatorTests :: TestTree
+operatorTests =
+  testGroup
+    "operators"
+    [ testCase "binary" $
+        map
+          (\op -> render (BinOpExp op (VarExp "a") (VarExp "b")))
+          [ Add,
+            Subtract,
+            Multiply,
+            Divide,
+            Remainder,
+            BitwiseAnd,
+            BitwiseOr,
+            BitwiseExclusiveOr,
+            ShiftLeft,
+            ShiftRight,
+            Less,
+            LessEqual,
+            Greater,
+            GreaterEqual,
+            Equal,
+            NotEqual,
+            ShortCircuitAnd,
+            ShortCircuitOr
+          ]
+          @?= [ "(a + b)",
+                "(a - b)",
+                "(a * b)",
+                "(a / b)",
+                "(a % b)",
+                "(a & b)",
+                "(a | b)",
+                "(a ^ b)",
+                "(a << b)",
+                "(a >> b)",
+                "(a < b)",
+                "(a <= b)",
+                "(a > b)",
+                "(a >= b)",
+                "(a == b)",
+                "(a != b)",
+                "(a && b)",
+                "(a || b)"
+              ],
+      testCase "unary" $
+        map
+          (\op -> render (UnOpExp op (VarExp "a")))
+          [Negate, LogicalNegate, BitwiseComplement, Indirection, AddressOf]
+          @?= ["(-a)", "(!a)", "(~a)", "(*a)", "(&a)"]
+    ]
+
 tests :: TestTree
 tests =
   testGroup
@@ -601,7 +655,9 @@ tests =
           structLayoutTests,
           hostShareableTests
         ],
-      testGroup "expressions" [intLitTests, floatLitTests, callTests],
+      testGroup
+        "expressions"
+        [operatorTests, intLitTests, floatLitTests, callTests],
       testGroup
         "statements"
         [sequenceTests, assignTests, returnTests, forTests],
