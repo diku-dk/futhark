@@ -649,8 +649,6 @@ floatExp v t
 bitcast :: Type -> Exp -> Exp
 bitcast t e = CallExp "bitcast" [TypeExp t] [e]
 
---- Prettyprinting definitions
-
 -- | A template argument list, which is omitted when empty.
 templateArgs :: [Doc a] -> Doc a
 templateArgs [] = mempty
