@@ -411,7 +411,10 @@ static void wgpu_size_setup(struct futhark_context *ctx) {
   }
 }
 
-void wgpu_module_setup(struct futhark_context *ctx, const char *program, WGPUShaderModule *module, const char* label) {
+void wgpu_module_setup(struct futhark_context *ctx,
+                       const char *program,
+                       WGPUShaderModule *module,
+                       const char* label) {
   WGPUShaderSourceWGSL wgsl_desc = {
     .chain = {
       .sType = WGPUSType_ShaderSourceWGSL
@@ -657,7 +660,7 @@ typedef struct wgpu_kernel* gpu_kernel;
 typedef WGPUBuffer gpu_mem;
 
 static int gpu_alloc_actual(struct futhark_context *ctx,
-  size_t size, gpu_mem *mem_out) {
+                            size_t size, gpu_mem *mem_out) {
   // Storage buffers bindings must have an effective size that is a multiple of
   // 4, so we round up all allocations.  A binding must also be large enough to
   // hold at least one element of the array type in the shader, even when the
@@ -672,9 +675,9 @@ static int gpu_alloc_actual(struct futhark_context *ctx,
   };
   *mem_out = wgpuDeviceCreateBuffer(ctx->device, &desc);
   return FUTHARK_SUCCESS;
-  }
+}
 
-  static int gpu_free_actual(struct futhark_context *ctx, gpu_mem mem) {
+static int gpu_free_actual(struct futhark_context *ctx, gpu_mem mem) {
   (void)ctx;
   wgpuBufferDestroy(mem);
   return FUTHARK_SUCCESS;
