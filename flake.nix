@@ -90,7 +90,7 @@
         futhark-data = new.callPackage ./nix/futhark-data.nix { };
         futhark-server = new.callPackage ./nix/futhark-server.nix { };
         futhark-manifest = new.callPackage ./nix/futhark-manifest.nix { };
-        language-wgsl = new.callCabal2nix "language-wgsl" ./language-wgsl { };
+        language-wgsl = new.callPackage ./nix/language-wgsl.nix { };
 
         # The plain Haskell package -- library and executable, no static
         # linking. This is what downstream Haskell projects should depend
