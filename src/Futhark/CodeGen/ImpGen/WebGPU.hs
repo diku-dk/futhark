@@ -638,7 +638,7 @@ genCopy pt shape (dst, dst_space) (dst_offset, dst_strides) (src, src_space) (sr
         i
         zero
         (wgslCmpOp (CmpUlt Int64) (WGSL.VarExp i) n)
-        (assign i $ wgslBinOp (Add Int64 OverflowWrap) (WGSL.VarExp i) one)
+        (WGSL.UpdateAssign (WGSL.VarExp i) $ wgslBinOp (Add Int64 OverflowWrap) (WGSL.VarExp i) one)
         (loops ins body)
 
 -- | Assign to a variable.
@@ -666,7 +666,7 @@ genWGSLStm (For iName bound body) = do
       i
       zero
       (lt (WGSL.VarExp i) boundExp)
-      (assign i $ add (WGSL.VarExp i) one)
+      (WGSL.UpdateAssign (WGSL.VarExp i) $ add (WGSL.VarExp i) one)
       bodyStm
   where
     i = nameToIdent iName

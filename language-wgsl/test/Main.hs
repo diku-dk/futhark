@@ -7,6 +7,10 @@ import Prettyprinter.Render.Text (renderStrict)
 import Test.Tasty
 import Test.Tasty.HUnit
 
+-- | A convenient literal for tests that only need some expression.
+one :: Exp
+one = IntExp 1 AbstractInt
+
 -- | Render an AST fragment as a code generator would.
 render :: (Pretty a) => a -> T.Text
 render = renderStrict . layoutPretty defaultLayoutOptions . pretty
@@ -147,14 +151,14 @@ assignTests =
   testGroup
     "Assign"
     [ testCase "variable" $
-        render (Assign (VarExp "x") (VarExp "y")) @?= "x = y",
+        render (Assign (VarExp "x") (VarExp "y")) @?= "x = y;",
       testCase "dereference" $
-        render (Assign (UnOpExp "*" (VarExp "p")) (VarExp "x")) @?= "(*p) = x",
+        render (Assign (UnOpExp "*" (VarExp "p")) (VarExp "x")) @?= "(*p) = x;",
       testCase "index" $
         render (Assign (IndexExp "a" (IntExp 0 AbstractInt)) (IntExp 1 AbstractInt))
-          @?= "a[0] = 1",
+          @?= "a[0] = 1;",
       testCase "member" $
-        render (Assign (FieldExp (VarExp "s") "f") (VarExp "y")) @?= "s.f = y"
+        render (Assign (FieldExp (VarExp "s") "f") (VarExp "y")) @?= "s.f = y;"
     ]
 
 -- | A return statement supplies a value exactly when the enclosing function
@@ -164,9 +168,9 @@ returnTests =
   testGroup
     "Return"
     [ testCase "without value" $
-        render (Return Nothing) @?= "return",
+        render (Return Nothing) @?= "return;",
       testCase "with value" $
-        render (Return (Just (VarExp "x"))) @?= "return x"
+        render (Return (Just (VarExp "x"))) @?= "return x;"
     ]
 
 -- | A function declaration has at most one return type, which may carry
@@ -193,6 +197,38 @@ funDeclTests =
           @?= "@vertex\nfn vs() -> @builtin(position) vec4<f32> {\n  return p;\n}"
     ]
 
+-- | Each statement carries its own terminator, and a compound statement takes
+-- none.  See https://www.w3.org/TR/WGSL/#statements.
+seqTests :: TestTree
+seqTests =
+  testGroup
+    "Seq"
+    [ testCase "terminators" $
+        render (stmts [Call "f" [], Let "x" one, Call "g" []])
+          @?= "f();\nlet x = 1;\ng();",
+      -- The separator used to end up inside the comment.
+      testCase "comment" $
+        render (stmts [Call "f" [], Comment "note", Call "g" []])
+          @?= "f();\n// note\ng();",
+      testCase "compound statement" $
+        render (stmts [If (VarExp "c") (Call "f" []) Skip, Call "g" []])
+          @?= "if c {\n  f();\n}\ng();"
+    ]
+
+-- | A for loop's update is an assignment or a call, and is not terminated.
+-- See https://www.w3.org/TR/WGSL/#for-statement.
+forTests :: TestTree
+forTests =
+  testGroup
+    "For"
+    [ testCase "assignment update" $
+        render (For "i" one (BinOpExp "<" (VarExp "i") one) (UpdateAssign (VarExp "i") one) (Call "f" []))
+          @?= "for (var i = 1; (i < 1); i = 1) {\n  f();\n}",
+      testCase "call update" $
+        render (For "i" one (VarExp "c") (UpdateCall "step" [VarExp "i"]) Skip)
+          @?= "for (var i = 1; c; step(i)) {\n  ;\n}"
+    ]
+
 tests :: TestTree
 tests =
   testGroup
@@ -200,7 +236,7 @@ tests =
     [ testGroup "types" [pointerTests],
       testGroup "memory" [accessModeTests],
       testGroup "expressions" [intLitTests, floatLitTests],
-      testGroup "statements" [assignTests, returnTests],
+      testGroup "statements" [seqTests, assignTests, returnTests, forTests],
       testGroup "declarations" [varDeclTests, funDeclTests]
     ]
 

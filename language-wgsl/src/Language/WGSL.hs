@@ -21,6 +21,7 @@ module Language.WGSL
     intExp,
     floatExp,
     Stmt (..),
+    ForUpdate (..),
     Attrib (..),
     Param (..),
     FunDecl (..),
@@ -140,7 +141,10 @@ data Exp
 
 data Stmt
   = Skip
-  | Comment T.Text
+  | -- | This technically is not a statement in WGSL, but it is useful for
+    -- legibility of generated code. Produces a line comment. The comment may
+    -- have linebreaks.
+    Comment T.Text
   | Seq Stmt Stmt
   | Let Ident Exp
   | DeclareVar Ident Type
@@ -148,12 +152,19 @@ data Stmt
     -- https://www.w3.org/TR/WGSL/#assignment.
     Assign Exp Exp
   | If Exp Stmt Stmt
-  | For Ident Exp Exp Stmt Stmt
+  | For Ident Exp Exp ForUpdate Stmt
   | While Exp Stmt
   | Call Ident [Exp]
   | -- | The expression must be present exactly when the enclosing function
     -- has a return type.
     Return (Maybe Exp)
+
+-- | The update of a @for@ loop, which the grammar restricts to an assignment
+-- or a function call.  See https://www.w3.org/TR/WGSL/#for-statement.
+data ForUpdate
+  = -- | The left-hand side must be an assignable expression.
+    UpdateAssign Exp Exp
+  | UpdateCall Ident [Exp]
 
 data Attrib = Attrib Ident [Exp]
 
@@ -254,9 +265,6 @@ commastack :: [Doc a] -> Doc a
 commastack = align . vsep . punctuate comma
 
 -- | Separate with semicolons and newlines.
-semistack :: [Doc a] -> Doc a
-semistack = align . vsep . punctuate semi
-
 -- | Separate with linebreaks.
 stack :: [Doc a] -> Doc a
 stack = align . mconcat . punctuate line
@@ -307,17 +315,16 @@ instance Pretty Exp where
 instance Pretty Stmt where
   pretty Skip = ";"
   pretty (Comment c) = vsep (map ("//" <+>) (pretty <$> T.lines c))
-  pretty (Seq s1 s2) = semistack [pretty s1, pretty s2]
-  pretty (Let x e) = "let" <+> pretty x <+> "=" <+> pretty e
-  pretty (DeclareVar x t) = "var" <+> pretty x <+> ":" <+> pretty t
-  pretty (Assign lhs e) = pretty lhs <+> "=" <+> pretty e
+  pretty (Seq s1 s2) = stack [pretty s1, pretty s2]
+  pretty (Let x e) = "let" <+> pretty x <+> "=" <+> pretty e <> ";"
+  pretty (DeclareVar x t) = "var" <+> pretty x <+> ":" <+> pretty t <> ";"
+  pretty (Assign lhs e) = pretty lhs <+> "=" <+> pretty e <> ";"
   pretty (If cond Skip Skip) = "if" <+> pretty cond <+> "{ }"
   pretty (If cond th Skip) =
     "if"
       <+> pretty cond
       <+> "{"
         </> indent 2 (pretty th)
-      <> ";"
         </> "}"
   pretty (If cond Skip el) =
     "if"
@@ -325,17 +332,14 @@ instance Pretty Stmt where
       <+> "{ }"
         </> "else {"
         </> indent 2 (pretty el)
-      <> ";"
         </> "}"
   pretty (If cond th el) =
     "if"
       <+> pretty cond
       <+> "{"
         </> indent 2 (pretty th)
-      <> ";"
         </> "} else {"
         </> indent 2 (pretty el)
-      <> ";"
         </> "}"
   pretty (For x initializer cond upd body) =
     "for"
@@ -351,18 +355,20 @@ instance Pretty Stmt where
         )
       <+> "{"
         </> indent 2 (pretty body)
-      <> ";"
         </> "}"
   pretty (While cond body) =
     "while"
       <+> pretty cond
       <+> "{"
         </> indent 2 (pretty body)
-      <> ";"
         </> "}"
-  pretty (Call f args) = pretty f <> parens (commasep $ map pretty args)
-  pretty (Return Nothing) = "return"
-  pretty (Return (Just e)) = "return" <+> pretty e
+  pretty (Call f args) = pretty f <> parens (commasep $ map pretty args) <> ";"
+  pretty (Return Nothing) = "return;"
+  pretty (Return (Just e)) = "return" <+> pretty e <> ";"
+
+instance Pretty ForUpdate where
+  pretty (UpdateAssign lhs e) = pretty lhs <+> "=" <+> pretty e
+  pretty (UpdateCall f args) = pretty f <> parens (commasep $ map pretty args)
 
 instance Pretty Attrib where
   pretty (Attrib name []) = "@" <> pretty name
@@ -387,7 +393,7 @@ instance Pretty FunDecl where
     stack
       [ hsep (map pretty attribs),
         header,
-        indent 2 (pretty body) <> ";",
+        indent 2 (pretty body),
         "}"
       ]
     where
