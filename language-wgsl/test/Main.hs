@@ -221,13 +221,11 @@ funDeclTests =
           @?= "@vertex\nfn vs() -> @builtin(position) vec4<f32> {\n  return p;\n}"
     ]
 
--- | Each statement carries its own terminator, and a compound statement takes
--- none.  See https://www.w3.org/TR/WGSL/#statements.
 sequenceTests :: TestTree
 sequenceTests =
   testGroup
     "sequences"
-    [ testCase "terminators" $
+    [ testCase "semicolons" $
         renderBody [Call "f" [] [], Let "x" Nothing one, Call "g" [] []]
           @?= "f();\nlet x = 1;\ng();",
       -- The separator used to end up inside the comment.
