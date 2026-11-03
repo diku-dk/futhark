@@ -27,6 +27,10 @@ which python3
 # emsdk
 if [ ! -d "${HOME}/opt/emsdk" ]; then
   git clone https://github.com/emscripten-core/emsdk.git "${HOME}/opt/emsdk"
+else
+  # The release list is part of the checkout, so it must be updated
+  # before a newer version can be installed.
+  git -C "${HOME}/opt/emsdk" pull --ff-only
 fi
 
 pushd "${HOME}/opt/emsdk" >/dev/null
