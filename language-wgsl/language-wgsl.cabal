@@ -1,23 +1,34 @@
 cabal-version:      3.4
 name:               language-wgsl
 version:            0.1.0.0
-synopsis:           The WebGPU Shader Language.
+synopsis:           AST, prettyprinter, and other tools for the WebGPU Shading Language.
 
-description:        A package implementing a (partial) AST definition for the
-                    WebGPU Shader Language, including a prettyprinter.
+description:        A package for working with the
+                    <https://www.w3.org/TR/WGSL/ WebGPU Shading Language>
+                    (WGSL).
+                    .
+                    The package is currently fairly minimalistic, and mostly
+                    useful for programs that want to generate WGSL.
 
 license:            ISC
 license-file:       LICENSE
 author:             Sebastian Paarmann
-maintainer:         sepa@di.ku.dk
--- copyright:
+maintainer:         Troels Henriksen <athas@sigkill.dk>
+copyright:          Sebastian Paarmann and the University of Copenhagen
 category:           Language
+homepage:           https://github.com/diku-dk/language-wgsl
+bug-reports:        https://github.com/diku-dk/language-wgsl/issues
 build-type:         Simple
+tested-with:        GHC == 9.12.3
 extra-doc-files:    CHANGELOG.md
--- extra-source-files:
+                    README.md
+
+source-repository head
+    type:     git
+    location: https://github.com/diku-dk/language-wgsl.git
 
 common warnings
-    ghc-options: -Wall
+    ghc-options: -Wall -Wcompat
 
 library
     import:           warnings
