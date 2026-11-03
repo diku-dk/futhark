@@ -431,7 +431,6 @@ library
       Futhark.Test.Compile
       Futhark.Test.Property
       Futhark.Test.Spec
-      Futhark.Test.WebGPUTest
       Futhark.Test.Values
       Futhark.Tools
       Futhark.Transform.CopyPropagate
