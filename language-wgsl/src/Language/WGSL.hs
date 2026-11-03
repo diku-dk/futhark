@@ -1,12 +1,15 @@
 -- | Basic WGSL definitions, including AST definitions. These are intended to
 -- correspond closely with the terminology and structure of the WGSL
--- specification, but it is not machine-generated.
+-- specification, but it is not automatically generated from the specification,
+-- and so may have inconsistencies.
 --
 -- The definitions here are abstract in the sense that they cannot represent
 -- syntactic details of a WGSL program, e.g., whether an integer literal is
 -- written hexadecimally. This makes these definitions less useful for parsing,
 -- but fine for code generation. I would not be opposed to adding a concrete
 -- syntax module in the future.
+--
+-- To produce WGSL code as text, use the 'Pretty' definition.
 module Language.WGSL
   ( -- * Identifiers
     Ident,
@@ -61,9 +64,6 @@ module Language.WGSL
     Severity (..),
     EnableExtension (..),
     LanguageExtension (..),
-
-    -- * Prettyprinting
-    prettyDecls,
   )
 where
 
@@ -960,6 +960,3 @@ instance Pretty GlobalDecl where
       <+> "="
       <+> pretty initial
       <> ";"
-
-prettyDecls :: [GlobalDecl] -> Doc a
-prettyDecls decls = stack (map pretty decls)

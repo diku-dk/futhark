@@ -27,7 +27,7 @@ import Futhark.Error (compilerLimitation)
 import Futhark.IR.GPUMem qualified as F
 import Futhark.MonadFreshNames
 import Futhark.Util (convFloat, nubOrd, zEncodeText)
-import Futhark.Util.Pretty (align, docText, indent, pretty, (</>))
+import Futhark.Util.Pretty (align, docText, indent, pretty, stack, (</>))
 import Language.Futhark.Warnings (Warnings)
 import Language.WGSL qualified as WGSL
 
@@ -197,7 +197,7 @@ genKernel kernel = do
 
   ((), s, ()) <- runRWST gen (KernelR kernel) initial
 
-  addCode $ docText $ WGSL.prettyDecls (ksDecls s)
+  addCode $ docText $ stack $ map pretty $ ksDecls s
   addCode "\n\n"
 
   let name = nameToText $ ImpGPU.kernelName kernel
