@@ -34,8 +34,8 @@ library
     import:           warnings
     exposed-modules:  Language.WGSL
     build-depends:    base >=4.15 && <5,
-                      text,
-                      prettyprinter >= 1.7
+                      text >=1.2 && <2.2,
+                      prettyprinter >=1.7 && <1.8
     hs-source-dirs:   src
     default-language: GHC2021
     default-extensions:
@@ -51,4 +51,8 @@ test-suite language-wgsl-test
     main-is:          Main.hs
     build-depends:
         base >=4.15 && <5,
-        language-wgsl
+        text >=1.2 && <2.2,
+        prettyprinter >=1.7 && <1.8,
+        language-wgsl,
+        tasty >=1.4 && <1.6,
+        tasty-hunit >=0.10 && <0.11

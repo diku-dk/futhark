@@ -1,3 +1,6 @@
+-- | Basic WGSL definitions, including AST definitions. These are intended to
+-- correspond closely with the terminology and structure of the WGSL
+-- specification, but it is not machine-generated.
 module Language.WGSL
   ( Ident,
     PrimType (..),
@@ -183,7 +186,7 @@ instance Pretty Typ where
   pretty (Array t Nothing) = "array<" <> pretty t <> ">"
   pretty (Array t sz) = "array<" <> pretty t <> ", " <> pretty sz <> ">"
   pretty (Named t) = pretty t
-  pretty (Pointer t as am) = "ptr<" <> pretty as <> ", " <> pretty t <> maybe "" pretty am <> ">"
+  pretty (Pointer t as am) = "ptr<" <> pretty as <> ", " <> pretty t <> maybe "" ((", " <>) . pretty) am <> ">"
 
 instance Pretty Exp where
   pretty (BoolExp True) = "true"
