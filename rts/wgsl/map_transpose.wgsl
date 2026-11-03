@@ -48,6 +48,9 @@ fn map_transpose_NAME(
         var global_id_2 = i32(global_id[2]);
 
         for (var i2 = 0; i2 <= args.repeat_2; i2++) {
+            if (tblock_id_2 >= args.num_arrays) { break; }
+            // The previous iteration may still be reading shared memory.
+            if (i1 > 0 || i2 > 0) { workgroupBarrier(); }
             let odata_offset = dst_offset + tblock_id_2 * args.dst_array_stride;
             let idata_offset = src_offset + tblock_id_2 * args.src_array_stride;
             var x_index = i32(global_id_0);

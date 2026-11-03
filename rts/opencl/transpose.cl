@@ -29,6 +29,8 @@ void map_transpose_##NAME(SHARED_MEM_PARAM                              \
     int global_id_2 = get_global_id(2);                                 \
     for (int i2 = 0; i2 <= repeat_2; i2++) {                            \
       if (tblock_id_2 >= num_arrays) { break; }                         \
+      /* The previous iteration may still be reading shared memory. */  \
+      if (i1 > 0 || i2 > 0) { barrier_local(); }                        \
       int32_t odata_offset = dst_offset + tblock_id_2 * dst_array_stride; \
       int32_t idata_offset = src_offset + tblock_id_2 * src_array_stride; \
       int32_t x_index = global_id_0;                                    \
@@ -91,6 +93,8 @@ void map_transpose_##NAME##_low_height(SHARED_MEM_PARAM                 \
     int global_id_2 = get_global_id(2);                                 \
     for (int i2 = 0; i2 <= repeat_2; i2++) {                            \
       if (tblock_id_2 >= num_arrays) { break; }                         \
+      /* The previous iteration may still be reading shared memory. */  \
+      if (i1 > 0 || i2 > 0) { barrier_local(); }                        \
       int32_t odata_offset = dst_offset + tblock_id_2 * dst_array_stride; \
       int32_t idata_offset = src_offset + tblock_id_2 * src_array_stride; \
       int32_t x_index =                                                 \
@@ -149,6 +153,8 @@ void map_transpose_##NAME##_low_width(SHARED_MEM_PARAM                  \
     int global_id_2 = get_global_id(2);                                 \
     for (int i2 = 0; i2 <= repeat_2; i2++) {                            \
       if (tblock_id_2 >= num_arrays) { break; }                         \
+      /* The previous iteration may still be reading shared memory. */  \
+      if (i1 > 0 || i2 > 0) { barrier_local(); }                        \
       int32_t odata_offset = dst_offset + tblock_id_2 * dst_array_stride; \
       int32_t idata_offset = src_offset + tblock_id_2 * src_array_stride; \
       int32_t x_index = tblock_id_0 * TR_BLOCK_DIM + get_local_id(0)/muly; \
@@ -250,6 +256,8 @@ void map_transpose_##NAME##_large(SHARED_MEM_PARAM                      \
     int global_id_2 = get_global_id(2);                                 \
     for (int i2 = 0; i2 <= repeat_2; i2++) {                            \
       if (tblock_id_2 >= num_arrays) { break; }                         \
+      /* The previous iteration may still be reading shared memory. */  \
+      if (i1 > 0 || i2 > 0) { barrier_local(); }                        \
       int64_t odata_offset = dst_offset + tblock_id_2 * dst_array_stride; \
       int64_t idata_offset = src_offset + tblock_id_2 * src_array_stride; \
       int64_t x_index = global_id_0;                                    \
