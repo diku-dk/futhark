@@ -1003,7 +1003,10 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
   int scalars_start = shared_mem_start + kernel_info->num_shared_mem_overrides;
   int mem_start = scalars_start + kernel_info->num_scalars;
 
-  void *scalars = malloc(kernel_info->scalars_size);
+  // Must be zero-initialised: a scalar argument may be smaller than its field
+  // in the kernel's scalar struct (a bool is passed as one byte, but read as an
+  // i32), and the remaining bytes of the field must be zero.
+  void *scalars = calloc(1, kernel_info->scalars_size);
   for (int i = 0; i < kernel_info->num_scalars; i++) {
     memcpy(scalars + kernel_info->scalar_offsets[i],
         args[scalars_start + i], args_sizes[scalars_start + i]);
