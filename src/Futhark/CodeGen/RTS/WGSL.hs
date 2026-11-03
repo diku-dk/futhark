@@ -2,12 +2,7 @@
 
 -- | Code snippets used by the WebGPU backend as part of WGSL shaders.
 module Futhark.CodeGen.RTS.WGSL
-  ( scalar,
-    scalar8,
-    scalar16,
-    scalar32,
-    scalar64,
-    atomics,
+  ( atomics,
     wgslPrelude,
     lmadCopy,
     mapTranspose,
