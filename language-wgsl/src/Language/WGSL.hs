@@ -93,7 +93,6 @@ data Exp
   = BoolExp Bool
   | IntExp Int
   | FloatExp Double
-  | StringExp T.Text
   | VarExp Ident
   | BinOpExp BinOp Exp Exp
   | UnOpExp UnOp Exp
@@ -197,7 +196,6 @@ instance Pretty Exp where
   pretty (BoolExp False) = "false"
   pretty (IntExp x) = pretty x
   pretty (FloatExp x) = pretty x
-  pretty (StringExp x) = pretty $ show x
   pretty (VarExp x) = pretty x
   pretty (UnOpExp op e) = parens (pretty op <> pretty e)
   pretty (BinOpExp op e1 e2) = parens (pretty e1 <+> pretty op <+> pretty e2)

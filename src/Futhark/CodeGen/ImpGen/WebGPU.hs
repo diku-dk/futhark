@@ -1031,7 +1031,8 @@ genWGSLExp (CmpOpExp op e1 e2) =
   liftM2 (wgslCmpOp op) (genWGSLExp e1) (genWGSLExp e2)
 genWGSLExp (UnOpExp op e) = wgslUnOp op <$> genWGSLExp e
 genWGSLExp (ConvOpExp op e) = wgslConvOp op <$> genWGSLExp e
-genWGSLExp e = pure $ WGSL.StringExp $ "<not implemented: " <> prettyText e <> ">"
+genWGSLExp e =
+  compilerLimitation $ "WebGPU backend cannot generate expression: " <> prettyText e
 
 -- We support 64-bit arithmetic, but since WGSL does not have support for it,
 -- we cannot use a 64-bit value as an index, so we have to truncate it to 32
