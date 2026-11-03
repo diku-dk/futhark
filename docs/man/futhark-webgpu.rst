@@ -67,6 +67,8 @@ are the main restrictions that a Futhark programmer will notice.
 * Programs only run on devices that support the ``shader-f16`` feature, even if
   they do not use ``f16``.
 
+* Tuning files are unsupported.
+
 SEE ALSO
 ========
 
