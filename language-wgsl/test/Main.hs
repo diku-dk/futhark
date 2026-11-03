@@ -3,7 +3,7 @@ module Main (main) where
 import Data.List (nub)
 import Data.Text qualified as T
 import Language.WGSL
-import Prettyprinter (Pretty, defaultLayoutOptions, layoutPretty, pretty)
+import Prettyprinter (Pretty, defaultLayoutOptions, layoutPretty, pretty, vsep)
 import Prettyprinter.Render.Text (renderStrict)
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -20,6 +20,11 @@ layout t = (,) <$> alignOf t <*> sizeOf t
 -- | A convenient literal for tests that only need some expression.
 one :: Exp
 one = IntExp 1 AbstractInt
+
+-- | Render a statement sequence, as a code generator would.
+renderBody :: [Stmt] -> T.Text
+renderBody =
+  renderStrict . layoutPretty defaultLayoutOptions . vsep . map pretty
 
 -- | Render an AST fragment as a code generator would.
 render :: (Pretty a) => a -> T.Text
@@ -61,24 +66,23 @@ accessModeTests =
 
 -- | The address space of a module-scope variable is given as a template list
 -- after the @var@ keyword, with the access mode second if present.  See
--- https://www.w3.org/TR/WGSL/#var-decls.  Note that a declaration without
--- attributes is currently rendered with a leading line break.
+-- https://www.w3.org/TR/WGSL/#var-decls.
 varDeclTests :: TestTree
 varDeclTests =
   testGroup
     "VarDecl"
     [ testCase "without access mode" $
         render (VarDecl [] Workgroup Nothing "x" I32)
-          @?= "\nvar<workgroup> x : i32;",
+          @?= "var<workgroup> x : i32;",
       testCase "with access mode" $
         render (VarDecl [] Storage (Just ReadWrite) "x" (Array I32 Nothing))
-          @?= "\nvar<storage, read_write> x : array<i32>;",
+          @?= "var<storage, read_write> x : array<i32>;",
       testCase "private" $
         render (VarDecl [] Private Nothing "x" F32)
-          @?= "\nvar<private> x : f32;",
+          @?= "var<private> x : f32;",
       testCase "immediate" $
         render (VarDecl [] Immediate Nothing "x" (Named "S"))
-          @?= "\nvar<immediate> x : S;",
+          @?= "var<immediate> x : S;",
       testCase "with attributes" $
         render (VarDecl (bindingAttribs 0 1) Storage (Just Read) "x" (Array F32 Nothing))
           @?= "@group(0) @binding(1)\nvar<storage, read> x : array<f32>;"
@@ -190,11 +194,14 @@ funDeclTests =
   testGroup
     "FunDecl"
     [ testCase "without return type" $
-        render (FunDecl "f" [] [Param "a" I32 []] Nothing (Call "g" [] [VarExp "a"]))
-          @?= "\nfn f(\n  a : i32\n) {\n  g(a);\n}",
+        render (FunDecl "f" [] [Param "a" I32 []] Nothing [Call "g" [] [VarExp "a"]])
+          @?= "fn f(\n  a : i32\n) {\n  g(a);\n}",
       testCase "with return type" $
-        render (FunDecl "f" [] [] (Just ([], I32)) (Return (Just (IntExp 1 AbstractInt))))
-          @?= "\nfn f() -> i32 {\n  return 1;\n}",
+        render
+          (FunDecl "f" [] [] (Just ([], I32)) [Return (Just (IntExp 1 AbstractInt))])
+          @?= "fn f() -> i32 {\n  return 1;\n}",
+      testCase "empty body" $
+        render (FunDecl "f" [] [] Nothing []) @?= "fn f() { }",
       testCase "with return attributes" $
         render
           ( FunDecl
@@ -202,27 +209,39 @@ funDeclTests =
               [Attrib "vertex" []]
               []
               (Just ([Attrib "builtin" [VarExp "position"]], Vec4 F32))
-              (Return (Just (VarExp "p")))
+              [Return (Just (VarExp "p"))]
           )
           @?= "@vertex\nfn vs() -> @builtin(position) vec4<f32> {\n  return p;\n}"
     ]
 
 -- | Each statement carries its own terminator, and a compound statement takes
 -- none.  See https://www.w3.org/TR/WGSL/#statements.
-seqTests :: TestTree
-seqTests =
+sequenceTests :: TestTree
+sequenceTests =
   testGroup
-    "Seq"
+    "sequences"
     [ testCase "terminators" $
-        render (stmts [Call "f" [] [], Let "x" one, Call "g" [] []])
+        renderBody [Call "f" [] [], Let "x" one, Call "g" [] []]
           @?= "f();\nlet x = 1;\ng();",
       -- The separator used to end up inside the comment.
       testCase "comment" $
-        render (stmts [Call "f" [] [], Comment "note", Call "g" [] []])
+        renderBody [Call "f" [] [], Comment "note", Call "g" [] []]
           @?= "f();\n// note\ng();",
       testCase "compound statement" $
-        render (stmts [If (VarExp "c") (Call "f" [] []) Skip, Call "g" [] []])
-          @?= "if c {\n  f();\n}\ng();"
+        renderBody [If (VarExp "c") [Call "f" [] []] Nothing, Call "g" [] []]
+          @?= "if c {\n  f();\n}\ng();",
+      -- An empty body used to render as a stray empty statement.
+      testCase "empty body" $
+        render (While (VarExp "c") []) @?= "while c { }",
+      testCase "empty statement" $
+        render (While (VarExp "c") [Empty]) @?= "while c {\n  ;\n}",
+      testCase "block introduces a scope" $
+        render (Compound [Let "x" one]) @?= "{\n  let x = 1;\n}",
+      -- An absent else clause is not the same as an empty one.
+      testCase "absent else" $
+        render (If (VarExp "c") [] Nothing) @?= "if c { }",
+      testCase "empty else" $
+        render (If (VarExp "c") [] (Just [])) @?= "if c { } else { }"
     ]
 
 -- | A for loop's update is an assignment or a call, and is not terminated.
@@ -232,11 +251,18 @@ forTests =
   testGroup
     "For"
     [ testCase "assignment update" $
-        render (For "i" one (BinOpExp "<" (VarExp "i") one) (UpdateAssign (VarExp "i") one) (Call "f" [] []))
+        render
+          ( For
+              "i"
+              one
+              (BinOpExp "<" (VarExp "i") one)
+              (UpdateAssign (VarExp "i") one)
+              [Call "f" [] []]
+          )
           @?= "for (var i = 1; (i < 1); i = 1) {\n  f();\n}",
       testCase "call update" $
-        render (For "i" one (VarExp "c") (UpdateCall "step" [] [VarExp "i"]) Skip)
-          @?= "for (var i = 1; c; step(i)) {\n  ;\n}"
+        render (For "i" one (VarExp "c") (UpdateCall "step" [] [VarExp "i"]) [])
+          @?= "for (var i = 1; c; step(i)) { }"
     ]
 
 -- | A callee may carry a template argument list.  See
@@ -579,7 +605,9 @@ tests =
           hostShareableTests
         ],
       testGroup "expressions" [intLitTests, floatLitTests, callTests],
-      testGroup "statements" [seqTests, assignTests, returnTests, forTests],
+      testGroup
+        "statements"
+        [sequenceTests, assignTests, returnTests, forTests],
       testGroup "declarations" [varDeclTests, funDeclTests]
     ]
 

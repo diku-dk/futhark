@@ -39,7 +39,6 @@ module Language.WGSL
     Declaration (..),
     AccessMode (..),
     AddressSpace (..),
-    stmts,
     bindingAttribs,
     bitcast,
     prettyDecls,
@@ -381,20 +380,24 @@ data Exp
   deriving (Eq, Ord, Show)
 
 data Stmt
-  = Skip
+  = -- | The empty statement.
+    Empty
   | -- | This technically is not a statement in WGSL, but it is useful for
     -- legibility of generated code. Produces a line comment. The comment may
     -- have linebreaks.
     Comment T.Text
-  | Seq Stmt Stmt
+  | -- | A compound statement, which introduces a new scope.
+    Compound [Stmt]
   | Let Ident Exp
   | DeclareVar Ident Type
   | -- | The left-hand side must be an assignable expression.  See
     -- https://www.w3.org/TR/WGSL/#assignment.
     Assign Exp Exp
-  | If Exp Stmt Stmt
-  | For Ident Exp Exp ForUpdate Stmt
-  | While Exp Stmt
+  | -- | The @else@ clause is absent when 'Nothing', which is not the same as
+    -- an empty one.
+    If Exp [Stmt] (Maybe [Stmt])
+  | For Ident Exp Exp ForUpdate [Stmt]
+  | While Exp [Stmt]
   | Call Ident [Exp] [Exp]
   | -- | The expression must be present exactly when the enclosing function
     -- has a return type.
@@ -422,7 +425,7 @@ data FunDecl = FunDecl
     funAttribs :: [Attrib],
     funParams :: [Param],
     funReturn :: Maybe ([Attrib], Type),
-    funBody :: Stmt
+    funBody :: [Stmt]
   }
   deriving (Eq, Ord, Show)
 
@@ -460,11 +463,6 @@ data Declaration
     VarDecl [Attrib] AddressSpace (Maybe AccessMode) Ident Type
   | OverrideDecl Ident Type (Maybe Exp)
   deriving (Eq, Ord, Show)
-
-stmts :: [Stmt] -> Stmt
-stmts [] = Skip
-stmts [s] = s
-stmts (s : ss) = Seq s (stmts ss)
 
 bindingAttribs :: Int -> Int -> [Attrib]
 bindingAttribs grp binding =
@@ -659,34 +657,15 @@ instance Pretty Exp where
   pretty (FieldExp x y) = pretty x <> "." <> pretty y
 
 instance Pretty Stmt where
-  pretty Skip = ";"
+  pretty Empty = ";"
   pretty (Comment c) = vsep (map ("//" <+>) (pretty <$> T.lines c))
-  pretty (Seq s1 s2) = stack [pretty s1, pretty s2]
+  pretty (Compound body) = block body
   pretty (Let x e) = "let" <+> pretty x <+> "=" <+> pretty e <> ";"
   pretty (DeclareVar x t) = "var" <+> pretty x <+> ":" <+> pretty t <> ";"
   pretty (Assign lhs e) = pretty lhs <+> "=" <+> pretty e <> ";"
-  pretty (If cond Skip Skip) = "if" <+> pretty cond <+> "{ }"
-  pretty (If cond th Skip) =
-    "if"
-      <+> pretty cond
-      <+> "{"
-        </> indent 2 (pretty th)
-        </> "}"
-  pretty (If cond Skip el) =
-    "if"
-      <+> pretty cond
-      <+> "{ }"
-        </> "else {"
-        </> indent 2 (pretty el)
-        </> "}"
-  pretty (If cond th el) =
-    "if"
-      <+> pretty cond
-      <+> "{"
-        </> indent 2 (pretty th)
-        </> "} else {"
-        </> indent 2 (pretty el)
-        </> "}"
+  pretty (If cond th Nothing) = "if" <+> pretty cond <+> block th
+  pretty (If cond th (Just el)) =
+    "if" <+> pretty cond <+> block th <+> "else" <+> block el
   pretty (For x initializer cond upd body) =
     "for"
       <+> parens
@@ -699,19 +678,18 @@ instance Pretty Stmt where
             <> ";"
             <+> pretty upd
         )
-      <+> "{"
-        </> indent 2 (pretty body)
-        </> "}"
-  pretty (While cond body) =
-    "while"
-      <+> pretty cond
-      <+> "{"
-        </> indent 2 (pretty body)
-        </> "}"
+      <+> block body
+  pretty (While cond body) = "while" <+> pretty cond <+> block body
   pretty (Call f targs args) =
     pretty f <> templateList targs <> parens (commasep $ map pretty args) <> ";"
   pretty (Return Nothing) = "return;"
   pretty (Return (Just e)) = "return" <+> pretty e <> ";"
+
+-- | A brace-enclosed statement sequence, as every block in WGSL is.  See
+-- https://www.w3.org/TR/WGSL/#compound-statement-section.
+block :: [Stmt] -> Doc a
+block [] = "{ }"
+block body = "{" </> indent 2 (stack (map pretty body)) </> "}"
 
 instance Pretty ForUpdate where
   pretty (UpdateAssign lhs e) = pretty lhs <+> "=" <+> pretty e
@@ -738,23 +716,21 @@ prettyParams params = "(" </> indent 2 (commastack (map pretty params)) </> ")"
 
 instance Pretty FunDecl where
   pretty (FunDecl name attribs params ret body) =
-    stack
-      [ hsep (map pretty attribs),
-        header,
-        indent 2 (pretty body),
-        "}"
-      ]
+    prettyAttribs attribs <> header <+> block body
     where
       header = case ret of
-        Nothing ->
-          "fn" <+> pretty name <> prettyParams params <+> "{"
+        Nothing -> "fn" <+> pretty name <> prettyParams params
         Just (ret_attribs, t) ->
           "fn"
             <+> pretty name
             <> prettyParams params
             <+> "->"
             <+> hsep (map pretty ret_attribs ++ [pretty t])
-            <+> "{"
+
+-- | Attributes, followed by a line break if there are any at all.
+prettyAttribs :: [Attrib] -> Doc a
+prettyAttribs [] = mempty
+prettyAttribs attribs = hsep (map pretty attribs) <> line
 
 instance Pretty Field where
   pretty (Field name typ) = pretty name <+> ":" <+> pretty typ
@@ -784,8 +760,8 @@ instance Pretty Declaration where
   pretty (FunctionDecl fun) = pretty fun
   pretty (StructDecl struct) = pretty struct
   pretty (VarDecl attribs as am name typ) =
-    hsep (map pretty attribs)
-      </> "var<"
+    prettyAttribs attribs
+      <> "var<"
       <> pretty as
       <> maybe "" ((", " <>) . pretty) am
       <> ">"

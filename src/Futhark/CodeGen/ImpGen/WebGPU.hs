@@ -7,7 +7,7 @@ module Futhark.CodeGen.ImpGen.WebGPU
   )
 where
 
-import Control.Monad (forM, forM_, liftM2, liftM3, unless, when)
+import Control.Monad (forM, forM_, liftM2, unless, when)
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.RWS
 import Control.Monad.Trans.State qualified as State
@@ -212,7 +212,7 @@ genKernel kernel = do
             WGSL.funAttribs = attribs,
             WGSL.funParams = entryParams,
             WGSL.funReturn = Nothing,
-            WGSL.funBody = WGSL.stmts (ksInits s ++ ksBody s)
+            WGSL.funBody = ksInits s ++ ksBody s
           }
   addCode $ prettyText wgslFun
 
@@ -252,10 +252,8 @@ genKernel kernel = do
       addInitStmt $
         WGSL.Let "_dummy_lockstep_width" (WGSL.VarExp lsw)
 
-      wgslBody <- genWGSLStm (ImpGPU.kernelBody kernel)
-      addBodyStmt wgslBody
-
-      pure ()
+      wgslBody <- genWGSLStms (ImpGPU.kernelBody kernel)
+      mapM_ addBodyStmt wgslBody
 
 calledInKernelOp :: ImpGPU.KernelOp -> S.Set Name
 calledInKernelOp = const mempty
@@ -281,7 +279,7 @@ generateDeviceFun fname device_func = do
   ws <- lift State.get
   ks <- get
   r <- ask
-  (body, _, _) <- lift $ runRWST (genWGSLStm (functionBody device_func)) r ks
+  (body, _, _) <- lift $ runRWST (genWGSLStms (functionBody device_func)) r ks
 
   if functionMayFail fname ws
     then compilerLimitation "WebGPU backend Cannot handle GPU functions that may fail."
@@ -304,13 +302,12 @@ generateDeviceFun fname device_func = do
             [p@(WGSL.Param v typ _)] ->
               ( in_params,
                 Just ([], typ),
-                WGSL.stmts [declare p, body, WGSL.Return $ Just $ WGSL.VarExp v]
+                [declare p] ++ body ++ [WGSL.Return $ Just $ WGSL.VarExp v]
               )
             _ ->
               ( in_params ++ map outPtrParam out_params,
                 Nothing,
-                WGSL.stmts $
-                  map declare out_params ++ [body] ++ map writeOutPtr out_params
+                map declare out_params ++ body ++ map writeOutPtr out_params
               )
       let wgslFun =
             WGSL.FunDecl
@@ -616,9 +613,9 @@ genCopy pt shape (dst, dst_space) (dst_offset, dst_strides) (src, src_space) (sr
     let dst_i = dst_offset + sum (zipWith (*) is' dst_strides)
         src_i = src_offset + sum (zipWith (*) is' src_strides)
         read' = genReadExp pt src_space src src_i
-     in genArrayWrite pt dst_space dst dst_i read'
+     in pure <$> genArrayWrite pt dst_space dst dst_i read'
 
-  pure $ loops (zip iis shape') body
+  pure . WGSL.Compound $ loops (zip iis shape') body
   where
     (zero, one) = (WGSL.VarExp "zero_i64", WGSL.VarExp "one_i64")
     is = map (VName "i") [0 .. length shape - 1]
@@ -626,15 +623,16 @@ genCopy pt shape (dst, dst_space) (dst_offset, dst_strides) (src, src_space) (sr
     is' = map (elements . le64) is
     iis = map nameToIdent is
 
-    loops :: [(WGSL.Ident, WGSL.Exp)] -> WGSL.Stmt -> WGSL.Stmt
+    loops :: [(WGSL.Ident, WGSL.Exp)] -> [WGSL.Stmt] -> [WGSL.Stmt]
     loops [] body = body
     loops ((i, n) : ins) body =
-      WGSL.For
-        i
-        zero
-        (wgslCmpOp (CmpUlt Int64) (WGSL.VarExp i) n)
-        (WGSL.UpdateAssign (WGSL.VarExp i) $ wgslBinOp (Add Int64 OverflowWrap) (WGSL.VarExp i) one)
-        (loops ins body)
+      [ WGSL.For
+          i
+          zero
+          (wgslCmpOp (CmpUlt Int64) (WGSL.VarExp i) n)
+          (WGSL.UpdateAssign (WGSL.VarExp i) $ wgslBinOp (Add Int64 OverflowWrap) (WGSL.VarExp i) one)
+          (loops ins body)
+      ]
 
 -- | Assign to a variable.
 assign :: WGSL.Ident -> WGSL.Exp -> WGSL.Stmt
@@ -658,12 +656,23 @@ wgslProduct ((Constant (IntValue v)) : vs) =
   wgslBinOp (Mul Int32 OverflowWrap) (WGSL.IntExp (valueIntegral v) WGSL.AbstractInt) (wgslProduct vs)
 wgslProduct _ = error "wgslProduct: non-constant product"
 
+-- | The statements of a code tree, with sequencing flattened away.
+codeStms :: Code ImpGPU.KernelOp -> [Code ImpGPU.KernelOp]
+codeStms Skip = []
+codeStms (s1 :>>: s2) = codeStms s1 ++ codeStms s2
+codeStms s = [s]
+
+-- | Generate the statements of a code tree.
+genWGSLStms :: Code ImpGPU.KernelOp -> KernelM [WGSL.Stmt]
+genWGSLStms = mapM genWGSLStm . codeStms
+
 genWGSLStm :: Code ImpGPU.KernelOp -> KernelM WGSL.Stmt
-genWGSLStm Skip = pure WGSL.Skip
-genWGSLStm (s1 :>>: s2) = liftM2 WGSL.Seq (genWGSLStm s1) (genWGSLStm s2)
+-- 'genWGSLStms' flattens these two away; the cases are here for totality.
+genWGSLStm Skip = pure WGSL.Empty
+genWGSLStm c@(_ :>>: _) = WGSL.Compound <$> genWGSLStms c
 genWGSLStm (For iName bound body) = do
   boundExp <- genWGSLExp bound
-  bodyStm <- genWGSLStm body
+  bodyStm <- genWGSLStms body
   pure $
     WGSL.For
       i
@@ -685,7 +694,7 @@ genWGSLStm (While cond body) =
   liftM2
     WGSL.While
     (genWGSLExp $ untyped cond)
-    (genWGSLStm body)
+    (genWGSLStms body)
 genWGSLStm (DeclareMem name (Space "shared")) = do
   let name' = nameToIdent name
   moduleName <- mkGlobalIdent name'
@@ -763,19 +772,19 @@ genWGSLStm (Call dests f args) = do
   outExps <- mapM (pure . WGSL.UnOpExp "&" . WGSL.VarExp) outIdents
 
   pure $ callStm fname (argExps ++ outExps)
-genWGSLStm (If cond cThen cElse) =
-  liftM3
-    WGSL.If
-    (genWGSLExp $ untyped cond)
-    (genWGSLStm cThen)
-    (genWGSLStm cElse)
+genWGSLStm (If cond cThen cElse) = do
+  cond' <- genWGSLExp $ untyped cond
+  cThen' <- genWGSLStms cThen
+  cElse' <- genWGSLStms cElse
+  pure . WGSL.If cond' cThen' $
+    if null cElse' then Nothing else Just cElse'
 genWGSLStm s@(Assert {}) = pure $ WGSL.Comment $ "assert: " <> prettyText s
 genWGSLStm (Meta (MetaComment c)) =
   pure $ WGSL.Comment c
 genWGSLStm (Meta (MetaProvenance (Provenance _ l))) =
   pure $ WGSL.Comment $ locText l
-genWGSLStm (DebugPrint _ _) = pure WGSL.Skip
-genWGSLStm (TracePrint _) = pure WGSL.Skip
+genWGSLStm (DebugPrint _ _) = pure WGSL.Empty
+genWGSLStm (TracePrint _) = pure WGSL.Empty
 genWGSLStm (Op (ImpGPU.GetBlockId dest i)) = do
   destId <- getIdent dest
   pure $
@@ -1279,21 +1288,13 @@ genConstAndBuiltinDecls = do
             addOverride hi WGSL.I32 zeroInit
             lift $ addMacroDef (nameFromText lo) (mkLo e)
             lift $ addMacroDef (nameFromText hi) (mkHi e)
-            addInitStmt $
-              WGSL.Seq
-                (WGSL.DeclareVar n wgslInt64)
-                ( assign n $
-                    call "i64" [WGSL.VarExp lo, WGSL.VarExp hi]
-                )
+            addInitStmt $ WGSL.DeclareVar n wgslInt64
+            addInitStmt . assign n $ call "i64" [WGSL.VarExp lo, WGSL.VarExp hi]
           _ -> do
             addOverride lo WGSL.I32 zeroInit
             lift $ addMacroDef (nameFromText lo) e
-            addInitStmt $
-              WGSL.Seq
-                (WGSL.DeclareVar n wgslInt64)
-                ( assign n $
-                    call "i64" [WGSL.VarExp lo, WGSL.IntExp 0 WGSL.AbstractInt]
-                )
+            addInitStmt $ WGSL.DeclareVar n wgslInt64
+            addInitStmt . assign n $ call "i64" [WGSL.VarExp lo, WGSL.IntExp 0 WGSL.AbstractInt]
 
   mapM_ mkConst consts
   where
