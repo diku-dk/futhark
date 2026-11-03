@@ -3,7 +3,6 @@
 -- properly update the lambda indices.
 --
 -- ==
--- tags { no_webgpu }
 --
 -- input {
 -- [
