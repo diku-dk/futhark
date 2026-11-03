@@ -1,5 +1,5 @@
--- Test mixed precision computations in WebGPU.
--- Exercises combinations of emulated and native types in a single kernel.
+-- Mixed precision computations: combinations of i8, i16, i64 and f16 in a
+-- single kernel.  Some of these types are emulated on some backends.
 
 -- ==
 -- tags { no_webgpu }
