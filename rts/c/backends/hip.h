@@ -697,7 +697,9 @@ void backend_context_teardown(struct futhark_context* ctx) {
     free_builtin_kernels(ctx, ctx->kernels);
     hipFree(ctx->global_failure);
     hipFree(ctx->global_failure_args);
-    HIP_SUCCEED_FATAL(gpu_free_all(ctx));
+    if (gpu_free_all(ctx) != FUTHARK_SUCCESS) {
+      futhark_panic(-1, "Failed to free GPU memory:\n%s", ctx->error);
+    }
     HIP_SUCCEED_FATAL(hipStreamDestroy(ctx->stream));
     HIP_SUCCEED_FATAL(hipModuleUnload(ctx->module));
   }

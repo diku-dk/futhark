@@ -868,7 +868,9 @@ void backend_context_teardown(struct futhark_context* ctx) {
     free_builtin_kernels(ctx, ctx->kernels);
     cuMemFree(ctx->global_failure);
     cuMemFree(ctx->global_failure_args);
-    CUDA_SUCCEED_FATAL(gpu_free_all(ctx));
+    if (gpu_free_all(ctx) != FUTHARK_SUCCESS) {
+      futhark_panic(-1, "Failed to free GPU memory:\n%s", ctx->error);
+    }
     CUDA_SUCCEED_FATAL(cuStreamDestroy(ctx->stream));
     CUDA_SUCCEED_FATAL(cuModuleUnload(ctx->module));
     if (ctx->cfg->use_primary_context) {
