@@ -517,8 +517,8 @@ arrayLayoutTests :: TestTree
 arrayLayoutTests =
   testGroup
     "arrays"
-    [ testCase "element stride" $
-        map elementStride [F32, Vec3 F32, F16, Named "S"]
+    [ testCase "strideOf" $
+        map strideOf [F32, Vec3 F32, F16, Named "S"]
           @?= [Just 4, Just 16, Just 2, Nothing],
       testCase "array<f32, 8>" $
         layout (Array F32 (Just (IntExp 8 AbstractInt))) @?= Just (4, 32),

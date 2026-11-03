@@ -27,9 +27,10 @@ module Language.WGSL
 
     -- ** Alignment and size
     roundUp,
+    roundDown,
     alignOf,
     sizeOf,
-    elementStride,
+    strideOf,
     hostShareable,
     alignOfStruct,
     offsetOfMembers,
@@ -206,6 +207,13 @@ data TexelFormat
 roundUp :: Int -> Int -> Int
 roundUp k n = ((n + k - 1) `div` k) * k
 
+-- | Round @n@ down to the previous multiple of @k@, as WGSL specifies:
+-- @roundDown(k, n)@ is @floor(n / k) * k@, defined for positive integers. None
+-- of the layout rules use it; the specification needs it only to size the array
+-- of a buffer view. See https://www.w3.org/TR/WGSL/#rounddown.
+roundDown :: Int -> Int -> Int
+roundDown k n = (n `div` k) * k
+
 -- | @AlignOf@ of a type, or 'Nothing' if it has none, which is the case for
 -- pointers, named types and 'Other' types.  Note that this is defined for
 -- types that are not 'hostShareable' but do have a fixed footprint, such as
@@ -255,18 +263,18 @@ sizeOf (Vec2 t) = (2 *) <$> sizeOf t
 sizeOf (Vec3 t) = (3 *) <$> sizeOf t
 sizeOf (Vec4 t) = (4 *) <$> sizeOf t
 -- A matrix is laid out as an array of its columns.
-sizeOf (Mat2x2 t) = (2 *) <$> elementStride (Vec2 t)
-sizeOf (Mat3x2 t) = (3 *) <$> elementStride (Vec2 t)
-sizeOf (Mat4x2 t) = (4 *) <$> elementStride (Vec2 t)
-sizeOf (Mat2x3 t) = (2 *) <$> elementStride (Vec3 t)
-sizeOf (Mat3x3 t) = (3 *) <$> elementStride (Vec3 t)
-sizeOf (Mat4x3 t) = (4 *) <$> elementStride (Vec3 t)
-sizeOf (Mat2x4 t) = (2 *) <$> elementStride (Vec4 t)
-sizeOf (Mat3x4 t) = (3 *) <$> elementStride (Vec4 t)
-sizeOf (Mat4x4 t) = (4 *) <$> elementStride (Vec4 t)
+sizeOf (Mat2x2 t) = (2 *) <$> strideOf (Vec2 t)
+sizeOf (Mat3x2 t) = (3 *) <$> strideOf (Vec2 t)
+sizeOf (Mat4x2 t) = (4 *) <$> strideOf (Vec2 t)
+sizeOf (Mat2x3 t) = (2 *) <$> strideOf (Vec3 t)
+sizeOf (Mat3x3 t) = (3 *) <$> strideOf (Vec3 t)
+sizeOf (Mat4x3 t) = (4 *) <$> strideOf (Vec3 t)
+sizeOf (Mat2x4 t) = (2 *) <$> strideOf (Vec4 t)
+sizeOf (Mat3x4 t) = (3 *) <$> strideOf (Vec4 t)
+sizeOf (Mat4x4 t) = (4 *) <$> strideOf (Vec4 t)
 sizeOf (Atomic _) = Just 4
 sizeOf (Array t (Just (IntExp n _)))
-  | n >= 0 = (n *) <$> elementStride t
+  | n >= 0 = (n *) <$> strideOf t
 sizeOf Array {} = Nothing
 sizeOf Ptr {} = Nothing
 sizeOf (Named _) = Nothing
@@ -278,11 +286,12 @@ sizeOf (DepthTexture _) = Nothing
 sizeOf Sampler = Nothing
 sizeOf SamplerComparison = Nothing
 
--- | The stride between the elements of an array with the given element type,
--- which is the element size rounded up to the element alignment.  See
--- https://www.w3.org/TR/WGSL/#array-layout-examples.
-elementStride :: Type -> Maybe Int
-elementStride t = roundUp <$> alignOf t <*> sizeOf t
+-- | @StrideOf@ of an array with the given element type: the distance from the
+-- start of one element to the start of the next, which is the element size
+-- rounded up to the element alignment. See
+-- https://www.w3.org/TR/WGSL/#internal-value-layout.
+strideOf :: Type -> Maybe Int
+strideOf t = roundUp <$> alignOf t <*> sizeOf t
 
 -- | Whether a type is host-shareable, and so may be the store type of a
 -- uniform or storage buffer.  This is conservative: a named type is not
