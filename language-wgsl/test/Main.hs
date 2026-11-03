@@ -18,17 +18,56 @@ pointerTests =
   testGroup
     "Pointer"
     [ testCase "without access mode" $
-        render (Pointer Int32 FunctionSpace Nothing)
+        render (Pointer Int32 Function Nothing)
           @?= "ptr<function, i32>",
       testCase "with access mode" $
-        render (Pointer Int32 FunctionSpace (Just ReadWrite))
+        render (Pointer Int32 Function (Just ReadWrite))
           @?= "ptr<function, i32, read_write>",
       testCase "uniform" $
         render (Pointer Float32 Uniform Nothing)
           @?= "ptr<uniform, f32>",
       testCase "vector store type" $
-        render (Pointer (Vec3 Float32) Workgroup (Just ReadOnly))
-          @?= "ptr<workgroup, vec3<f32>, read>"
+        render (Pointer (Vec3 Float32) Workgroup (Just Read))
+          @?= "ptr<workgroup, vec3<f32>, read>",
+      testCase "storage" $
+        render (Pointer Int32 Storage (Just Read))
+          @?= "ptr<storage, i32, read>"
+    ]
+
+-- | An access mode is a predeclared enumerant.  See
+-- https://www.w3.org/TR/WGSL/#memory-access-mode.
+accessModeTests :: TestTree
+accessModeTests =
+  testGroup
+    "AccessMode"
+    [ testCase "read" $ render Read @?= "read",
+      testCase "write" $ render Write @?= "write",
+      testCase "read_write" $ render ReadWrite @?= "read_write"
+    ]
+
+-- | The address space of a module-scope variable is given as a template list
+-- after the @var@ keyword, with the access mode second if present.  See
+-- https://www.w3.org/TR/WGSL/#var-decls.  Note that a declaration without
+-- attributes is currently rendered with a leading line break.
+varDeclTests :: TestTree
+varDeclTests =
+  testGroup
+    "VarDecl"
+    [ testCase "without access mode" $
+        render (VarDecl [] Workgroup Nothing "x" (Prim Int32))
+          @?= "\nvar<workgroup> x : i32;",
+      testCase "with access mode" $
+        render (VarDecl [] Storage (Just ReadWrite) "x" (Array Int32 Nothing))
+          @?= "\nvar<storage, read_write> x : array<i32>;",
+      testCase "private" $
+        render (VarDecl [] Private Nothing "x" (Prim Float32))
+          @?= "\nvar<private> x : f32;",
+      testCase "immediate" $
+        render (VarDecl [] Immediate Nothing "x" (Named "S"))
+          @?= "\nvar<immediate> x : S;",
+      testCase "with attributes" $
+        render (VarDecl (bindingAttribs 0 1) Storage (Just Read) "x" (Array Float32 Nothing))
+          @?= "@group(0) @binding(1)\nvar<storage, read> x : array<f32>;"
     ]
 
 -- | A literal is never negative, and its suffix fixes its type.  See
@@ -106,7 +145,9 @@ tests =
   testGroup
     "Language.WGSL"
     [ testGroup "types" [pointerTests],
-      testGroup "expressions" [intLitTests, floatLitTests]
+      testGroup "memory" [accessModeTests],
+      testGroup "expressions" [intLitTests, floatLitTests],
+      testGroup "declarations" [varDeclTests]
     ]
 
 main :: IO ()

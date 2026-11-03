@@ -207,7 +207,7 @@ genKernel kernel = do
           WGSL.Attrib "workgroup_size" (map WGSL.VarExp blockDimNames)
         ]
   let wgslFun =
-        WGSL.Function
+        WGSL.FunDecl
           { WGSL.funName = textToIdent name,
             WGSL.funAttribs = attribs,
             WGSL.funParams = entryParams,
@@ -290,18 +290,18 @@ generateDeviceFun fname device_func = do
       let out_ptr_params =
             map
               ( \(WGSL.Param name (WGSL.Prim t) a) ->
-                  WGSL.Param (name <> "_out") (WGSL.Pointer t WGSL.FunctionSpace Nothing) a
+                  WGSL.Param (name <> "_out") (WGSL.Pointer t WGSL.Function Nothing) a
               )
               out_params
       let wgslFun =
-            WGSL.Function
+            WGSL.FunDecl
               { WGSL.funName = "futrts_" <> textToIdent (nameToText fname),
                 WGSL.funAttribs = mempty,
                 WGSL.funParams = in_params,
                 WGSL.funOutput = out_ptr_params,
                 WGSL.funBody = body
               }
-       in prependDecl $ WGSL.FunDecl wgslFun
+       in prependDecl $ WGSL.FunctionDecl wgslFun
 
   lift $ State.modify $ \s ->
     s
@@ -669,7 +669,7 @@ genWGSLStm (DeclareMem name (Space "shared")) = do
               (Just $ WGSL.VarExp sizeName)
 
       addOverride sizeName (WGSL.Prim WGSL.Int32) (Just $ WGSL.IntExp 0 WGSL.AbstractInt)
-      addDecl $ WGSL.VarDecl [] WGSL.Workgroup moduleName bufType
+      addDecl $ WGSL.VarDecl [] WGSL.Workgroup Nothing moduleName bufType
       when atomic $ addAtomicMem moduleName
       addRename name' moduleName
       pure $ WGSL.Comment $ "declare_shared: " <> name'
@@ -1087,7 +1087,7 @@ genScalarDecls = do
   slot <- assignBindSlot
   let bufferAttribs = WGSL.bindingAttribs 0 slot
   addDecl $
-    WGSL.VarDecl bufferAttribs WGSL.Uniform bufferName (WGSL.Named structName)
+    WGSL.VarDecl bufferAttribs WGSL.Uniform Nothing bufferName (WGSL.Named structName)
 
 atomicOpArray :: ImpGPU.AtomicOp -> VName
 atomicOpArray (ImpGPU.AtomicAdd _ _ n _ _) = n
@@ -1193,7 +1193,8 @@ genMemoryDecls = do
       addDecl $
         WGSL.VarDecl
           (WGSL.bindingAttribs 0 slot)
-          (WGSL.Storage WGSL.ReadWrite)
+          WGSL.Storage
+          (Just WGSL.ReadWrite)
           ident
           (wgslBufferType typ Nothing)
     rename (name, _) = mkGlobalIdent name >>= addRename name

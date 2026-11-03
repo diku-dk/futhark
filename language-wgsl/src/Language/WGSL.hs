@@ -23,7 +23,7 @@ module Language.WGSL
     Stmt (..),
     Attrib (..),
     Param (..),
-    Function (..),
+    FunDecl (..),
     Field (..),
     Struct (..),
     Declaration (..),
@@ -156,7 +156,9 @@ data Attrib = Attrib Ident [Exp]
 
 data Param = Param Ident Type [Attrib]
 
-data Function = Function
+-- | A function declaration.  See
+-- https://www.w3.org/TR/WGSL/#function-declaration-sec.
+data FunDecl = FunDecl
   { funName :: Ident,
     funAttribs :: [Attrib],
     funParams :: [Param],
@@ -168,15 +170,32 @@ data Field = Field Ident Type
 
 data Struct = Struct Ident [Field]
 
-data AccessMode = ReadOnly | ReadWrite
+-- | The access modes supported by a memory view.  See
+-- https://www.w3.org/TR/WGSL/#memory-access-mode.
+data AccessMode = Read | Write | ReadWrite
+  deriving (Eq, Ord, Show)
 
--- Uniform buffers are always read-only.
-data AddressSpace = Storage AccessMode | Uniform | Workgroup | FunctionSpace
+-- | The address spaces that can be written in WGSL source.  The @handle@
+-- address space is never written, so it is not represented.  Only @Storage@
+-- supports more than one access mode.  See
+-- https://www.w3.org/TR/WGSL/#address-spaces.
+data AddressSpace
+  = Function
+  | Private
+  | Workgroup
+  | Uniform
+  | Storage
+  | Immediate
+  deriving (Eq, Ord, Show)
 
+-- | A module-scope declaration.  See
+-- https://www.w3.org/TR/WGSL/#module-scope-declarations.
 data Declaration
-  = FunDecl Function
+  = FunctionDecl FunDecl
   | StructDecl Struct
-  | VarDecl [Attrib] AddressSpace Ident Type
+  | -- | The access mode may only be given along with the address space, and
+    -- defaults to the one of the address space when omitted.
+    VarDecl [Attrib] AddressSpace (Maybe AccessMode) Ident Type
   | OverrideDecl Ident Type (Maybe Exp)
 
 stmts :: [Stmt] -> Stmt
@@ -367,8 +386,8 @@ prettyAssignOutParams params = stack (map prettyAssign params)
     prettyAssign (Param name _ _) =
       indent 2 "*" <> pretty name <> " = " <> pretty (T.stripSuffix "_out" name) <> ";"
 
-instance Pretty Function where
-  pretty (Function name attribs in_params out_params body) = do
+instance Pretty FunDecl where
+  pretty (FunDecl name attribs in_params out_params body) = do
     stack $ hsep (map pretty attribs) : function
     where
       funBody = indent 2 (pretty body) <> ";"
@@ -411,22 +430,26 @@ instance Pretty Struct where
         </> "}"
 
 instance Pretty AccessMode where
-  pretty ReadOnly = "read"
+  pretty Read = "read"
+  pretty Write = "write"
   pretty ReadWrite = "read_write"
 
 instance Pretty AddressSpace where
-  pretty (Storage am) = "storage" <> "," <> pretty am
+  pretty Storage = "storage"
+  pretty Private = "private"
+  pretty Immediate = "immediate"
   pretty Uniform = "uniform"
   pretty Workgroup = "workgroup"
-  pretty FunctionSpace = "function"
+  pretty Function = "function"
 
 instance Pretty Declaration where
-  pretty (FunDecl fun) = pretty fun
+  pretty (FunctionDecl fun) = pretty fun
   pretty (StructDecl struct) = pretty struct
-  pretty (VarDecl attribs as name typ) =
+  pretty (VarDecl attribs as am name typ) =
     hsep (map pretty attribs)
       </> "var<"
       <> pretty as
+      <> maybe "" ((", " <>) . pretty) am
       <> ">"
       <+> pretty name
       <+> ":"
