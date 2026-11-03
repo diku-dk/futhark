@@ -249,8 +249,8 @@ sequenceTests =
         render (If (VarExp "c") [] [] (Just [])) @?= "if c { } else { }"
     ]
 
--- | A for loop's update is an assignment or a call, and is not terminated.
--- See https://www.w3.org/TR/WGSL/#for-statement.
+-- | A for loop's update is an assignment or a call. See
+-- https://www.w3.org/TR/WGSL/#for-statement.
 forTests :: TestTree
 forTests =
   testGroup
