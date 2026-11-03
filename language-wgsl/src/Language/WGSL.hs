@@ -6,7 +6,7 @@ module Language.WGSL
     PrimType (..),
     hsLayout,
     structLayout,
-    Typ (..),
+    Type (..),
     BinOp,
     UnOp,
     Exp (..),
@@ -79,7 +79,11 @@ structLayout fields = do
   where
     roundUp k n = ceiling ((fromIntegral n :: Double) / fromIntegral k) * k
 
-data Typ = Prim PrimType | Array PrimType (Maybe Exp) | Named Ident | Pointer PrimType AddressSpace (Maybe AccessMode)
+data Type
+  = Prim PrimType
+  | Array PrimType (Maybe Exp)
+  | Named Ident
+  | Pointer PrimType AddressSpace (Maybe AccessMode)
 
 type BinOp = T.Text
 
@@ -102,7 +106,7 @@ data Stmt
   | Comment T.Text
   | Seq Stmt Stmt
   | Let Ident Exp
-  | DeclareVar Ident Typ
+  | DeclareVar Ident Type
   | Assign Ident Exp
   | AssignIndex Ident Exp Exp
   | If Exp Stmt Stmt
@@ -112,7 +116,7 @@ data Stmt
 
 data Attrib = Attrib Ident [Exp]
 
-data Param = Param Ident Typ [Attrib]
+data Param = Param Ident Type [Attrib]
 
 data Function = Function
   { funName :: Ident,
@@ -122,7 +126,7 @@ data Function = Function
     funBody :: Stmt
   }
 
-data Field = Field Ident Typ
+data Field = Field Ident Type
 
 data Struct = Struct Ident [Field]
 
@@ -134,8 +138,8 @@ data AddressSpace = Storage AccessMode | Uniform | Workgroup | FunctionSpace
 data Declaration
   = FunDecl Function
   | StructDecl Struct
-  | VarDecl [Attrib] AddressSpace Ident Typ
-  | OverrideDecl Ident Typ (Maybe Exp)
+  | VarDecl [Attrib] AddressSpace Ident Type
+  | OverrideDecl Ident Type (Maybe Exp)
 
 stmts :: [Stmt] -> Stmt
 stmts [] = Skip
@@ -181,7 +185,7 @@ instance Pretty PrimType where
   pretty (Vec4 t) = "vec4<" <> pretty t <> ">"
   pretty (Atomic t) = "atomic<" <> pretty t <> ">"
 
-instance Pretty Typ where
+instance Pretty Type where
   pretty (Prim t) = pretty t
   pretty (Array t Nothing) = "array<" <> pretty t <> ">"
   pretty (Array t sz) = "array<" <> pretty t <> ", " <> pretty sz <> ">"

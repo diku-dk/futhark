@@ -123,7 +123,7 @@ assignBindSlot = do
 
 -- | Add an override declaration to the current kernel's interface and into the
 -- module.
-addOverride :: WGSL.Ident -> WGSL.Typ -> Maybe WGSL.Exp -> KernelM ()
+addOverride :: WGSL.Ident -> WGSL.Type -> Maybe WGSL.Exp -> KernelM ()
 addOverride ident typ e = do
   addDecl $ WGSL.OverrideDecl ident typ e
   modify $ \s -> s {ksOverrides = ksOverrides s ++ [ident]}
@@ -418,7 +418,7 @@ wgslPrimType Bool = WGSL.Bool
 -- TODO: Make sure we do not ever codegen statements involving Unit variables
 wgslPrimType Unit = WGSL.Float16 -- error "TODO: no unit in WGSL"
 
-wgslBufferType :: (PrimType, Bool, Signedness) -> Maybe WGSL.Exp -> WGSL.Typ
+wgslBufferType :: (PrimType, Bool, Signedness) -> Maybe WGSL.Exp -> WGSL.Type
 wgslBufferType (Bool, _, _) = WGSL.Array $ WGSL.Atomic wgslInt8
 wgslBufferType (IntType Int8, _, _) = WGSL.Array $ WGSL.Atomic wgslInt8
 wgslBufferType (IntType Int16, _, _) = WGSL.Array $ WGSL.Atomic wgslInt16
@@ -434,7 +434,7 @@ wgslBufferType (t, _, _) = WGSL.Array $ wgslPrimType t
 wgslSharedBufferType ::
   (PrimType, Bool, Signedness) ->
   Maybe WGSL.Exp ->
-  WGSL.Typ
+  WGSL.Type
 wgslSharedBufferType (Bool, _, _) = WGSL.Array WGSL.Bool
 wgslSharedBufferType (IntType Int8, True, _) = WGSL.Array $ WGSL.Atomic WGSL.Int32
 wgslSharedBufferType (IntType Int16, True, _) = WGSL.Array $ WGSL.Atomic WGSL.Int32
