@@ -115,24 +115,34 @@ fn atomic_write_f32_shared(p: ptr<workgroup, atomic<i32>>, x: f32) {
 }
 
 fn atomic_fadd_f32_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32, x: f32) -> f32 {
-    var old: f32 = x;
+    // Repeatedly take the value out of the slot (leaving zero), add our
+    // pending contribution, and put the sum back; whatever was added to the
+    // slot in the meantime becomes the next pending contribution.  The
+    // termination check is on the bits, because WGSL does not guarantee IEEE
+    // semantics for NaN, and a pending NaN must not be dropped.
+    var old: i32 = bitcast<i32>(x);
     var ret: f32;
 
     while (old != 0) {
-        ret = bitcast<f32>(atomicExchange(p, 0)) + old;
-        old = bitcast<f32>(atomicExchange(p, bitcast<i32>(ret)));
+        ret = bitcast<f32>(atomicExchange(p, 0)) + bitcast<f32>(old);
+        old = atomicExchange(p, bitcast<i32>(ret));
     }
 
     return ret;
 }
 
 fn atomic_fadd_f32_shared(p: ptr<workgroup, atomic<i32>>, x: f32) -> f32 {
-    var old: f32 = x;
+    // Repeatedly take the value out of the slot (leaving zero), add our
+    // pending contribution, and put the sum back; whatever was added to the
+    // slot in the meantime becomes the next pending contribution.  The
+    // termination check is on the bits, because WGSL does not guarantee IEEE
+    // semantics for NaN, and a pending NaN must not be dropped.
+    var old: i32 = bitcast<i32>(x);
     var ret: f32;
 
     while (old != 0) {
-        ret = bitcast<f32>(atomicExchange(p, 0)) + old;
-        old = bitcast<f32>(atomicExchange(p, bitcast<i32>(ret)));
+        ret = bitcast<f32>(atomicExchange(p, 0)) + bitcast<f32>(old);
+        old = atomicExchange(p, bitcast<i32>(ret));
     }
 
     return ret;
