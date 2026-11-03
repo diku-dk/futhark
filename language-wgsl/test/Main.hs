@@ -19,8 +19,9 @@ layout :: Type -> Maybe (Int, Int)
 layout t = (,) <$> alignOf t <*> sizeOf t
 
 -- | A convenient literal for tests that only need some expression.
-one :: Exp
+one, two :: Exp
 one = IntExp 1 AbstractInt
+two = IntExp 2 AbstractInt
 
 -- | Render a statement sequence, as a code generator would.
 renderBody :: [Stmt] -> T.Text
@@ -229,7 +230,7 @@ sequenceTests =
         renderBody [Call "f" [] [], Comment "note", Call "g" [] []]
           @?= "f();\n// note\ng();",
       testCase "compound statement" $
-        renderBody [If (VarExp "c") [Call "f" [] []] Nothing, Call "g" [] []]
+        renderBody [If (VarExp "c") [Call "f" [] []] [] Nothing, Call "g" [] []]
           @?= "if c {\n  f();\n}\ng();",
       -- An empty body used to render as a stray empty statement.
       testCase "empty body" $
@@ -240,9 +241,9 @@ sequenceTests =
         render (Compound [Let "x" one]) @?= "{\n  let x = 1;\n}",
       -- An absent else clause is not the same as an empty one.
       testCase "absent else" $
-        render (If (VarExp "c") [] Nothing) @?= "if c { }",
+        render (If (VarExp "c") [] [] Nothing) @?= "if c { }",
       testCase "empty else" $
-        render (If (VarExp "c") [] (Just [])) @?= "if c { } else { }"
+        render (If (VarExp "c") [] [] (Just [])) @?= "if c { } else { }"
     ]
 
 -- | A for loop's update is an assignment or a call, and is not terminated.
@@ -713,6 +714,71 @@ moduleTests =
           @?= "struct S {\n  a : i32,\n  b : f32\n}"
     ]
 
+-- | An @if@ may be followed by any number of @else if@ clauses.  See
+-- https://www.w3.org/TR/WGSL/#if-statement.
+elseIfTests :: TestTree
+elseIfTests =
+  testGroup
+    "else if"
+    [ testCase "one clause" $
+        render (If (VarExp "a") [Break] [(VarExp "b", [Continue])] Nothing)
+          @?= "if a {\n  break;\n} else if b {\n  continue;\n}",
+      testCase "chain with else" $
+        render
+          ( If
+              (VarExp "a")
+              [Break]
+              [(VarExp "b", [Continue]), (VarExp "c", [Discard])]
+              (Just [Return Nothing])
+          )
+          @?= "if a {\n  break;\n} else if b {\n  continue;\n}"
+            <> " else if c {\n  discard;\n} else {\n  return;\n}"
+    ]
+
+-- | See https://www.w3.org/TR/WGSL/#switch-statement.
+switchTests :: TestTree
+switchTests =
+  testGroup
+    "switch"
+    [ testCase "several selectors" $
+        render (Switch (VarExp "x") (Case (CaseExp one :| [CaseExp two]) [Break] :| []))
+          @?= "switch x {\n  case 1, 2: {\n    break;\n  }\n}",
+      -- 'default' may appear among a case clause's selectors, as well as
+      -- being a clause of its own.
+      testCase "default as a selector" $
+        render (Switch (VarExp "x") (Case (CaseExp one :| [CaseDefault]) [] :| []))
+          @?= "switch x {\n  case 1, default: { }\n}",
+      testCase "default clause" $
+        render (Switch (VarExp "x") (DefaultCase [Discard] :| []))
+          @?= "switch x {\n  default: {\n    discard;\n  }\n}",
+      testCase "several clauses" $
+        render
+          ( Switch
+              (VarExp "x")
+              (Case (CaseExp one :| []) [Break] :| [DefaultCase []])
+          )
+          @?= "switch x {\n  case 1: {\n    break;\n  }\n  default: { }\n}"
+    ]
+
+-- | A @loop@ may end in a @continuing@ block, which may end in a @break if@.
+-- See https://www.w3.org/TR/WGSL/#loop-statement.
+loopTests :: TestTree
+loopTests =
+  testGroup
+    "loop"
+    [ testCase "without continuing" $
+        render (Loop [Break] Nothing) @?= "loop {\n  break;\n}",
+      testCase "with continuing" $
+        render (Loop [Call "f" [] []] (Just (Continuing [Assign (VarExp "i") one] Nothing)))
+          @?= "loop {\n  f();\n  continuing {\n    i = 1;\n  }\n}",
+      testCase "with break if" $
+        render (Loop [] (Just (Continuing [] (Just (VarExp "done")))))
+          @?= "loop {\n  continuing {\n    break if done;\n  }\n}",
+      testCase "jumps" $
+        map render [Break, Continue, Discard]
+          @?= ["break;", "continue;", "discard;"]
+    ]
+
 tests :: TestTree
 tests =
   testGroup
@@ -733,7 +799,14 @@ tests =
         [operatorTests, intLitTests, floatLitTests, callTests],
       testGroup
         "statements"
-        [sequenceTests, assignTests, returnTests, forTests],
+        [ sequenceTests,
+          assignTests,
+          returnTests,
+          forTests,
+          elseIfTests,
+          switchTests,
+          loopTests
+        ],
       testGroup
         "declarations"
         [globalVarTests, funDeclTests, directiveTests, moduleTests]

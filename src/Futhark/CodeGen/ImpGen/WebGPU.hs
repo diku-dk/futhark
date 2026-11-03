@@ -776,7 +776,7 @@ genWGSLStm (If cond cThen cElse) = do
   cond' <- genWGSLExp $ untyped cond
   cThen' <- genWGSLStms cThen
   cElse' <- genWGSLStms cElse
-  pure . WGSL.If cond' cThen' $
+  pure . WGSL.If cond' cThen' [] $
     if null cElse' then Nothing else Just cElse'
 genWGSLStm s@(Assert {}) = pure $ WGSL.Comment $ "assert: " <> prettyText s
 genWGSLStm (Meta (MetaComment c)) =

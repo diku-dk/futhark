@@ -49,6 +49,9 @@ module Language.WGSL
     -- * Statements
     Stmt (..),
     ForUpdate (..),
+    SwitchClause (..),
+    CaseSelector (..),
+    Continuing (..),
 
     -- * Declarations
     Attrib (..),
@@ -458,15 +461,41 @@ data Stmt
   | -- | The left-hand side must be an assignable expression.  See
     -- https://www.w3.org/TR/WGSL/#assignment.
     Assign Exp Exp
-  | -- | The @else@ clause is absent when 'Nothing', which is not the same as
-    -- an empty one.
-    If Exp [Stmt] (Maybe [Stmt])
+  | -- | An @if@, its @else if@ clauses, and its optional @else@ clause.
+    If Exp [Stmt] [(Exp, [Stmt])] (Maybe [Stmt])
+  | Switch Exp (NonEmpty SwitchClause)
+  | -- | A @loop@, with its optional @continuing@ block.
+    Loop [Stmt] (Maybe Continuing)
   | For Ident Exp Exp ForUpdate [Stmt]
   | While Exp [Stmt]
+  | Break
+  | Continue
+  | Discard
   | Call Ident [Exp] [Exp]
   | -- | The expression must be present exactly when the enclosing function
     -- has a return type.
     Return (Maybe Exp)
+  deriving (Eq, Ord, Show)
+
+-- | A clause of a @switch@ statement.  See
+-- https://www.w3.org/TR/WGSL/#switch-statement.
+data SwitchClause
+  = -- | A @case@ with one or more selectors.
+    Case (NonEmpty CaseSelector) [Stmt]
+  | -- | A @default@ clause on its own.  Equivalently, 'Case' may list
+    -- 'CaseDefault' among its selectors.
+    DefaultCase [Stmt]
+  deriving (Eq, Ord, Show)
+
+-- | A selector of a @case@ clause.
+data CaseSelector
+  = CaseExp Exp
+  | CaseDefault
+  deriving (Eq, Ord, Show)
+
+-- | The @continuing@ block of a @loop@, which may end in a @break if@.  See
+-- https://www.w3.org/TR/WGSL/#continuing-statement.
+data Continuing = Continuing [Stmt] (Maybe Exp)
   deriving (Eq, Ord, Show)
 
 -- | The update of a @for@ loop, which the grammar restricts to an assignment
@@ -807,9 +836,18 @@ instance Pretty Stmt where
   pretty (Let x e) = "let" <+> pretty x <+> "=" <+> pretty e <> ";"
   pretty (DeclareVar x t) = "var" <+> pretty x <+> ":" <+> pretty t <> ";"
   pretty (Assign lhs e) = pretty lhs <+> "=" <+> pretty e <> ";"
-  pretty (If cond th Nothing) = "if" <+> pretty cond <+> block th
-  pretty (If cond th (Just el)) =
-    "if" <+> pretty cond <+> block th <+> "else" <+> block el
+  pretty (If cond th elifs el) =
+    hsep $
+      ["if" <+> pretty cond <+> block th]
+        ++ map elseIf elifs
+        ++ maybe [] (\body -> ["else" <+> block body]) el
+    where
+      elseIf (c, body) = "else if" <+> pretty c <+> block body
+  pretty (Switch e clauses) =
+    "switch" <+> pretty e <+> braceBlock (map pretty (NE.toList clauses))
+  pretty (Loop body continuing) =
+    "loop"
+      <+> braceBlock (map pretty body ++ maybe [] (pure . pretty) continuing)
   pretty (For x initializer cond upd body) =
     "for"
       <+> parens
@@ -828,12 +866,39 @@ instance Pretty Stmt where
     pretty f <> templateList targs <> parens (commasep $ map pretty args) <> ";"
   pretty (Return Nothing) = "return;"
   pretty (Return (Just e)) = "return" <+> pretty e <> ";"
+  pretty Break = "break;"
+  pretty Continue = "continue;"
+  pretty Discard = "discard;"
+
+instance Pretty SwitchClause where
+  pretty (Case selectors body) =
+    "case"
+      <+> commasep (map pretty (NE.toList selectors))
+      <> ":"
+      <+> block body
+  pretty (DefaultCase body) = "default:" <+> block body
+
+instance Pretty CaseSelector where
+  pretty (CaseExp e) = pretty e
+  pretty CaseDefault = "default"
+
+instance Pretty Continuing where
+  pretty (Continuing body breakIf) =
+    "continuing"
+      <+> braceBlock
+        ( map pretty body
+            ++ maybe [] (\e -> ["break if" <+> pretty e <> ";"]) breakIf
+        )
 
 -- | A brace-enclosed statement sequence, as every block in WGSL is.  See
 -- https://www.w3.org/TR/WGSL/#compound-statement-section.
 block :: [Stmt] -> Doc a
-block [] = "{ }"
-block body = "{" </> indent 2 (stack (map pretty body)) </> "}"
+block = braceBlock . map pretty
+
+-- | A brace-enclosed, indented sequence.
+braceBlock :: [Doc a] -> Doc a
+braceBlock [] = "{ }"
+braceBlock docs = "{" </> indent 2 (stack docs) </> "}"
 
 instance Pretty ForUpdate where
   pretty (UpdateAssign lhs e) = pretty lhs <+> "=" <+> pretty e
