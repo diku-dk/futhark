@@ -18,7 +18,6 @@ import Data.Map qualified as M
 import Data.Maybe (catMaybes, fromMaybe)
 import Data.Set qualified as S
 import Data.Text qualified as T
-import Debug.Trace (traceM)
 import Futhark.CodeGen.ImpCode.GPU qualified as ImpGPU
 import Futhark.CodeGen.ImpCode.WebGPU
 import Futhark.CodeGen.ImpGen.GPU qualified as ImpGPU
@@ -610,7 +609,6 @@ genCopy ::
 genCopy pt shape (dst, dst_space) (dst_offset, dst_strides) (src, src_space) (src_offset, src_strides) = do
   shape' <- mapM (genWGSLExp . untyped . unCount) shape
   body <- do
-    traceM $ "Generating copy for " <> T.unpack (prettyText dst) <> " <- " <> T.unpack (prettyText src) <> " dst space is " <> T.unpack (prettyText dst_space)
     let dst_i = dst_offset + sum (zipWith (*) is' dst_strides)
         src_i = src_offset + sum (zipWith (*) is' src_strides)
         read' = genReadExp pt src_space src src_i
