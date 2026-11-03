@@ -74,7 +74,7 @@ data KernelState = KernelState
     -- general information about memory in scope
     ksSharedMem :: [(WGSL.Ident, Exp)],
     ksAtomicMem :: [WGSL.Ident],
-    ksScalars :: [WGSL.PrimType],
+    ksScalars :: [WGSL.Type],
     ksBindSlots :: [Int]
   }
 
@@ -154,18 +154,18 @@ isAtomic :: WGSL.Ident -> KernelM Bool
 isAtomic ident = elem ident <$> gets ksAtomicMem
 
 -- | Add a scalar struct field.
-addScalar :: WGSL.PrimType -> KernelM ()
+addScalar :: WGSL.Type -> KernelM ()
 addScalar typ = modify $ \s -> s {ksScalars = ksScalars s ++ [typ]}
 
 entryParams :: [WGSL.Param]
 entryParams =
   [ WGSL.Param
       "workgroup_id"
-      (WGSL.Prim (WGSL.Vec3 WGSL.UInt32))
+      (WGSL.Vec3 WGSL.U32)
       [WGSL.Attrib "builtin" [WGSL.VarExp "workgroup_id"]],
     WGSL.Param
       "local_id"
-      (WGSL.Prim (WGSL.Vec3 WGSL.UInt32))
+      (WGSL.Vec3 WGSL.U32)
       [WGSL.Attrib "builtin" [WGSL.VarExp "local_invocation_id"]]
   ]
 
@@ -217,7 +217,7 @@ genKernel kernel = do
   addCode $ prettyText wgslFun
 
   -- Dummy layout with single i32 instead of empty structs.
-  let scalarMembers = map WGSL.Prim (ksScalars s)
+  let scalarMembers = ksScalars s
       offsets = fromMaybe [] $ WGSL.offsetOfMembers scalarMembers
       size = fromMaybe 4 $ WGSL.sizeOfStruct scalarMembers
   let dynamicBlockDims = [(dim, n) | (dim, n, True) <- ksBlockDims s]
@@ -272,7 +272,7 @@ genFunParams =
     MemParam _ _ -> compilerLimitation "WebGPU backend cannot handle GPU functions with memory parameters."
     ScalarParam name tp -> do
       ident <- getIdent name
-      pure $ WGSL.Param ident (WGSL.Prim $ wgslPrimType tp) []
+      pure $ WGSL.Param ident (wgslPrimType tp) []
 
 generateDeviceFun :: Name -> ImpGPU.Function ImpGPU.KernelOp -> KernelM ()
 generateDeviceFun fname device_func = do
@@ -293,14 +293,8 @@ generateDeviceFun fname device_func = do
       -- written through pointer parameters, as WGSL functions return at most
       -- one value.
       let declare (WGSL.Param v typ _) = WGSL.DeclareVar v typ
-          outPtrParam (WGSL.Param v (WGSL.Prim t) a) =
-            WGSL.Param (v <> "_out") (WGSL.Pointer t WGSL.Function Nothing) a
-          outPtrParam (WGSL.Param v _ _) =
-            compilerLimitation $
-              "WebGPU backend can only return primitive types, but "
-                <> prettyText fname
-                <> " returns "
-                <> v
+          outPtrParam (WGSL.Param v t a) =
+            WGSL.Param (v <> "_out") (WGSL.Ptr t WGSL.Function Nothing) a
           writeOutPtr (WGSL.Param v _ _) =
             WGSL.Assign
               (WGSL.UnOpExp "*" (WGSL.VarExp (v <> "_out")))
@@ -426,34 +420,34 @@ kernelsToWebGPU prog =
 compileProg :: (MonadFreshNames m) => F.Prog F.GPUMem -> m (Warnings, Program)
 compileProg prog = second kernelsToWebGPU <$> ImpGPU.compileProgOpenCL prog
 
-wgslInt8, wgslInt16, wgslInt64 :: WGSL.PrimType
-wgslInt8 = WGSL.Int32
-wgslInt16 = WGSL.Int32
-wgslInt64 = WGSL.Vec2 WGSL.Int32
+wgslInt8, wgslInt16, wgslInt64 :: WGSL.Type
+wgslInt8 = WGSL.I32
+wgslInt16 = WGSL.I32
+wgslInt64 = WGSL.Vec2 WGSL.I32
 
-wgslPrimType :: PrimType -> WGSL.PrimType
+wgslPrimType :: PrimType -> WGSL.Type
 wgslPrimType (IntType Int8) = wgslInt8
 wgslPrimType (IntType Int16) = wgslInt16
-wgslPrimType (IntType Int32) = WGSL.Int32
+wgslPrimType (IntType Int32) = WGSL.I32
 wgslPrimType (IntType Int64) = wgslInt64
-wgslPrimType (FloatType Float16) = WGSL.Float16
-wgslPrimType (FloatType Float32) = WGSL.Float32
+wgslPrimType (FloatType Float16) = WGSL.F16
+wgslPrimType (FloatType Float32) = WGSL.F32
 wgslPrimType (FloatType Float64) = compilerLimitation "WebGPU backend does not support f64."
 wgslPrimType Bool = WGSL.Bool
 -- TODO: Make sure we do not ever codegen statements involving Unit variables
-wgslPrimType Unit = WGSL.Float16 -- error "TODO: no unit in WGSL"
+wgslPrimType Unit = WGSL.F16 -- error "TODO: no unit in WGSL"
 
 wgslBufferType :: (PrimType, Bool, Signedness) -> Maybe WGSL.Exp -> WGSL.Type
 wgslBufferType (Bool, _, _) = WGSL.Array $ WGSL.Atomic wgslInt8
 wgslBufferType (IntType Int8, _, _) = WGSL.Array $ WGSL.Atomic wgslInt8
 wgslBufferType (IntType Int16, _, _) = WGSL.Array $ WGSL.Atomic wgslInt16
-wgslBufferType (IntType Int32, False, _) = WGSL.Array WGSL.Int32
+wgslBufferType (IntType Int32, False, _) = WGSL.Array WGSL.I32
 wgslBufferType (IntType Int32, True, _) =
-  WGSL.Array $ WGSL.Atomic WGSL.Int32
+  WGSL.Array $ WGSL.Atomic WGSL.I32
 wgslBufferType (FloatType Float32, True, _) =
-  WGSL.Array $ WGSL.Atomic WGSL.Int32
+  WGSL.Array $ WGSL.Atomic WGSL.I32
 wgslBufferType (FloatType Float16, True, _) =
-  WGSL.Array $ WGSL.Atomic WGSL.Int32
+  WGSL.Array $ WGSL.Atomic WGSL.I32
 wgslBufferType (t, _, _) = WGSL.Array $ wgslPrimType t
 
 wgslSharedBufferType ::
@@ -461,19 +455,19 @@ wgslSharedBufferType ::
   Maybe WGSL.Exp ->
   WGSL.Type
 wgslSharedBufferType (Bool, _, _) = WGSL.Array WGSL.Bool
-wgslSharedBufferType (IntType Int8, True, _) = WGSL.Array $ WGSL.Atomic WGSL.Int32
-wgslSharedBufferType (IntType Int16, True, _) = WGSL.Array $ WGSL.Atomic WGSL.Int32
-wgslSharedBufferType (IntType Int8, False, _) = WGSL.Array WGSL.Int32
-wgslSharedBufferType (IntType Int16, False, _) = WGSL.Array WGSL.Int32
-wgslSharedBufferType (IntType Int32, False, _) = WGSL.Array WGSL.Int32
+wgslSharedBufferType (IntType Int8, True, _) = WGSL.Array $ WGSL.Atomic WGSL.I32
+wgslSharedBufferType (IntType Int16, True, _) = WGSL.Array $ WGSL.Atomic WGSL.I32
+wgslSharedBufferType (IntType Int8, False, _) = WGSL.Array WGSL.I32
+wgslSharedBufferType (IntType Int16, False, _) = WGSL.Array WGSL.I32
+wgslSharedBufferType (IntType Int32, False, _) = WGSL.Array WGSL.I32
 wgslSharedBufferType (IntType Int32, True, Signed) =
-  WGSL.Array $ WGSL.Atomic WGSL.Int32
+  WGSL.Array $ WGSL.Atomic WGSL.I32
 wgslSharedBufferType (IntType Int32, True, Unsigned) =
-  WGSL.Array $ WGSL.Atomic WGSL.UInt32
+  WGSL.Array $ WGSL.Atomic WGSL.U32
 wgslSharedBufferType (FloatType Float32, True, _) =
-  WGSL.Array $ WGSL.Atomic WGSL.Int32
+  WGSL.Array $ WGSL.Atomic WGSL.I32
 wgslSharedBufferType (FloatType Float16, True, _) =
-  WGSL.Array $ WGSL.Atomic WGSL.Int32
+  WGSL.Array $ WGSL.Atomic WGSL.I32
 wgslSharedBufferType (t, _, _) = WGSL.Array $ wgslPrimType t
 
 packedElemIndex :: PrimType -> WGSL.Exp -> WGSL.Exp
@@ -705,7 +699,7 @@ genWGSLStm (DeclareMem name (Space "shared")) = do
               elemPrimType
               (Just $ WGSL.VarExp sizeName)
 
-      addOverride sizeName (WGSL.Prim WGSL.Int32) (Just $ WGSL.IntExp 0 WGSL.AbstractInt)
+      addOverride sizeName WGSL.I32 (Just $ WGSL.IntExp 0 WGSL.AbstractInt)
       addDecl $ WGSL.VarDecl [] WGSL.Workgroup Nothing moduleName bufType
       when atomic $ addAtomicMem moduleName
       addRename name' moduleName
@@ -718,7 +712,7 @@ genWGSLStm (DeclareMem name (ScalarSpace vs pt)) =
 genWGSLStm s@(DeclareMem _ _) = unsupported s
 genWGSLStm (DeclareScalar name _ typ) =
   pure $
-    WGSL.DeclareVar (nameToIdent name) (WGSL.Prim $ wgslPrimType typ)
+    WGSL.DeclareVar (nameToIdent name) (wgslPrimType typ)
 genWGSLStm s@(DeclareArray {}) = unsupported s
 genWGSLStm s@(Allocate {}) = unsupported s
 genWGSLStm s@(Free _ _) = pure $ WGSL.Comment $ "free: " <> prettyText s
@@ -786,12 +780,12 @@ genWGSLStm (Op (ImpGPU.GetBlockId dest i)) = do
   destId <- getIdent dest
   pure $
     assign destId $
-      WGSL.bitcast (WGSL.Prim WGSL.Int32) (WGSL.IndexExp "workgroup_id" (WGSL.IntExp i WGSL.AbstractInt))
+      WGSL.bitcast WGSL.I32 (WGSL.IndexExp "workgroup_id" (WGSL.IntExp i WGSL.AbstractInt))
 genWGSLStm (Op (ImpGPU.GetLocalId dest i)) = do
   destId <- getIdent dest
   pure $
     assign destId $
-      WGSL.bitcast (WGSL.Prim WGSL.Int32) (WGSL.IndexExp "local_id" (WGSL.IntExp i WGSL.AbstractInt))
+      WGSL.bitcast WGSL.I32 (WGSL.IndexExp "local_id" (WGSL.IntExp i WGSL.AbstractInt))
 genWGSLStm (Op (ImpGPU.GetLocalSize dest i)) = do
   destId <- getIdent dest
   assign destId . WGSL.VarExp <$> builtinBlockSize i
@@ -1057,8 +1051,8 @@ handleSpecialFloats s t v
     msg = "WebGPU backend cannot represent " <> s <> " literal: " <> prettyText v
 
 genFloatExp :: FloatValue -> WGSL.Exp
-genFloatExp (Float16Value v) = handleSpecialFloats "f16" WGSL.F16 (convFloat v)
-genFloatExp (Float32Value v) = handleSpecialFloats "f32" WGSL.F32 (convFloat v)
+genFloatExp (Float16Value v) = handleSpecialFloats "f16" WGSL.LitF16 (convFloat v)
+genFloatExp (Float32Value v) = handleSpecialFloats "f32" WGSL.LitF32 (convFloat v)
 genFloatExp (Float64Value v) = handleSpecialFloats "f64" WGSL.AbstractFloat v
 
 genWGSLExp :: Exp -> KernelM WGSL.Exp
@@ -1101,21 +1095,21 @@ genScalarDecls = do
     \(name, typ) -> do
       let varPrimTyp = wgslPrimType typ
       let fieldPrimTyp = case typ of
-            Bool -> WGSL.Int32 -- bool is not host-shareable
+            Bool -> WGSL.I32 -- bool is not host-shareable
             _ -> varPrimTyp
       let wrapCopy e = case typ of
             Bool -> call "bool" [e]
             _ -> e
 
       addScalar fieldPrimTyp
-      addInitStmt $ WGSL.DeclareVar name (WGSL.Prim varPrimTyp)
+      addInitStmt $ WGSL.DeclareVar name varPrimTyp
       addInitStmt $
         assign name (wrapCopy $ WGSL.FieldExp (WGSL.VarExp bufferName) name)
 
-      pure (name, WGSL.Prim fieldPrimTyp)
+      pure (name, fieldPrimTyp)
 
   let scalarFields = case scalars of
-        [] -> [("_dummy_scalar", WGSL.Prim WGSL.Int32)]
+        [] -> [("_dummy_scalar", WGSL.I32)]
         sclrs -> sclrs
   addDecl $
     WGSL.StructDecl $
@@ -1250,7 +1244,7 @@ genConstAndBuiltinDecls = do
   let dynBlockDims = [(i, n, e) | ((i, Left e), n) <- blockDims]
 
   forM_ blockDimNames $
-    \n -> addOverride n (WGSL.Prim WGSL.Int32) zeroInit
+    \n -> addOverride n WGSL.I32 zeroInit
 
   -- KernelConstExp block dims get generated into the general macro/override
   -- machinery.
@@ -1262,7 +1256,7 @@ genConstAndBuiltinDecls = do
 
   -- Next we generate builtin override declarations.
   lsWidth <- builtinLockstepWidth
-  addOverride lsWidth (WGSL.Prim WGSL.Int32) zeroInit
+  addOverride lsWidth WGSL.I32 zeroInit
   lift $ addMacroDef (nameFromText lsWidth) $ ValueExp (IntValue (Int32Value 1))
 
   -- And lastly we handle ConstUses.
@@ -1281,22 +1275,22 @@ genConstAndBuiltinDecls = do
         hi <- mkGlobalIdent (n <> "_hi")
         case primExpType e of
           IntType Int64 -> do
-            addOverride lo (WGSL.Prim WGSL.Int32) zeroInit
-            addOverride hi (WGSL.Prim WGSL.Int32) zeroInit
+            addOverride lo WGSL.I32 zeroInit
+            addOverride hi WGSL.I32 zeroInit
             lift $ addMacroDef (nameFromText lo) (mkLo e)
             lift $ addMacroDef (nameFromText hi) (mkHi e)
             addInitStmt $
               WGSL.Seq
-                (WGSL.DeclareVar n (WGSL.Prim wgslInt64))
+                (WGSL.DeclareVar n wgslInt64)
                 ( assign n $
                     call "i64" [WGSL.VarExp lo, WGSL.VarExp hi]
                 )
           _ -> do
-            addOverride lo (WGSL.Prim WGSL.Int32) zeroInit
+            addOverride lo WGSL.I32 zeroInit
             lift $ addMacroDef (nameFromText lo) e
             addInitStmt $
               WGSL.Seq
-                (WGSL.DeclareVar n (WGSL.Prim wgslInt64))
+                (WGSL.DeclareVar n wgslInt64)
                 ( assign n $
                     call "i64" [WGSL.VarExp lo, WGSL.IntExp 0 WGSL.AbstractInt]
                 )

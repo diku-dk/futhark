@@ -1,5 +1,6 @@
 module Main (main) where
 
+import Data.List (nub)
 import Data.Text qualified as T
 import Language.WGSL
 import Prettyprinter (Pretty, defaultLayoutOptions, layoutPretty, pretty)
@@ -29,21 +30,21 @@ render = renderStrict . layoutPretty defaultLayoutOptions . pretty
 pointerTests :: TestTree
 pointerTests =
   testGroup
-    "Pointer"
+    "Ptr"
     [ testCase "without access mode" $
-        render (Pointer Int32 Function Nothing)
+        render (Ptr I32 Function Nothing)
           @?= "ptr<function, i32>",
       testCase "with access mode" $
-        render (Pointer Int32 Function (Just ReadWrite))
+        render (Ptr I32 Function (Just ReadWrite))
           @?= "ptr<function, i32, read_write>",
       testCase "uniform" $
-        render (Pointer Float32 Uniform Nothing)
+        render (Ptr F32 Uniform Nothing)
           @?= "ptr<uniform, f32>",
       testCase "vector store type" $
-        render (Pointer (Vec3 Float32) Workgroup (Just Read))
+        render (Ptr (Vec3 F32) Workgroup (Just Read))
           @?= "ptr<workgroup, vec3<f32>, read>",
       testCase "storage" $
-        render (Pointer Int32 Storage (Just Read))
+        render (Ptr I32 Storage (Just Read))
           @?= "ptr<storage, i32, read>"
     ]
 
@@ -67,19 +68,19 @@ varDeclTests =
   testGroup
     "VarDecl"
     [ testCase "without access mode" $
-        render (VarDecl [] Workgroup Nothing "x" (Prim Int32))
+        render (VarDecl [] Workgroup Nothing "x" I32)
           @?= "\nvar<workgroup> x : i32;",
       testCase "with access mode" $
-        render (VarDecl [] Storage (Just ReadWrite) "x" (Array Int32 Nothing))
+        render (VarDecl [] Storage (Just ReadWrite) "x" (Array I32 Nothing))
           @?= "\nvar<storage, read_write> x : array<i32>;",
       testCase "private" $
-        render (VarDecl [] Private Nothing "x" (Prim Float32))
+        render (VarDecl [] Private Nothing "x" F32)
           @?= "\nvar<private> x : f32;",
       testCase "immediate" $
         render (VarDecl [] Immediate Nothing "x" (Named "S"))
           @?= "\nvar<immediate> x : S;",
       testCase "with attributes" $
-        render (VarDecl (bindingAttribs 0 1) Storage (Just Read) "x" (Array Float32 Nothing))
+        render (VarDecl (bindingAttribs 0 1) Storage (Just Read) "x" (Array F32 Nothing))
           @?= "@group(0) @binding(1)\nvar<storage, read> x : array<f32>;"
     ]
 
@@ -92,28 +93,28 @@ intLitTests =
     [ testCase "no suffix" $
         fmap render (intExp 5 AbstractInt) @?= Just "5",
       testCase "i suffix" $
-        fmap render (intExp 5 I32) @?= Just "5i",
+        fmap render (intExp 5 LitI32) @?= Just "5i",
       testCase "u suffix" $
-        fmap render (intExp 5 U32) @?= Just "5u",
+        fmap render (intExp 5 LitU32) @?= Just "5u",
       testCase "negated literal" $
-        fmap render (intExp (-5) I32) @?= Just "-5i",
+        fmap render (intExp (-5) LitI32) @?= Just "-5i",
       testCase "largest i32" $
-        fmap render (intExp 2147483647 I32) @?= Just "2147483647i",
+        fmap render (intExp 2147483647 LitI32) @?= Just "2147483647i",
       testCase "i32 overflow" $
-        fmap render (intExp 2147483648 I32) @?= Nothing,
+        fmap render (intExp 2147483648 LitI32) @?= Nothing,
       -- The literal is 2147483648, which i32 cannot represent, even though
       -- the negated value can be.
       testCase "most negative i32" $
-        fmap render (intExp (-2147483648) I32) @?= Nothing,
+        fmap render (intExp (-2147483648) LitI32) @?= Nothing,
       testCase "largest u32" $
-        fmap render (intExp 4294967295 U32) @?= Just "4294967295u",
+        fmap render (intExp 4294967295 LitU32) @?= Just "4294967295u",
       testCase "u32 overflow" $
-        fmap render (intExp 4294967296 U32) @?= Nothing,
+        fmap render (intExp 4294967296 LitU32) @?= Nothing,
       testCase "negative u32" $
-        fmap render (intExp (-1) U32) @?= Nothing,
-      testCase "largest AbstractInt" $
+        fmap render (intExp (-1) LitU32) @?= Nothing,
+      testCase "largest Nothing" $
         fmap render (intExp maxBound AbstractInt) @?= Just "9223372036854775807",
-      testCase "AbstractInt overflow" $
+      testCase "Nothing overflow" $
         fmap render (intExp minBound AbstractInt) @?= Nothing
     ]
 
@@ -127,30 +128,30 @@ floatLitTests =
     [ testCase "no suffix" $
         fmap render (floatExp 1.5 AbstractFloat) @?= Just "1.5",
       testCase "f suffix" $
-        fmap render (floatExp 1.5 F32) @?= Just "1.5f",
+        fmap render (floatExp 1.5 LitF32) @?= Just "1.5f",
       testCase "h suffix" $
-        fmap render (floatExp 1.5 F16) @?= Just "1.5h",
+        fmap render (floatExp 1.5 LitF16) @?= Just "1.5h",
       testCase "negated literal" $
-        fmap render (floatExp (-1.5) F32) @?= Just "-1.5f",
+        fmap render (floatExp (-1.5) LitF32) @?= Just "-1.5f",
       testCase "exponent" $
-        fmap render (floatExp 1.0e-2 F32) @?= Just "1.0e-2f",
+        fmap render (floatExp 1.0e-2 LitF32) @?= Just "1.0e-2f",
       testCase "infinity" $
         fmap render (floatExp (1 / 0) AbstractFloat) @?= Nothing,
       testCase "negative infinity" $
-        fmap render (floatExp (-1 / 0) F32) @?= Nothing,
+        fmap render (floatExp (-1 / 0) LitF32) @?= Nothing,
       testCase "NaN" $
-        fmap render (floatExp (0 / 0) F32) @?= Nothing,
+        fmap render (floatExp (0 / 0) LitF32) @?= Nothing,
       testCase "largest f32" $
-        fmap render (floatExp 3.40282346638528859812e38 F32)
+        fmap render (floatExp 3.40282346638528859812e38 LitF32)
           @?= Just "3.4028234663852886e38f",
       testCase "f32 overflow" $
-        fmap render (floatExp 1.0e300 F32) @?= Nothing,
-      testCase "f64 magnitude is an AbstractFloat" $
+        fmap render (floatExp 1.0e300 LitF32) @?= Nothing,
+      testCase "f64 magnitude is an Nothing" $
         fmap render (floatExp 1.0e300 AbstractFloat) @?= Just "1.0e300",
       testCase "largest f16" $
-        fmap render (floatExp 65504 F16) @?= Just "65504.0h",
+        fmap render (floatExp 65504 LitF16) @?= Just "65504.0h",
       testCase "f16 overflow" $
-        fmap render (floatExp 65505 F16) @?= Nothing
+        fmap render (floatExp 65505 LitF16) @?= Nothing
     ]
 
 -- | An assignment's left-hand side is an assignable expression.  See
@@ -189,10 +190,10 @@ funDeclTests =
   testGroup
     "FunDecl"
     [ testCase "without return type" $
-        render (FunDecl "f" [] [Param "a" (Prim Int32) []] Nothing (Call "g" [] [VarExp "a"]))
+        render (FunDecl "f" [] [Param "a" I32 []] Nothing (Call "g" [] [VarExp "a"]))
           @?= "\nfn f(\n  a : i32\n) {\n  g(a);\n}",
       testCase "with return type" $
-        render (FunDecl "f" [] [] (Just ([], Prim Int32)) (Return (Just (IntExp 1 AbstractInt))))
+        render (FunDecl "f" [] [] (Just ([], I32)) (Return (Just (IntExp 1 AbstractInt))))
           @?= "\nfn f() -> i32 {\n  return 1;\n}",
       testCase "with return attributes" $
         render
@@ -200,7 +201,7 @@ funDeclTests =
               "vs"
               [Attrib "vertex" []]
               []
-              (Just ([Attrib "builtin" [VarExp "position"]], Prim (Vec4 Float32)))
+              (Just ([Attrib "builtin" [VarExp "position"]], Vec4 F32))
               (Return (Just (VarExp "p")))
           )
           @?= "@vertex\nfn vs() -> @builtin(position) vec4<f32> {\n  return p;\n}"
@@ -249,14 +250,14 @@ callTests =
       testCase "without arguments" $
         render (CallExp "atomicLoad" [] []) @?= "atomicLoad()",
       testCase "with a type argument" $
-        render (CallExp "vec2" [TypeExp (Prim Float32)] [one, one])
+        render (CallExp "vec2" [TypeExp F32] [one, one])
           @?= "vec2<f32>(1, 1)",
       testCase "bitcast" $
-        render (bitcast (Prim Int32) (VarExp "x")) @?= "bitcast<i32>(x)",
+        render (bitcast I32 (VarExp "x")) @?= "bitcast<i32>(x)",
       -- The template argument list end is disambiguated by the grammar, so a
       -- nested list needs no space between the closing delimiters.
       testCase "nested template arguments" $
-        render (bitcast (Prim (Vec2 Float16)) (VarExp "x"))
+        render (bitcast (Vec2 F16) (VarExp "x"))
           @?= "bitcast<vec2<f16>>(x)"
     ]
 
@@ -270,18 +271,220 @@ layoutTests =
         map (uncurry roundUp) [(16, 12), (4, 4), (16, 0), (8, 9)]
           @?= [16, 4, 0, 16],
       -- bool is not host-shareable, but it does have a fixed footprint.
-      testCase "bool" $ layout (Prim Bool) @?= Just (4, 4),
-      testCase "i32" $ layout (Prim Int32) @?= Just (4, 4),
-      testCase "f16" $ layout (Prim Float16) @?= Just (2, 2),
-      testCase "atomic" $ layout (Prim (Atomic Int32)) @?= Just (4, 4),
-      testCase "vec2<f32>" $ layout (Prim (Vec2 Float32)) @?= Just (8, 8),
-      testCase "vec3<f32>" $ layout (Prim (Vec3 Float32)) @?= Just (16, 12),
-      testCase "vec4<f32>" $ layout (Prim (Vec4 Float32)) @?= Just (16, 16),
-      testCase "vec2<f16>" $ layout (Prim (Vec2 Float16)) @?= Just (4, 4),
-      testCase "vec3<f16>" $ layout (Prim (Vec3 Float16)) @?= Just (8, 6),
-      testCase "vec4<f16>" $ layout (Prim (Vec4 Float16)) @?= Just (8, 8),
+      testCase "bool" $ layout Bool @?= Just (4, 4),
+      testCase "i32" $ layout I32 @?= Just (4, 4),
+      testCase "f16" $ layout F16 @?= Just (2, 2),
+      testCase "atomic" $ layout (Atomic I32) @?= Just (4, 4),
+      testCase "vec2<f32>" $ layout (Vec2 F32) @?= Just (8, 8),
+      testCase "vec3<f32>" $ layout (Vec3 F32) @?= Just (16, 12),
+      testCase "vec4<f32>" $ layout (Vec4 F32) @?= Just (16, 16),
+      testCase "vec2<f16>" $ layout (Vec2 F16) @?= Just (4, 4),
+      testCase "vec3<f16>" $ layout (Vec3 F16) @?= Just (8, 6),
+      testCase "vec4<f16>" $ layout (Vec4 F16) @?= Just (8, 8),
       testCase "named type" $ layout (Named "S") @?= Nothing,
-      testCase "pointer" $ layout (Pointer Int32 Function Nothing) @?= Nothing
+      testCase "pointer" $ layout (Ptr I32 Function Nothing) @?= Nothing,
+      testCase "texture" $ layout (SampledTexture Tex2d F32) @?= Nothing,
+      testCase "sampler" $ layout Sampler @?= Nothing
+    ]
+
+-- | Texture and sampler types are opaque: they have no layout, and are not
+-- host-shareable.  There is no other way to spell them, so no type that does
+-- have a layout can be mistaken for one.  See
+-- https://www.w3.org/TR/WGSL/#texture-sampler-types.
+opaqueTests :: TestTree
+opaqueTests =
+  testGroup
+    "textures and samplers"
+    [ testCase "no layout" $
+        map layout opaques @?= map (const Nothing) opaques,
+      testCase "not host-shareable" $
+        filter hostShareable opaques @?= [],
+      testCase "sampled" $
+        map
+          render
+          [ SampledTexture Tex1d F32,
+            SampledTexture Tex2d F32,
+            SampledTexture Tex2dArray I32,
+            SampledTexture Tex3d U32,
+            SampledTexture TexCube F32,
+            SampledTexture TexCubeArray U32
+          ]
+          @?= [ "texture_1d<f32>",
+                "texture_2d<f32>",
+                "texture_2d_array<i32>",
+                "texture_3d<u32>",
+                "texture_cube<f32>",
+                "texture_cube_array<u32>"
+              ],
+      testCase "multisampled" $
+        render (MultisampledTexture F32) @?= "texture_multisampled_2d<f32>",
+      testCase "external" $ render ExternalTexture @?= "texture_external",
+      testCase "depth" $
+        map
+          render
+          [ DepthTexture Depth2d,
+            DepthTexture Depth2dArray,
+            DepthTexture DepthCube,
+            DepthTexture DepthCubeArray,
+            DepthTexture DepthMultisampled2d
+          ]
+          @?= [ "texture_depth_2d",
+                "texture_depth_2d_array",
+                "texture_depth_cube",
+                "texture_depth_cube_array",
+                "texture_depth_multisampled_2d"
+              ],
+      testCase "storage" $
+        map
+          render
+          [ StorageTexture StorageTex1d Rgba8Unorm Write,
+            StorageTexture StorageTex2d R32Float Read,
+            StorageTexture StorageTex2dArray Rgb10a2Uint ReadWrite,
+            StorageTexture StorageTex3d Rg11b10Ufloat Write
+          ]
+          @?= [ "texture_storage_1d<rgba8unorm, write>",
+                "texture_storage_2d<r32float, read>",
+                "texture_storage_2d_array<rgb10a2uint, read_write>",
+                "texture_storage_3d<rg11b10ufloat, write>"
+              ],
+      testCase "samplers" $
+        map render [Sampler, SamplerComparison] @?= ["sampler", "sampler_comparison"]
+    ]
+
+-- | One of every texture and sampler family.
+opaques :: [Type]
+opaques =
+  [ SampledTexture Tex2d F32,
+    MultisampledTexture F32,
+    ExternalTexture,
+    StorageTexture StorageTex2d Rgba8Unorm Write,
+    DepthTexture Depth2d,
+    Sampler,
+    SamplerComparison
+  ]
+
+-- | A matrix is laid out as an array of its columns, so @matCxR@ has the
+-- alignment of @vecR@ and the size of @array<vecR, C>@.  See
+-- https://www.w3.org/TR/WGSL/#alignment-and-size.
+matrixLayoutTests :: TestTree
+matrixLayoutTests =
+  testGroup
+    "matrices"
+    [ testCase "mat2x2<f32>" $ layout (Mat2x2 F32) @?= Just (8, 16),
+      testCase "mat3x2<f32>" $ layout (Mat3x2 F32) @?= Just (8, 24),
+      testCase "mat4x2<f32>" $ layout (Mat4x2 F32) @?= Just (8, 32),
+      -- The columns are padded from 12 bytes to a stride of 16.
+      testCase "mat2x3<f32>" $ layout (Mat2x3 F32) @?= Just (16, 32),
+      testCase "mat3x3<f32>" $ layout (Mat3x3 F32) @?= Just (16, 48),
+      testCase "mat4x3<f32>" $ layout (Mat4x3 F32) @?= Just (16, 64),
+      testCase "mat2x4<f32>" $ layout (Mat2x4 F32) @?= Just (16, 32),
+      testCase "mat3x4<f32>" $ layout (Mat3x4 F32) @?= Just (16, 48),
+      testCase "mat4x4<f32>" $ layout (Mat4x4 F32) @?= Just (16, 64),
+      testCase "mat2x2<f16>" $ layout (Mat2x2 F16) @?= Just (4, 8),
+      testCase "mat4x2<f16>" $ layout (Mat4x2 F16) @?= Just (4, 16),
+      testCase "mat2x3<f16>" $ layout (Mat2x3 F16) @?= Just (8, 16),
+      testCase "mat4x3<f16>" $ layout (Mat4x3 F16) @?= Just (8, 32),
+      testCase "mat4x4<f16>" $ layout (Mat4x4 F16) @?= Just (8, 32)
+    ]
+
+-- | At least one type of every shape, for properties that should hold of all
+-- of them.
+representativeTypes :: [Type]
+representativeTypes =
+  [Bool, I32, U32, F16, F32]
+    ++ [Vec2 F32, Vec3 F32, Vec4 F32, Vec2 F16]
+    ++ [ Mat2x2 F32,
+         Mat2x3 F32,
+         Mat2x4 F32,
+         Mat3x2 F32,
+         Mat3x3 F32,
+         Mat3x4 F32,
+         Mat4x2 F32,
+         Mat4x3 F32,
+         Mat4x4 F32,
+         Mat2x2 F16
+       ]
+    ++ [Atomic I32, Atomic U32]
+    ++ [ Array F32 Nothing,
+         Array F32 (Just (IntExp 8 AbstractInt)),
+         Array F32 (Just (IntExp 8 LitI32)),
+         Array (Named "S") (Just (IntExp 3 AbstractInt)),
+         Array (Array F32 (Just (IntExp 2 AbstractInt))) Nothing
+       ]
+    ++ [ Ptr I32 Function Nothing,
+         Ptr I32 Function (Just ReadWrite),
+         Ptr I32 Storage (Just Read),
+         Ptr (Array F32 Nothing) Private Nothing
+       ]
+    ++ [Named "S", Named "T"]
+    ++ [ SampledTexture Tex1d F32,
+         SampledTexture Tex2d F32,
+         SampledTexture Tex2d I32,
+         SampledTexture Tex2dArray F32,
+         SampledTexture Tex3d F32,
+         SampledTexture TexCube F32,
+         SampledTexture TexCubeArray F32,
+         MultisampledTexture F32,
+         ExternalTexture,
+         StorageTexture StorageTex1d Rgba8Unorm Write,
+         StorageTexture StorageTex2d Rgba8Unorm Write,
+         StorageTexture StorageTex2d R32Float Write,
+         StorageTexture StorageTex2d R32Float Read,
+         StorageTexture StorageTex2dArray Rgba8Unorm Write,
+         StorageTexture StorageTex3d Rgba8Unorm Write,
+         DepthTexture Depth2d,
+         DepthTexture Depth2dArray,
+         DepthTexture DepthCube,
+         DepthTexture DepthCubeArray,
+         DepthTexture DepthMultisampled2d,
+         Sampler,
+         SamplerComparison
+       ]
+
+-- | Distinct types must have distinct spellings.  Were two of them to spell
+-- the same WGSL type, they could disagree about its layout, which is what an
+-- open-ended escape hatch in 'Type' used to allow.
+injectivityTests :: TestTree
+injectivityTests =
+  testGroup
+    "spellings are distinct"
+    [ testCase "the sample has no duplicates" $
+        nub representativeTypes @?= representativeTypes,
+      testCase "no two types spell the same" $
+        let spellings = map render representativeTypes
+         in nub spellings @?= spellings
+    ]
+
+-- | Every type is spelled as an identifier with an optional template argument
+-- list.  See https://www.w3.org/TR/WGSL/#type-specifiers.
+typeSpellingTests :: TestTree
+typeSpellingTests =
+  testGroup
+    "spelling"
+    [ testCase "scalars" $
+        map render [Bool, I32, U32, F16, F32]
+          @?= ["bool", "i32", "u32", "f16", "f32"],
+      testCase "vector" $ render (Vec3 F32) @?= "vec3<f32>",
+      testCase "matrix" $ render (Mat4x3 F16) @?= "mat4x3<f16>",
+      testCase "atomic" $ render (Atomic U32) @?= "atomic<u32>",
+      testCase "runtime-sized array" $ render (Array F32 Nothing) @?= "array<f32>",
+      testCase "fixed-size array" $
+        render (Array F32 (Just (IntExp 8 AbstractInt))) @?= "array<f32, 8>",
+      -- Element and store types are no longer restricted to scalars.
+      testCase "array of struct" $
+        render (Array (Named "S") (Just (IntExp 3 AbstractInt))) @?= "array<S, 3>",
+      testCase "array of array" $
+        render
+          ( Array
+              (Array F32 (Just (IntExp 2 AbstractInt)))
+              (Just (IntExp 3 AbstractInt))
+          )
+          @?= "array<array<f32, 2>, 3>",
+      -- The specification's own example of a pointer type.
+      testCase "pointer to array" $
+        render (Ptr (Array F32 (Just (IntExp 50 AbstractInt))) Private Nothing)
+          @?= "ptr<private, array<f32, 50>>",
+      testCase "sampler" $ render Sampler @?= "sampler"
     ]
 
 -- | An array's size is its element count times the element stride.  See
@@ -291,19 +494,19 @@ arrayLayoutTests =
   testGroup
     "arrays"
     [ testCase "element stride" $
-        map elementStride [Float32, Vec3 Float32, Float16]
-          @?= [4, 16, 2],
+        map elementStride [F32, Vec3 F32, F16, Named "S"]
+          @?= [Just 4, Just 16, Just 2, Nothing],
       testCase "array<f32, 8>" $
-        layout (Array Float32 (Just (IntExp 8 AbstractInt))) @?= Just (4, 32),
+        layout (Array F32 (Just (IntExp 8 AbstractInt))) @?= Just (4, 32),
       -- The element is padded from 12 bytes to a stride of 16.
       testCase "array<vec3<f32>, 8>" $
-        layout (Array (Vec3 Float32) (Just (IntExp 8 AbstractInt)))
+        layout (Array (Vec3 F32) (Just (IntExp 8 AbstractInt)))
           @?= Just (16, 128),
       testCase "runtime-sized array" $
-        (alignOf (Array Float32 Nothing), sizeOf (Array Float32 Nothing))
+        (alignOf (Array F32 Nothing), sizeOf (Array F32 Nothing))
           @?= (Just 4, Nothing),
       testCase "overridable element count" $
-        layout (Array Float32 (Just (VarExp "n"))) @?= Nothing
+        layout (Array F32 (Just (VarExp "n"))) @?= Nothing
     ]
 
 -- | See https://www.w3.org/TR/WGSL/#structure-member-layout.
@@ -313,29 +516,29 @@ structLayoutTests =
     "structures"
     [ -- struct A from the specification's example.
       testCase "implicit padding" $
-        structLayout [Prim Float32, Prim Float32, Prim (Vec2 Float32), Prim Float32]
+        structLayout [F32, F32, Vec2 F32, F32]
           @?= (Just [0, 4, 8, 16], Just 8, Just 24),
       -- The first four members of struct B from the same example.
       testCase "vector alignment" $
         structLayout
-          [Prim (Vec2 Float32), Prim (Vec3 Float32), Prim Float32, Prim Float32]
+          [Vec2 F32, Vec3 F32, F32, F32]
           @?= (Just [0, 16, 28, 32], Just 16, Just 48),
       testCase "single member" $
-        structLayout [Prim Int32] @?= (Just [0], Just 4, Just 4),
+        structLayout [I32] @?= (Just [0], Just 4, Just 4),
       -- The offsets and alignment of a storage buffer's header are known even
       -- though its size is not.
       testCase "trailing runtime-sized array" $
-        structLayout [Prim UInt32, Array Float32 Nothing]
+        structLayout [U32, Array F32 Nothing]
           @?= (Just [0, 4], Just 4, Nothing),
       -- A member without a size stops the offsets of later members from
       -- being known, but the alignment still is.
       testCase "member without a size" $
-        structLayout [Array Float32 Nothing, Prim UInt32]
+        structLayout [Array F32 Nothing, U32]
           @?= (Nothing, Just 4, Nothing),
       testCase "no members" $
         structLayout [] @?= (Nothing, Nothing, Nothing),
       testCase "member without a layout" $
-        structLayout [Prim Int32, Named "S"]
+        structLayout [I32, Named "S"]
           @?= (Nothing, Nothing, Nothing)
     ]
 
@@ -344,31 +547,33 @@ hostShareableTests :: TestTree
 hostShareableTests =
   testGroup
     "hostShareable"
-    [ testCase "numeric scalar" $ hostShareable (Prim Int32) @?= True,
-      testCase "bool" $ hostShareable (Prim Bool) @?= False,
-      testCase "numeric vector" $ hostShareable (Prim (Vec3 Float32)) @?= True,
-      testCase "vector of bool" $ hostShareable (Prim (Vec3 Bool)) @?= False,
-      testCase "atomic" $ hostShareable (Prim (Atomic Int32)) @?= True,
+    [ testCase "numeric scalar" $ hostShareable I32 @?= True,
+      testCase "bool" $ hostShareable Bool @?= False,
+      testCase "numeric vector" $ hostShareable (Vec3 F32) @?= True,
+      testCase "vector of bool" $ hostShareable (Vec3 Bool) @?= False,
+      testCase "atomic" $ hostShareable (Atomic I32) @?= True,
       testCase "runtime-sized array" $
-        hostShareable (Array Float32 Nothing) @?= True,
+        hostShareable (Array F32 Nothing) @?= True,
       testCase "fixed-size array" $
-        hostShareable (Array Float32 (Just (IntExp 8 AbstractInt))) @?= True,
+        hostShareable (Array F32 (Just (IntExp 8 AbstractInt))) @?= True,
       testCase "overridable element count" $
-        hostShareable (Array Float32 (Just (VarExp "n"))) @?= False,
+        hostShareable (Array F32 (Just (VarExp "n"))) @?= False,
       testCase "named type" $ hostShareable (Named "S") @?= False,
       testCase "pointer" $
-        hostShareable (Pointer Int32 Function Nothing) @?= False
+        hostShareable (Ptr I32 Function Nothing) @?= False
     ]
 
 tests :: TestTree
 tests =
   testGroup
     "Language.WGSL"
-    [ testGroup "types" [pointerTests],
+    [ testGroup "types" [typeSpellingTests, injectivityTests, pointerTests],
       testGroup
         "memory"
         [ accessModeTests,
           layoutTests,
+          matrixLayoutTests,
+          opaqueTests,
           arrayLayoutTests,
           structLayoutTests,
           hostShareableTests

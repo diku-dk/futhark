@@ -9,7 +9,6 @@
 -- syntax module in the future.
 module Language.WGSL
   ( Ident,
-    PrimType (..),
     roundUp,
     alignOf,
     sizeOf,
@@ -19,10 +18,14 @@ module Language.WGSL
     offsetOfMembers,
     sizeOfStruct,
     Type (..),
-    BinOp,
-    UnOp,
+    TextureDim (..),
+    StorageTextureDim (..),
+    DepthTexture (..),
+    TexelFormat (..),
     IntLitType (..),
     FloatLitType (..),
+    BinOp,
+    UnOp,
     Exp (..),
     intExp,
     floatExp,
@@ -51,114 +54,263 @@ import Prettyprinter
 -- constraint is violated.
 type Ident = T.Text
 
-data PrimType
-  = Bool
-  | Int32
-  | UInt32
-  | Float16
-  | Float32
-  | Vec2 PrimType
-  | Vec3 PrimType
-  | Vec4 PrimType
-  | Atomic PrimType
-  deriving (Show)
-
+-- | A type as it occurs in WGSL source. See
+-- https://www.w3.org/TR/WGSL/#type-specifiers.
 data Type
-  = Prim PrimType
-  | Array PrimType (Maybe Exp)
-  | Named Ident
-  | Pointer PrimType AddressSpace (Maybe AccessMode)
+  = Bool
+  | I32
+  | U32
+  | F16
+  | F32
+  | Vec2 Type
+  | Vec3 Type
+  | Vec4 Type
+  | -- | @matCxR@ has @C@ columns of @R@ rows.
+    Mat2x2 Type
+  | Mat2x3 Type
+  | Mat2x4 Type
+  | Mat3x2 Type
+  | Mat3x3 Type
+  | Mat3x4 Type
+  | Mat4x2 Type
+  | Mat4x3 Type
+  | Mat4x4 Type
+  | Atomic Type
+  | -- | An array, which is runtime-sized when the element count is absent.
+    Array Type (Maybe Exp)
+  | Ptr Type AddressSpace (Maybe AccessMode)
+  | -- | A structure or type alias, referred to by name. Its definition is not
+    -- known here, so it has no layout.
+    Named Ident
+  | -- | A sampled texture type.  The sampled type must be @f32@, @i32@ or
+    -- @u32@.  See https://www.w3.org/TR/WGSL/#sampled-texture-type.
+    SampledTexture TextureDim Type
+  | -- | A multisampled texture type, which is only ever two-dimensional.  See
+    -- https://www.w3.org/TR/WGSL/#multisampled-texture-type.
+    MultisampledTexture Type
+  | -- | An external sampled texture type.  See
+    -- https://www.w3.org/TR/WGSL/#external-texture-type.
+    ExternalTexture
+  | -- | A storage texture type.  See
+    -- https://www.w3.org/TR/WGSL/#texture-storage.
+    StorageTexture StorageTextureDim TexelFormat AccessMode
+  | -- | A depth texture type.  See
+    -- https://www.w3.org/TR/WGSL/#texture-depth.
+    DepthTexture DepthTexture
+  | -- | A sampler.  See https://www.w3.org/TR/WGSL/#sampler-type.
+    Sampler
+  | -- | A comparison sampler.
+    SamplerComparison
+  deriving (Eq, Ord, Show)
+
+-- | The dimensionality and arrangement of a sampled texture.
+data TextureDim
+  = Tex1d
+  | Tex2d
+  | Tex2dArray
+  | Tex3d
+  | TexCube
+  | TexCubeArray
+  deriving (Eq, Ord, Show)
+
+-- | The dimensionality and arrangement of a storage texture.
+data StorageTextureDim
+  = StorageTex1d
+  | StorageTex2d
+  | StorageTex2dArray
+  | StorageTex3d
+  deriving (Eq, Ord, Show)
+
+-- | A depth texture type, which is never parameterised.
+data DepthTexture
+  = Depth2d
+  | Depth2dArray
+  | DepthCube
+  | DepthCubeArray
+  | DepthMultisampled2d
+  deriving (Eq, Ord, Show)
+
+-- | A texel format, used to parameterise the storage texture types.  See
+-- https://www.w3.org/TR/WGSL/#texel-formats.
+data TexelFormat
+  = Rgba8Unorm
+  | Rgba8Snorm
+  | Rgba8Uint
+  | Rgba8Sint
+  | Rgba16Unorm
+  | Rgba16Snorm
+  | Rgba16Uint
+  | Rgba16Sint
+  | Rgba16Float
+  | Rg8Unorm
+  | Rg8Snorm
+  | Rg8Uint
+  | Rg8Sint
+  | Rg16Unorm
+  | Rg16Snorm
+  | Rg16Uint
+  | Rg16Sint
+  | Rg16Float
+  | R32Uint
+  | R32Sint
+  | R32Float
+  | Rg32Uint
+  | Rg32Sint
+  | Rg32Float
+  | Rgba32Uint
+  | Rgba32Sint
+  | Rgba32Float
+  | Bgra8Unorm
+  | R8Unorm
+  | R8Snorm
+  | R8Uint
+  | R8Sint
+  | R16Unorm
+  | R16Snorm
+  | R16Uint
+  | R16Sint
+  | R16Float
+  | Rgb10a2Unorm
+  | Rgb10a2Uint
+  | Rg11b10Ufloat
+  deriving (Eq, Ord, Show)
 
 -- | @roundUp(k, n)@, as used by the layout rules.
 roundUp :: Int -> Int -> Int
 roundUp k n = ((n + k - 1) `div` k) * k
 
--- | @AlignOf@ of a primitive type.  Every primitive type has a fixed
--- footprint, so this is total, even for the ones that are not
--- 'hostShareable'.  See
--- https://www.w3.org/TR/WGSL/#alignment-and-size.
-primAlignOf :: PrimType -> Int
-primAlignOf Bool = 4
-primAlignOf Int32 = 4
-primAlignOf UInt32 = 4
-primAlignOf Float16 = 2
-primAlignOf Float32 = 4
-primAlignOf (Vec2 t) = 2 * primAlignOf t
-primAlignOf (Vec3 t) = 4 * primAlignOf t
-primAlignOf (Vec4 t) = 4 * primAlignOf t
-primAlignOf (Atomic _) = 4
-
--- | @SizeOf@ of a primitive type.
-primSizeOf :: PrimType -> Int
-primSizeOf Bool = 4
-primSizeOf Int32 = 4
-primSizeOf UInt32 = 4
-primSizeOf Float16 = 2
-primSizeOf Float32 = 4
-primSizeOf (Vec2 t) = 2 * primSizeOf t
-primSizeOf (Vec3 t) = 3 * primSizeOf t
-primSizeOf (Vec4 t) = 4 * primSizeOf t
-primSizeOf (Atomic _) = 4
-
--- | @AlignOf@ of a type, or 'Nothing' if it has none. The latter occurs for
--- named types and pointers.
+-- | @AlignOf@ of a type, or 'Nothing' if it has none, which is the case for
+-- pointers, named types and 'Other' types.  Note that this is defined for
+-- types that are not 'hostShareable' but do have a fixed footprint, such as
+-- @bool@.  See https://www.w3.org/TR/WGSL/#alignment-and-size.
 alignOf :: Type -> Maybe Int
-alignOf (Prim t) = Just $ primAlignOf t
-alignOf (Array t _) = Just $ primAlignOf t
+alignOf Bool = Just 4
+alignOf I32 = Just 4
+alignOf U32 = Just 4
+alignOf F16 = Just 2
+alignOf F32 = Just 4
+alignOf (Vec2 t) = (2 *) <$> alignOf t
+alignOf (Vec3 t) = (4 *) <$> alignOf t
+alignOf (Vec4 t) = (4 *) <$> alignOf t
+-- The alignment of a matrix is that of its columns.
+alignOf (Mat2x2 t) = alignOf $ Vec2 t
+alignOf (Mat3x2 t) = alignOf $ Vec2 t
+alignOf (Mat4x2 t) = alignOf $ Vec2 t
+alignOf (Mat2x3 t) = alignOf $ Vec3 t
+alignOf (Mat3x3 t) = alignOf $ Vec3 t
+alignOf (Mat4x3 t) = alignOf $ Vec3 t
+alignOf (Mat2x4 t) = alignOf $ Vec4 t
+alignOf (Mat3x4 t) = alignOf $ Vec4 t
+alignOf (Mat4x4 t) = alignOf $ Vec4 t
+alignOf (Atomic _) = Just 4
+alignOf (Array t _) = alignOf t
+alignOf Ptr {} = Nothing
 alignOf (Named _) = Nothing
-alignOf Pointer {} = Nothing
+alignOf SampledTexture {} = Nothing
+alignOf (MultisampledTexture _) = Nothing
+alignOf ExternalTexture = Nothing
+alignOf StorageTexture {} = Nothing
+alignOf (DepthTexture _) = Nothing
+alignOf Sampler = Nothing
+alignOf SamplerComparison = Nothing
 
--- | The element stride of an array with the given element type, which is the
--- element size rounded up to the element alignment. See
--- https://www.w3.org/TR/WGSL/#array-layout-examples.
-elementStride :: PrimType -> Int
-elementStride t = roundUp (primAlignOf t) (primSizeOf t)
-
--- | @SizeOf@ of a type. An array has a size only if its element count is a
--- literal. Named types and pointers have no size.
+-- | @SizeOf@ of a type, or 'Nothing' if it has none.  An array has a size only
+-- if its element count is a literal: a runtime-sized array has no size until a
+-- buffer is bound, and an overridable count is not known until pipeline
+-- creation.
 sizeOf :: Type -> Maybe Int
-sizeOf (Prim t) = Just $ primSizeOf t
+sizeOf Bool = Just 4
+sizeOf I32 = Just 4
+sizeOf U32 = Just 4
+sizeOf F16 = Just 2
+sizeOf F32 = Just 4
+sizeOf (Vec2 t) = (2 *) <$> sizeOf t
+sizeOf (Vec3 t) = (3 *) <$> sizeOf t
+sizeOf (Vec4 t) = (4 *) <$> sizeOf t
+-- A matrix is laid out as an array of its columns.
+sizeOf (Mat2x2 t) = (2 *) <$> elementStride (Vec2 t)
+sizeOf (Mat3x2 t) = (3 *) <$> elementStride (Vec2 t)
+sizeOf (Mat4x2 t) = (4 *) <$> elementStride (Vec2 t)
+sizeOf (Mat2x3 t) = (2 *) <$> elementStride (Vec3 t)
+sizeOf (Mat3x3 t) = (3 *) <$> elementStride (Vec3 t)
+sizeOf (Mat4x3 t) = (4 *) <$> elementStride (Vec3 t)
+sizeOf (Mat2x4 t) = (2 *) <$> elementStride (Vec4 t)
+sizeOf (Mat3x4 t) = (3 *) <$> elementStride (Vec4 t)
+sizeOf (Mat4x4 t) = (4 *) <$> elementStride (Vec4 t)
+sizeOf (Atomic _) = Just 4
 sizeOf (Array t (Just (IntExp n _)))
-  | n >= 0 = Just $ n * elementStride t
+  | n >= 0 = (n *) <$> elementStride t
 sizeOf Array {} = Nothing
+sizeOf Ptr {} = Nothing
 sizeOf (Named _) = Nothing
-sizeOf Pointer {} = Nothing
+sizeOf SampledTexture {} = Nothing
+sizeOf (MultisampledTexture _) = Nothing
+sizeOf ExternalTexture = Nothing
+sizeOf StorageTexture {} = Nothing
+sizeOf (DepthTexture _) = Nothing
+sizeOf Sampler = Nothing
+sizeOf SamplerComparison = Nothing
 
--- | Whether a type is host-shareable, and so may be the store type of a uniform
--- or storage buffer. A named type is not resolved here, so it is reported as
--- not host-shareable. See https://www.w3.org/TR/WGSL/#host-shareable-types.
+-- | The stride between the elements of an array with the given element type,
+-- which is the element size rounded up to the element alignment.  See
+-- https://www.w3.org/TR/WGSL/#array-layout-examples.
+elementStride :: Type -> Maybe Int
+elementStride t = roundUp <$> alignOf t <*> sizeOf t
+
+-- | Whether a type is host-shareable, and so may be the store type of a
+-- uniform or storage buffer.  This is conservative: a named type is not
+-- resolved here, so it is reported as not host-shareable.  See
+-- https://www.w3.org/TR/WGSL/#host-shareable-types.
 hostShareable :: Type -> Bool
-hostShareable (Prim t) = numeric t
-  where
-    -- bool is not a numeric scalar type, and a vector of bool is not a
-    -- numeric vector type.
-    numeric Bool = False
-    numeric (Vec2 t') = numeric t'
-    numeric (Vec3 t') = numeric t'
-    numeric (Vec4 t') = numeric t'
-    numeric _ = True
+-- bool is not a numeric scalar type, and a vector of bool is not a numeric
+-- vector type.
+hostShareable Bool = False
+hostShareable I32 = True
+hostShareable U32 = True
+hostShareable F16 = True
+hostShareable F32 = True
+hostShareable (Vec2 t) = hostShareable t
+hostShareable (Vec3 t) = hostShareable t
+hostShareable (Vec4 t) = hostShareable t
+hostShareable (Mat2x2 t) = hostShareable t
+hostShareable (Mat2x3 t) = hostShareable t
+hostShareable (Mat2x4 t) = hostShareable t
+hostShareable (Mat3x2 t) = hostShareable t
+hostShareable (Mat3x3 t) = hostShareable t
+hostShareable (Mat3x4 t) = hostShareable t
+hostShareable (Mat4x2 t) = hostShareable t
+hostShareable (Mat4x3 t) = hostShareable t
+hostShareable (Mat4x4 t) = hostShareable t
+hostShareable (Atomic _) = True
 -- A fixed-size array is host-shareable only if it has a creation-fixed
--- footprint, so its element count must be a literal. A runtime-sized array has
--- no count at all.
-hostShareable (Array t Nothing) = hostShareable (Prim t)
-hostShareable (Array t (Just (IntExp _ _))) = hostShareable (Prim t)
+-- footprint, so its element count must be a literal.  A runtime-sized array
+-- has no count at all.
+hostShareable (Array t Nothing) = hostShareable t
+hostShareable (Array t (Just (IntExp _ _))) = hostShareable t
 hostShareable Array {} = False
+hostShareable Ptr {} = False
 hostShareable (Named _) = False
-hostShareable Pointer {} = False
+hostShareable SampledTexture {} = False
+hostShareable (MultisampledTexture _) = False
+hostShareable ExternalTexture = False
+hostShareable StorageTexture {} = False
+hostShareable (DepthTexture _) = False
+hostShareable Sampler = False
+hostShareable SamplerComparison = False
 
--- | @AlignOf@ of a structure with the given member types, which is the greatest
--- alignment of any member. Returns 'Nothing' if there are no members, since a
--- WGSL structure must have at least one, or if some member has no @AlignOf@.
--- Layout attributes are not taken into account. See
+-- | @AlignOf@ of a structure with the given member types, which is the
+-- greatest alignment of any member.  'Nothing' if there are no members, since
+-- a WGSL structure must have at least one, or if some member has no
+-- @AlignOf@.  Layout attributes are not taken into account.  See
 -- https://www.w3.org/TR/WGSL/#structure-member-layout.
 alignOfStruct :: [Type] -> Maybe Int
 alignOfStruct [] = Nothing
 alignOfStruct members = maximum <$> mapM alignOf members
 
 -- | @OffsetOfMember@ of every member of a structure with the given member
--- types. These are known even when the structure has no @SizeOf@, as when its
--- last member is a runtime-sized array. Layout attributes are not taken into
--- account.
+-- types.  These are known even when the structure has no @SizeOf@, as when its
+-- last member is a runtime-sized array, because only the preceding members
+-- contribute.  Layout attributes are not taken into account.
 offsetOfMembers :: [Type] -> Maybe [Int]
 offsetOfMembers [] = Nothing
 offsetOfMembers members = do
@@ -171,15 +323,15 @@ offsetOfMembers members = do
       (zip aligns sizes)
 
 -- | @SizeOf@ of a structure with the given member types, which is the end of
--- its last member rounded up to the structure's alignment. 'Nothing' if any
--- member has no @SizeOf@, which includes a trailing runtime-sized array. Layout
--- attributes are not taken into account.
+-- its last member rounded up to the structure's alignment.  'Nothing' if any
+-- member has no @SizeOf@, which includes a trailing runtime-sized array.
+-- Layout attributes are not taken into account.
 sizeOfStruct :: [Type] -> Maybe Int
 sizeOfStruct members = do
-  align <- alignOfStruct members
+  struct_align <- alignOfStruct members
   offsets <- offsetOfMembers members
   last_size <- sizeOf $ last members
-  pure $ roundUp align (last offsets + last_size)
+  pure $ roundUp struct_align (last offsets + last_size)
 
 type BinOp = T.Text
 
@@ -188,32 +340,31 @@ type UnOp = T.Text
 -- | The type denoted by an integer literal, which is determined by its
 -- suffix.  See https://www.w3.org/TR/WGSL/#numeric-literals.
 data IntLitType
-  = -- | No suffix: the literal denotes an @AbstractInt@.
+  = -- | No suffix.
     AbstractInt
   | -- | The @i@ suffix.
-    I32
+    LitI32
   | -- | The @u@ suffix.
-    U32
+    LitU32
   deriving (Eq, Ord, Show)
 
 -- | The type denoted by a floating point literal, which is determined by its
--- suffix.  See https://www.w3.org/TR/WGSL/#numeric-literals.
+-- suffix.
 data FloatLitType
-  = -- | No suffix: the literal denotes an @AbstractFloat@.
+  = -- | No suffix.
     AbstractFloat
   | -- | The @f@ suffix.
-    F32
+    LitF32
   | -- | The @h@ suffix.  Using it requires the @enable f16;@ directive.
-    F16
+    LitF16
   deriving (Eq, Ord, Show)
 
 data Exp
   = BoolExp Bool
-  | -- | An integer literal.  Prefer 'intExp', which checks that the value is
-    -- representable.
+  | -- | An integer literal.  Prefer 'intExp', which checks that the value can
+    -- be denoted by a literal of the given type.
     IntExp Int IntLitType
-  | -- | A floating point literal.  Prefer 'floatExp', which checks that the
-    -- value is representable.
+  | -- | A floating point literal.  Prefer 'floatExp'.
     FloatExp Double FloatLitType
   | VarExp Ident
   | BinOpExp BinOp Exp Exp
@@ -227,6 +378,7 @@ data Exp
     TypeExp Type
   | IndexExp Ident Exp
   | FieldExp Exp Ident
+  deriving (Eq, Ord, Show)
 
 data Stmt
   = Skip
@@ -247,6 +399,7 @@ data Stmt
   | -- | The expression must be present exactly when the enclosing function
     -- has a return type.
     Return (Maybe Exp)
+  deriving (Eq, Ord, Show)
 
 -- | The update of a @for@ loop, which the grammar restricts to an assignment
 -- or a function call.  See https://www.w3.org/TR/WGSL/#for-statement.
@@ -254,10 +407,13 @@ data ForUpdate
   = -- | The left-hand side must be an assignable expression.
     UpdateAssign Exp Exp
   | UpdateCall Ident [Exp] [Exp]
+  deriving (Eq, Ord, Show)
 
 data Attrib = Attrib Ident [Exp]
+  deriving (Eq, Ord, Show)
 
 data Param = Param Ident Type [Attrib]
+  deriving (Eq, Ord, Show)
 
 -- | A function declaration.  See
 -- https://www.w3.org/TR/WGSL/#function-declaration-sec.
@@ -268,10 +424,13 @@ data FunDecl = FunDecl
     funReturn :: Maybe ([Attrib], Type),
     funBody :: Stmt
   }
+  deriving (Eq, Ord, Show)
 
 data Field = Field Ident Type
+  deriving (Eq, Ord, Show)
 
 data Struct = Struct Ident [Field]
+  deriving (Eq, Ord, Show)
 
 -- | The access modes supported by a memory view.  See
 -- https://www.w3.org/TR/WGSL/#memory-access-mode.
@@ -300,6 +459,7 @@ data Declaration
     -- defaults to the one of the address space when omitted.
     VarDecl [Attrib] AddressSpace (Maybe AccessMode) Ident Type
   | OverrideDecl Ident Type (Maybe Exp)
+  deriving (Eq, Ord, Show)
 
 stmts :: [Stmt] -> Stmt
 stmts [] = Skip
@@ -321,8 +481,8 @@ intExp v t
   where
     representable = case t of
       AbstractInt -> magnitude <= 2 ^ (63 :: Int) - 1
-      I32 -> magnitude <= 2 ^ (31 :: Int) - 1
-      U32 -> toInteger v >= 0 && toInteger v <= 2 ^ (32 :: Int) - 1
+      LitI32 -> magnitude <= 2 ^ (31 :: Int) - 1
+      LitU32 -> toInteger v >= 0 && toInteger v <= 2 ^ (32 :: Int) - 1
     magnitude = abs $ toInteger v
 
 -- | Construct a floating point literal, or 'Nothing' if the value cannot be
@@ -335,10 +495,10 @@ floatExp v t
   | otherwise = Just $ FloatExp v t
   where
     largestFinite = case t of
-      -- Any finite Double is an AbstractFloat.
+      -- Any finite Double denotes an AbstractFloat.
       AbstractFloat -> Nothing
-      F32 -> Just 3.40282346638528859812e38
-      F16 -> Just 65504
+      LitF32 -> Just 3.40282346638528859812e38
+      LitF16 -> Just 65504
 
 -- | Reinterpret the bits of an expression as another type.  See
 -- https://www.w3.org/TR/WGSL/#bitcast-builtin.
@@ -348,9 +508,12 @@ bitcast t e = CallExp "bitcast" [TypeExp t] [e]
 --- Prettyprinting definitions
 
 -- | A template argument list, which is omitted when empty.
+templateArgs :: [Doc a] -> Doc a
+templateArgs [] = mempty
+templateArgs args = "<" <> commasep args <> ">"
+
 templateList :: [Exp] -> Doc a
-templateList [] = mempty
-templateList args = "<" <> commasep (map pretty args) <> ">"
+templateList = templateArgs . map pretty
 
 -- | Separate with commas.
 commasep :: [Doc a] -> Doc a
@@ -368,33 +531,118 @@ stack = align . mconcat . punctuate line
 (</>) :: Doc a -> Doc a -> Doc a
 a </> b = a <> line <> b
 
-instance Pretty PrimType where
-  pretty Bool = "bool"
-  pretty Int32 = "i32"
-  pretty UInt32 = "u32"
-  pretty Float16 = "f16"
-  pretty Float32 = "f32"
-  pretty (Vec2 t) = "vec2<" <> pretty t <> ">"
-  pretty (Vec3 t) = "vec3<" <> pretty t <> ">"
-  pretty (Vec4 t) = "vec4<" <> pretty t <> ">"
-  pretty (Atomic t) = "atomic<" <> pretty t <> ">"
-
 instance Pretty Type where
-  pretty (Prim t) = pretty t
-  pretty (Array t Nothing) = "array<" <> pretty t <> ">"
-  pretty (Array t sz) = "array<" <> pretty t <> ", " <> pretty sz <> ">"
+  pretty Bool = "bool"
+  pretty I32 = "i32"
+  pretty U32 = "u32"
+  pretty F16 = "f16"
+  pretty F32 = "f32"
+  pretty (Vec2 t) = generator "vec2" [pretty t]
+  pretty (Vec3 t) = generator "vec3" [pretty t]
+  pretty (Vec4 t) = generator "vec4" [pretty t]
+  pretty (Mat2x2 t) = generator "mat2x2" [pretty t]
+  pretty (Mat2x3 t) = generator "mat2x3" [pretty t]
+  pretty (Mat2x4 t) = generator "mat2x4" [pretty t]
+  pretty (Mat3x2 t) = generator "mat3x2" [pretty t]
+  pretty (Mat3x3 t) = generator "mat3x3" [pretty t]
+  pretty (Mat3x4 t) = generator "mat3x4" [pretty t]
+  pretty (Mat4x2 t) = generator "mat4x2" [pretty t]
+  pretty (Mat4x3 t) = generator "mat4x3" [pretty t]
+  pretty (Mat4x4 t) = generator "mat4x4" [pretty t]
+  pretty (Atomic t) = generator "atomic" [pretty t]
+  pretty (Array t Nothing) = generator "array" [pretty t]
+  pretty (Array t (Just n)) = generator "array" [pretty t, pretty n]
+  pretty (Ptr t as am) =
+    generator "ptr" $ [pretty as, pretty t] ++ maybe [] (pure . pretty) am
   pretty (Named t) = pretty t
-  pretty (Pointer t as am) = "ptr<" <> pretty as <> ", " <> pretty t <> maybe "" ((", " <>) . pretty) am <> ">"
+  pretty (SampledTexture dim t) = generator (textureDim dim) [pretty t]
+  pretty (MultisampledTexture t) =
+    generator "texture_multisampled_2d" [pretty t]
+  pretty ExternalTexture = "texture_external"
+  pretty (StorageTexture dim fmt am) =
+    generator (storageTextureDim dim) [pretty fmt, pretty am]
+  pretty (DepthTexture d) = pretty d
+  pretty Sampler = "sampler"
+  pretty SamplerComparison = "sampler_comparison"
+
+-- | The name of the sampled texture type-generator for a dimensionality.
+textureDim :: TextureDim -> Ident
+textureDim Tex1d = "texture_1d"
+textureDim Tex2d = "texture_2d"
+textureDim Tex2dArray = "texture_2d_array"
+textureDim Tex3d = "texture_3d"
+textureDim TexCube = "texture_cube"
+textureDim TexCubeArray = "texture_cube_array"
+
+-- | The name of the storage texture type-generator for a dimensionality.
+storageTextureDim :: StorageTextureDim -> Ident
+storageTextureDim StorageTex1d = "texture_storage_1d"
+storageTextureDim StorageTex2d = "texture_storage_2d"
+storageTextureDim StorageTex2dArray = "texture_storage_2d_array"
+storageTextureDim StorageTex3d = "texture_storage_3d"
+
+instance Pretty DepthTexture where
+  pretty Depth2d = "texture_depth_2d"
+  pretty Depth2dArray = "texture_depth_2d_array"
+  pretty DepthCube = "texture_depth_cube"
+  pretty DepthCubeArray = "texture_depth_cube_array"
+  pretty DepthMultisampled2d = "texture_depth_multisampled_2d"
+
+instance Pretty TexelFormat where
+  pretty Rgba8Unorm = "rgba8unorm"
+  pretty Rgba8Snorm = "rgba8snorm"
+  pretty Rgba8Uint = "rgba8uint"
+  pretty Rgba8Sint = "rgba8sint"
+  pretty Rgba16Unorm = "rgba16unorm"
+  pretty Rgba16Snorm = "rgba16snorm"
+  pretty Rgba16Uint = "rgba16uint"
+  pretty Rgba16Sint = "rgba16sint"
+  pretty Rgba16Float = "rgba16float"
+  pretty Rg8Unorm = "rg8unorm"
+  pretty Rg8Snorm = "rg8snorm"
+  pretty Rg8Uint = "rg8uint"
+  pretty Rg8Sint = "rg8sint"
+  pretty Rg16Unorm = "rg16unorm"
+  pretty Rg16Snorm = "rg16snorm"
+  pretty Rg16Uint = "rg16uint"
+  pretty Rg16Sint = "rg16sint"
+  pretty Rg16Float = "rg16float"
+  pretty R32Uint = "r32uint"
+  pretty R32Sint = "r32sint"
+  pretty R32Float = "r32float"
+  pretty Rg32Uint = "rg32uint"
+  pretty Rg32Sint = "rg32sint"
+  pretty Rg32Float = "rg32float"
+  pretty Rgba32Uint = "rgba32uint"
+  pretty Rgba32Sint = "rgba32sint"
+  pretty Rgba32Float = "rgba32float"
+  pretty Bgra8Unorm = "bgra8unorm"
+  pretty R8Unorm = "r8unorm"
+  pretty R8Snorm = "r8snorm"
+  pretty R8Uint = "r8uint"
+  pretty R8Sint = "r8sint"
+  pretty R16Unorm = "r16unorm"
+  pretty R16Snorm = "r16snorm"
+  pretty R16Uint = "r16uint"
+  pretty R16Sint = "r16sint"
+  pretty R16Float = "r16float"
+  pretty Rgb10a2Unorm = "rgb10a2unorm"
+  pretty Rgb10a2Uint = "rgb10a2uint"
+  pretty Rg11b10Ufloat = "rg11b10ufloat"
+
+-- | A predeclared type-generator applied to its template arguments.
+generator :: Ident -> [Doc a] -> Doc a
+generator name args = pretty name <> templateArgs args
 
 intSuffix :: IntLitType -> Doc a
 intSuffix AbstractInt = mempty
-intSuffix I32 = "i"
-intSuffix U32 = "u"
+intSuffix LitI32 = "i"
+intSuffix LitU32 = "u"
 
 floatSuffix :: FloatLitType -> Doc a
 floatSuffix AbstractFloat = mempty
-floatSuffix F32 = "f"
-floatSuffix F16 = "h"
+floatSuffix LitF32 = "f"
+floatSuffix LitF16 = "h"
 
 instance Pretty Exp where
   pretty (BoolExp True) = "true"
