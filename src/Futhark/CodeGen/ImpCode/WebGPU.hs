@@ -32,15 +32,11 @@ data KernelInterface = KernelInterface
     scalarsBindSlot :: Int,
     -- | Bind slot indices for all memory arguments.
     memBindSlots :: [Int],
-    -- | Names of all the override declarations used by the kernel. Currently
-    -- used to work around a Chrome/Dawn bug, see `gpu_create_kernel` in
-    -- rts/c/backends/webgpu.h.
-    overrideNames :: [T.Text],
-    -- | Dynamic block dimensions, with the corresponding override name. They
-    -- are also included in `overrideNames`.
+    -- | Dynamic block dimensions, with the corresponding override name. These
+    -- and the 'sharedMemoryOverrides' are the only overrides, and are set
+    -- when the kernel is launched.
     dynamicBlockDims :: [(Int, T.Text)],
-    -- | Override names for shared memory sizes. They are also included in
-    -- `overrideNames`.
+    -- | Override names for shared memory sizes.
     sharedMemoryOverrides :: [T.Text],
     -- | WGSL source of the kernel. This is only used for the built-in kernels.
     -- The compiled wgsl kernel from futhark source is still stored in the gpu_program.

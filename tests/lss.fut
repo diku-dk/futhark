@@ -4,7 +4,6 @@
 -- property.  Cannot handle empty input arrays.
 --
 -- ==
--- tags { no_webgpu }
 -- input { [1, -2, -2, 3, 4, -1, 5, -6, 1] }
 -- output { 4 }
 -- input { [5, 4, 3, 2, 1] }

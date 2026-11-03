@@ -43,8 +43,6 @@ mkKernelInfos kernels = do
                typename size_t *scalar_offsets;
                typename size_t num_bindings;
                typename uint32_t *binding_indices;
-               typename size_t num_overrides;
-               char **used_overrides;
                typename size_t num_dynamic_block_dims;
                typename uint32_t *dynamic_block_dim_indices;
                char **dynamic_block_dim_names;
@@ -55,7 +53,6 @@ mkKernelInfos kernels = do
              static typename size_t wgpu_num_kernel_infos = $exp:num_kernels; |]
   mapM_ GC.earlyDecl $ concatMap sc_offs_decl (M.toList kernels)
   mapM_ GC.earlyDecl $ concatMap bind_idxs_decl (M.toList kernels)
-  mapM_ GC.earlyDecl $ concatMap used_overrides_decl (M.toList kernels)
   mapM_ GC.earlyDecl $ concatMap dynamic_block_dim_indices_decl (M.toList kernels)
   mapM_ GC.earlyDecl $ concatMap dynamic_block_dim_names_decl (M.toList kernels)
   mapM_ GC.earlyDecl $ concatMap shared_mem_overrides_decl (M.toList kernels)
@@ -74,13 +71,6 @@ mkKernelInfos kernels = do
       let idxs = map (\i -> [C.cinit|$int:i|]) (memBindSlots k)
        in [C.cunit|static typename uint32_t $id:(n <> "_binding_indices")[]
                      = {$inits:idxs};|]
-    used_overrides_decl (n, k) =
-      let overrides =
-            map
-              (\o -> [C.cinit|$string:(T.unpack o)|])
-              (overrideNames k)
-       in [C.cunit|static char* $id:(n <> "_used_overrides")[]
-                    = {$inits:overrides};|]
     dynamic_block_dim_indices_decl (n, k) =
       let idxs = map ((\i -> [C.cinit|$int:i|]) . fst) (dynamicBlockDims k)
        in [C.cunit|static typename uint32_t $id:(n <> "_dynamic_block_dim_indices")[]
@@ -107,7 +97,6 @@ mkKernelInfos kernels = do
     info_init (n, k) =
       let num_scalars = length (scalarsOffsets k)
           num_bindings = length (memBindSlots k)
-          num_overrides = length (overrideNames k)
           num_dynamic_block_dims = length (dynamicBlockDims k)
           num_shared_mem_overrides = length (sharedMemoryOverrides k)
        in [C.cinit|{ .name = $string:(T.unpack (idText (C.toIdent n mempty))),
@@ -117,8 +106,6 @@ mkKernelInfos kernels = do
                      .scalar_offsets = $id:(n <> "_scalar_offsets"),
                      .num_bindings = $int:num_bindings,
                      .binding_indices = $id:(n <> "_binding_indices"),
-                     .num_overrides = $int:num_overrides,
-                     .used_overrides = $id:(n <> "_used_overrides"),
                      .num_dynamic_block_dims = $int:num_dynamic_block_dims,
                      .dynamic_block_dim_indices =
                         $id:(n <> "_dynamic_block_dim_indices"),
@@ -169,7 +156,6 @@ builtinKernels =
               scalarsSize = size,
               scalarsBindSlot = 0,
               memBindSlots = [1, 2],
-              overrideNames = ["block_size_x", "block_size_y", "block_size_z"],
               dynamicBlockDims =
                 [ (0, "block_size_x"),
                   (1, "block_size_y"),

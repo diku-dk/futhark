@@ -1,6 +1,5 @@
 -- #2238
 -- ==
--- tags { no_webgpu }
 -- structure { Screma 2 }
 
 type opt 'a = #none | #some a

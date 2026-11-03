@@ -322,10 +322,6 @@ struct futhark_context {
   int64_t peak_mem_usage_device;
   int64_t cur_mem_usage_device;
 
-  int num_overrides;
-  char **override_names;
-  double *override_values;
-
   WGPUInstance instance;
   WGPUAdapter adapter;
   WGPUDevice device;
@@ -551,17 +547,32 @@ int backend_context_setup(struct futhark_context *ctx) {
   ctx->scalar_readback_buffer = wgpuDeviceCreateBuffer(ctx->device, &desc);
   free_list_init(&ctx->gpu_free_list);
 
-  // We implement macros as override constants.
+  // The kernel constants (macros) are declared as WGSL constants, much as the
+  // other GPU backends pass them as preprocessor definitions.  Unlike an
+  // override, a constant can be the length of a function-scope array.  They go
+  // after the program, as directives such as 'enable' must come first, and the
+  // order of module-scope declarations does not matter.
+  char **macro_names;
   int64_t *macro_vals;
-  ctx->num_overrides = gpu_macros(ctx, &ctx->override_names,
-                                  &macro_vals);
-  ctx->override_values = malloc(ctx->num_overrides * sizeof(double));
-  for (int i = 0; i < ctx->num_overrides; i++) {
-    ctx->override_values[i] = (double) macro_vals[i];
+  int num_macros = gpu_macros(ctx, &macro_names, &macro_vals);
+  size_t program_size = strlen(ctx->cfg->program) + 1;
+  for (int i = 0; i < num_macros; i++) {
+    program_size += strlen(macro_names[i]) + 40;
   }
+  char *program = malloc(program_size);
+  size_t used = snprintf(program, program_size, "%s\n", ctx->cfg->program);
+  for (int i = 0; i < num_macros; i++) {
+    // The values are the bits of an i32, which a narrowing conversion
+    // preserves.
+    used += snprintf(program + used, program_size - used,
+                     "const %s: i32 = %d;\n",
+                     macro_names[i], (int)(int32_t)macro_vals[i]);
+  }
+  free(macro_names);
   free(macro_vals);
 
-  wgpu_module_setup(ctx, ctx->cfg->program, &ctx->module, "Futhark program");
+  wgpu_module_setup(ctx, program, &ctx->module, "Futhark program");
+  free(program);
 
   if ((ctx->kernels = init_builtin_kernels(ctx)) == NULL) {
     printf("Failed to init builtin kernels\n");
@@ -575,8 +586,6 @@ void backend_context_teardown(struct futhark_context *ctx) {
   if (ctx->kernels != NULL) {
     free_builtin_kernels(ctx, ctx->kernels);
   } // TODO
-    free(ctx->override_names);
-    free(ctx->override_values);
 
     if (gpu_free_all(ctx) != FUTHARK_SUCCESS) {
       futhark_panic(-1, "gpu_free_all failed");
@@ -599,9 +608,6 @@ void backend_context_teardown(struct futhark_context *ctx) {
 //   size_t num_bindings; // excluding the scalars binding
 //   uint32_t *binding_indices;
 //
-//   size_t num_overrides;
-//   char **used_overrides;
-
 //   size_t num_dynamic_block_dims;
 //   uint32_t *dynamic_block_dim_indices;
 //   char **dynamic_block_dim_names;
@@ -643,12 +649,9 @@ struct wgpu_kernel {
   // Only set if static_pipeline.
   WGPUComputePipeline pipeline;
 
-  // Only set if !static_pipeline.
+  // Only set if !static_pipeline.  Space for the dynamic block dimension and
+  // shared memory overrides, which are set at launch.
   WGPUConstantEntry *const_entries;
-
-  // How many entries are already set; there is enough space in the allocation
-  // to additionally set the shared memory and dynamic block dimension entries.
-  int const_entries_set;
 };
 typedef struct wgpu_kernel* gpu_kernel;
 typedef WGPUBuffer gpu_mem;
@@ -739,47 +742,30 @@ static void gpu_create_kernel(struct futhark_context *ctx,
   };
   kernel->pipeline_layout = wgpuDeviceCreatePipelineLayout(ctx->device, &pl);
 
-  // Create constants / overrides.
-  // TODO: We should be able to just set all overrides from the context and
-  // remove the used_overrides from kernel_info. It only exists because
-  // Chrome/Dawn currently complains if we set unused constants, see
-  // https://issues.chromium.org/issues/338624452.
-  WGPUConstantEntry *const_entries = calloc(kernel_info->num_overrides,
-                                            sizeof(WGPUConstantEntry));
-  int const_idx = 0;
-  for (int i = 0; i < ctx->num_overrides; i++) {
-    for (int j = 0; j < kernel_info->num_overrides; j++) {
-      if (strcmp(kernel_info->used_overrides[j], ctx->override_names[i]) == 0) {
-        WGPUConstantEntry *entry = &const_entries[const_idx];
-        entry->key = wgpu_str(ctx->override_names[i]);
-        entry->value = ctx->override_values[i];
-        const_idx++;
-      }
-    }
-  }
-
+  // The only overrides are the dynamic block dimensions and shared memory
+  // sizes, which are set at launch.  Without them, the pipeline can be created
+  // once and for all.
   kernel->static_pipeline =
     kernel_info->num_dynamic_block_dims == 0
     && kernel_info->num_shared_mem_overrides == 0;
   if (!kernel->static_pipeline) {
-    kernel->const_entries = const_entries;
-    kernel->const_entries_set = const_idx;
+    kernel->const_entries =
+      calloc(kernel_info->num_dynamic_block_dims
+             + kernel_info->num_shared_mem_overrides,
+             sizeof(WGPUConstantEntry));
   }
   else {
-    // Create pipeline.
     WGPUComputePipelineDescriptor desc = {
       .layout = kernel->pipeline_layout,
       .compute = {
-        .module = kernel_info->gpu_program[0] ? kernel->module : ctx->module,
+        .module = kernel->module,
         .entryPoint = wgpu_str(kernel_info->name),
-        .constantCount = kernel_info->num_overrides,
-        .constants = const_entries,
+        .constantCount = 0,
+        .constants = NULL,
       }
     };
 
     kernel->pipeline = wgpuDeviceCreateComputePipeline(ctx->device, &desc);
-
-    free(const_entries);
   }
 
   *kernel_out = kernel;
@@ -1044,7 +1030,7 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
   WGPUComputePipeline pipeline;
   if (kernel->static_pipeline) { pipeline = kernel->pipeline; }
   else {
-    int const_entry_idx = kernel->const_entries_set;
+    int const_entry_idx = 0;
     for (int i = 0; i < kernel_info->num_dynamic_block_dims; i++) {
       WGPUConstantEntry *entry = &kernel->const_entries[const_entry_idx];
       const_entry_idx++;
@@ -1063,7 +1049,7 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
       .compute = {
         .module = kernel->module,
         .entryPoint = wgpu_str(kernel_info->name),
-        .constantCount = kernel_info->num_overrides,
+        .constantCount = const_entry_idx,
         .constants = kernel->const_entries,
       }
     };

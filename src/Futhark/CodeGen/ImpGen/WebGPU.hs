@@ -74,7 +74,6 @@ data KernelState = KernelState
     -- renaming.
     ksNameReplacements :: M.Map WGSL.Ident WGSL.Ident,
     -- These describe the kernel interface.
-    ksOverrides :: [WGSL.Ident],
     ksBlockDims :: [(Int, WGSL.Ident, Bool)],
     -- | Memory blocks declared by the kernel, by their (renamed) identifier.
     ksMem :: M.Map WGSL.Ident MemInfo,
@@ -130,12 +129,25 @@ assignBindSlot = do
   lift $ State.put (wState {wsNextBindSlot = slot + 1})
   pure slot
 
--- | Add an override declaration to the current kernel's interface and into the
--- module.
+-- | Add an override declaration to the module. Overrides are set when the
+-- kernel is launched, and are only used for dynamic block sizes and shared
+-- memory sizes.
 addOverride :: WGSL.Ident -> WGSL.Type -> Maybe WGSL.Expression -> KernelM ()
-addOverride ident typ e = do
-  addDecl $ WGSL.GlobalOverride [] ident (Just typ) e
-  modify $ \s -> s {ksOverrides = ksOverrides s ++ [ident]}
+addOverride ident typ e = addDecl $ WGSL.GlobalOverride [] ident (Just typ) e
+
+-- | Make an @i32@ constant available to the module, with a value that the
+-- host computes when creating the context, and which the runtime then
+-- declares as a WGSL @const@ in front of the program (see
+-- @backend_context_setup@ in @rts/c/backends/webgpu.h@). This corresponds to
+-- the preprocessor macros of the other GPU backends. Unlike an override, a
+-- constant can be the length of a function-scope array.
+addConst :: WGSL.Ident -> KernelConstExp -> KernelM ()
+addConst ident = lift . addMacroDef (nameFromText ident)
+
+-- | The constant holding the low 32 bits of a kernel constant (see
+-- 'genConstAndBuiltinDecls').
+kernelConstLo :: VName -> KernelM WGSL.Ident
+kernelConstLo name = mkGlobalIdent $ nameToIdent name <> "_lo"
 
 -- | Register an override identifier as describing the given dimension of the
 -- block size of the current kernel.
@@ -198,7 +210,6 @@ genKernel kernel = do
             ksInits = mempty,
             ksBody = mempty,
             ksNameReplacements = mempty,
-            ksOverrides = mempty,
             ksBlockDims = mempty,
             ksMem = mempty,
             ksSharedMemSizes = mempty,
@@ -241,7 +252,6 @@ genKernel kernel = do
             scalarsSize = size,
             scalarsBindSlot = head (ksBindSlots s),
             memBindSlots = tail (ksBindSlots s),
-            overrideNames = ksOverrides s,
             dynamicBlockDims = dynamicBlockDims,
             sharedMemoryOverrides = sharedMemOverrides,
             gpuProgram = T.empty
@@ -255,14 +265,6 @@ genKernel kernel = do
       genMemoryDecls
 
       genDeviceFuns $ ImpGPU.kernelBody kernel
-
-      -- FIXME: This is only required to work around a Chrome bug that otherwise
-      -- causes the shader to fail compilation if the kernel never accesses the
-      -- lockstep width. See `gpu_create_kernel` in `rts/c/backends/webgpu.h`
-      -- for more details.
-      lsw <- builtinLockstepWidth
-      addInitStmt $
-        WGSL.Let "_dummy_lockstep_width" Nothing (WGSL.ExpIdent lsw)
 
       wgslBody <- genWGSLStms (ImpGPU.kernelBody kernel)
       mapM_ addBodyStmt wgslBody
@@ -650,12 +652,26 @@ callStm f = WGSL.Call f []
 unsupported :: Code ImpGPU.KernelOp -> KernelM WGSL.Statement
 unsupported stmt = pure $ WGSL.Comment $ "Unsupported stmt: " <> prettyText stmt
 
-wgslProduct :: [SubExp] -> WGSL.Expression
-wgslProduct [] = WGSL.ExpInt 1 WGSL.AbstractInt
-wgslProduct [Constant (IntValue v)] = WGSL.ExpInt (valueIntegral v) WGSL.AbstractInt
-wgslProduct ((Constant (IntValue v)) : vs) =
-  wgslBinOp (Mul Int32 OverflowWrap) (WGSL.ExpInt (valueIntegral v) WGSL.AbstractInt) (wgslProduct vs)
-wgslProduct _ = error "wgslProduct: non-constant product"
+-- | The number of elements in a 'ScalarSpace' block of the given shape. WGSL
+-- requires this to be a constant expression, so each dimension must be a
+-- constant or a kernel constant (see 'addConst').
+scalarSpaceSize :: [SubExp] -> KernelM WGSL.Expression
+scalarSpaceSize ds
+  -- As in the C backends: a zero can occur for some empty array literals.
+  | null ds || Constant (IntValue (Int64Value 0)) `elem` ds = pure one
+  | otherwise = foldl (WGSL.ExpBinary WGSL.Multiply) one <$> mapM dim ds
+  where
+    one = WGSL.ExpInt 1 WGSL.AbstractInt
+    dim (Constant (IntValue v)) = pure $ WGSL.ExpInt (valueIntegral v) WGSL.AbstractInt
+    dim (Constant v) = error $ "scalarSpaceSize: non-integer size " <> prettyString v
+    dim (Var v) = do
+      uses <- asks (ImpGPU.kernelUses . krKernel)
+      if v `elem` [n | ImpGPU.ConstUse n _ <- uses]
+        then WGSL.ExpIdent <$> kernelConstLo v
+        else
+          compilerLimitation $
+            "WebGPU backend cannot handle per-thread array of non-constant size: "
+              <> prettyText v
 
 -- | Whether the WGSL translation of this code contains a barrier. Besides
 -- 'ImpGPU.isBarrier', this includes 'ImpGPU.UniformRead', as
@@ -755,11 +771,12 @@ genWGSLStm (DeclareMem name (Space "shared")) = do
       pure $ WGSL.Comment $ "declare_shared: " <> name'
     Nothing ->
       pure $ WGSL.Comment $ "discard declare_shared: " <> name'
-genWGSLStm (DeclareMem name (ScalarSpace vs pt)) =
+genWGSLStm (DeclareMem name (ScalarSpace vs pt)) = do
+  size <- scalarSpaceSize vs
   pure $
     WGSL.Var
       (nameToIdent name)
-      (Just $ WGSL.Array (wgslPrimType pt) (Just $ wgslProduct vs))
+      (Just $ WGSL.Array (wgslPrimType pt) (Just size))
       Nothing
 genWGSLStm s@(DeclareMem _ _) = unsupported s
 genWGSLStm (DeclareScalar name _ typ) =
@@ -1236,21 +1253,20 @@ genConstAndBuiltinDecls :: KernelM ()
 genConstAndBuiltinDecls = do
   kernel <- asks krKernel
 
-  -- Start off with handling the block size parameters. Constant block
-  -- dimensions get generated into the general macro/override machinery.
+  -- Start off with handling the block size parameters. Dynamic ones are set
+  -- when launching the kernel.
   forM_ (zip [0 ..] $ ImpGPU.kernelBlockSize kernel) $ \(i, size) -> do
     n <- builtinBlockSize i
-    addOverride n WGSL.I32 zeroInit
     case size of
-      Left _ -> addBlockDim i n True
+      Left _ -> do
+        addOverride n WGSL.I32 zeroInit
+        addBlockDim i n True
       Right e -> do
-        lift $ addMacroDef (nameFromText n) e
+        addConst n e
         addBlockDim i n False
 
-  -- Next we generate builtin override declarations.
   lsWidth <- builtinLockstepWidth
-  addOverride lsWidth WGSL.I32 zeroInit
-  lift $ addMacroDef (nameFromText lsWidth) $ ValueExp (IntValue (Int32Value 1))
+  addConst lsWidth $ ValueExp (IntValue (Int32Value 1))
 
   -- And lastly we handle ConstUses.
   let consts = [(n, e) | ImpGPU.ConstUse n e <- ImpGPU.kernelUses kernel]
@@ -1264,17 +1280,15 @@ genConstAndBuiltinDecls = do
 
   let mkConst (name, e) = do
         let n = nameToIdent name
-        lo <- mkGlobalIdent (n <> "_lo")
-        addOverride lo WGSL.I32 zeroInit
+        lo <- kernelConstLo name
         hi_exp <- case primExpType e of
           IntType Int64 -> do
             hi <- mkGlobalIdent (n <> "_hi")
-            addOverride hi WGSL.I32 zeroInit
-            lift $ addMacroDef (nameFromText lo) (mkLo e)
-            lift $ addMacroDef (nameFromText hi) (mkHi e)
+            addConst lo $ mkLo e
+            addConst hi $ mkHi e
             pure $ WGSL.ExpIdent hi
           _ -> do
-            lift $ addMacroDef (nameFromText lo) e
+            addConst lo e
             pure $ WGSL.ExpInt 0 WGSL.AbstractInt
         addInitStmt $ WGSL.Var n (Just wgslInt64) Nothing
         addInitStmt . assign n $ call "i64" [WGSL.ExpIdent lo, hi_exp]
