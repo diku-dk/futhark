@@ -822,7 +822,7 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
 
   let lexical = lexicalMemoryUsageMC OpaqueKernels $ Function Nothing [] params mempty seq_code
 
-  fstruct <-
+  (fstruct, read_retvals) <-
     MC.prepareTaskStruct sharedDef "task" free_args free_ctypes retval_args retval_ctypes
 
   fpar_task <- MC.generateParLoopFn lexical (name <> "_task") seq_code fstruct free retval
@@ -895,13 +895,14 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
       goto cleanup;
     }
     $escstm:("#endif")|]
+  GC.stms read_retvals
 compileOp (ISPCKernel body free) = do
   free_ctypes <- mapM MC.paramToCType free
   let free_args = map paramName free
 
   let lexical = lexicalMemoryUsageMC OpaqueKernels $ Function Nothing [] free mempty body
   -- Generate ISPC kernel
-  fstruct <- MC.prepareTaskStruct sharedDef "param_struct" free_args free_ctypes [] []
+  (fstruct, _) <- MC.prepareTaskStruct sharedDef "param_struct" free_args free_ctypes [] []
   let fstruct' = fstruct <> "_"
 
   ispcShim <- ispcDef "loop_ispc" $ \s -> do

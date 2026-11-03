@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Invalid memory expansion in some rare cases.
 
+* The ISPC backend would handle `f16` incorrectly in some cases.
+
 ## [0.28.2]
 
 ### Added
