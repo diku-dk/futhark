@@ -42,9 +42,21 @@ scalar64 = $(embedStringFile "rts/wgsl/scalar64.wgsl")
 {-# NOINLINE scalar64 #-}
 
 -- | @rts/wgsl/atomics.wgsl@
+atomicsGlobal :: T.Text
+atomicsGlobal = $(embedStringFile "rts/wgsl/atomics.wgsl")
+{-# NOINLINE atomicsGlobal #-}
+
+-- | The atomic operations of @rts/wgsl/atomics.wgsl@, for both storage buffers
+-- ('_global') and workgroup memory ('_shared'). WGSL functions cannot be
+-- polymorphic in the address space of a pointer, so the latter are copies of
+-- the former with a different pointer type.
 atomics :: T.Text
-atomics = $(embedStringFile "rts/wgsl/atomics.wgsl")
-{-# NOINLINE atomics #-}
+atomics =
+  atomicsGlobal
+    <> T.replace
+      "ptr<storage, atomic<i32>, read_write>"
+      "ptr<workgroup, atomic<i32>>"
+      (T.replace "_global(" "_shared(" atomicsGlobal)
 
 wgslPrelude :: T.Text
 wgslPrelude =

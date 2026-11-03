@@ -1,4 +1,5 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE MultiWayIf #-}
 
 -- | Code generation for ImpCode with WebGPU.
 module Futhark.CodeGen.ImpGen.WebGPU
@@ -59,8 +60,8 @@ newtype KernelR = KernelR {krKernel :: ImpGPU.Kernel}
 data MemInfo = MemInfo
   { -- | Workgroup (shared) memory, rather than a storage buffer.
     memShared :: Bool,
-    -- | Accessed atomically somewhere in the kernel, which means all accesses
-    -- must be atomic.
+    -- | Stored as atomic words (see 'wordStorage'), so all accesses go through
+    -- the @atomic_@ functions of @rts/wgsl/atomics.wgsl@.
     memAtomic :: Bool
   }
 
@@ -169,12 +170,6 @@ addMem ident info = modify $ \s -> s {ksMem = M.insert ident info $ ksMem s}
 -- shared nor atomic.
 memInfo :: WGSL.Ident -> KernelM MemInfo
 memInfo ident = gets $ M.findWithDefault (MemInfo False False) ident . ksMem
-
-isShared :: WGSL.Ident -> KernelM Bool
-isShared = fmap memShared . memInfo
-
-isAtomic :: WGSL.Ident -> KernelM Bool
-isAtomic = fmap memAtomic . memInfo
 
 -- | Add a scalar struct field.
 addScalar :: WGSL.StructMember -> KernelM ()
@@ -437,25 +432,24 @@ wgslPrimType Bool = WGSL.Bool
 -- TODO: Make sure we do not ever codegen statements involving Unit variables
 wgslPrimType Unit = WGSL.F16 -- error "TODO: no unit in WGSL"
 
--- | Types smaller than a word, which storage buffers can only hold packed into
--- 32-bit words, and only modify atomically, as neighbouring elements may be
--- written concurrently.
+-- | Types smaller than a word. These are packed into words, which WGSL can only
+-- modify in part with atomics, as neighbouring elements may be written
+-- concurrently.
 packedType :: PrimType -> Bool
 packedType t = t `elem` [Bool, IntType Int8, IntType Int16]
 
--- | The type of a storage buffer, given the type of its elements and whether
--- they are accessed atomically. Atomic buffers are arrays of words (an atomic
--- i64 occupies two; see 'i64Words').
+-- | Whether memory whose elements have this type, and which is accessed
+-- atomically or not, is stored as an array of atomic words. This is the same
+-- for storage buffers and workgroup memory, and for the latter ensures that
+-- the memory occupies no more than the number of bytes Futhark asks for.
+wordStorage :: (PrimType, Bool) -> Bool
+wordStorage (t, atomic) = atomic || packedType t
+
+-- | The type of memory with the given element type and atomicity. An atomic
+-- i64 occupies two words; see 'i64Words'.
 wgslBufferType :: (PrimType, Bool) -> Maybe WGSL.Expression -> WGSL.Type
 wgslBufferType (t, atomic)
-  | atomic || packedType t = WGSL.Array $ WGSL.Atomic WGSL.I32
-  | otherwise = WGSL.Array $ wgslPrimType t
-
--- | Like 'wgslBufferType', but for workgroup memory, which can hold any type
--- natively.
-wgslSharedBufferType :: (PrimType, Bool) -> Maybe WGSL.Expression -> WGSL.Type
-wgslSharedBufferType (t, atomic)
-  | atomic = WGSL.Array $ WGSL.Atomic WGSL.I32
+  | wordStorage (t, atomic) = WGSL.Array $ WGSL.Atomic WGSL.I32
   | otherwise = WGSL.Array $ wgslPrimType t
 
 -- | How many elements of this type are stored in each word of an atomic
@@ -469,24 +463,11 @@ elemsPerWord (IntType Int32) = 1
 elemsPerWord (FloatType Float32) = 1
 elemsPerWord t = error $ "elemsPerWord: unsupported type " <> prettyString t
 
-nativeAccessSpace :: Space -> Bool
-nativeAccessSpace (ScalarSpace _ _) = True
-nativeAccessSpace (Space "shared") = True
-nativeAccessSpace _ = False
-
-genArrayAccess ::
-  Bool ->
-  PrimType ->
-  WGSL.Ident ->
-  WGSL.Expression ->
-  Bool ->
-  [WGSL.Expression]
-genArrayAccess atomic t mem i packed
-  | not atomic = [WGSL.ExpUnary WGSL.AddressOf (WGSL.ExpIdent mem), i]
-  | packed = [elemPtr word_i, word_offset]
-  | otherwise = [elemPtr i]
+-- | A pointer to the word holding an element, and the position of the element
+-- within it. These are the first arguments of the @atomic_@ functions.
+wordAccess :: PrimType -> WGSL.Ident -> WGSL.Expression -> (WGSL.Expression, WGSL.Expression)
+wordAccess t mem i = (WGSL.ExpUnary WGSL.AddressOf $ WGSL.ExpIndex (WGSL.ExpIdent mem) word_i, word_offset)
   where
-    elemPtr = WGSL.ExpUnary WGSL.AddressOf . WGSL.ExpIndex (WGSL.ExpIdent mem)
     (word_i, word_offset) = case elemsPerWord t of
       1 -> (i, WGSL.ExpInt 0 WGSL.AbstractInt)
       n ->
@@ -494,76 +475,53 @@ genArrayAccess atomic t mem i packed
           WGSL.ExpBinary WGSL.Remainder i (WGSL.ExpInt n WGSL.AbstractInt)
         )
 
-genArrayFun :: WGSL.Ident -> PrimType -> Bool -> Bool -> WGSL.Ident
-genArrayFun fun t atomic shared
-  | atomic = "atomic_" <> fun <> "_" <> prettyText t <> if shared then "_shared" else "_global"
-  | otherwise = fun <> "_" <> prettyText t
+-- | The name of an @atomic_@ function from @rts/wgsl/atomics.wgsl@.
+atomicFun :: WGSL.Ident -> PrimType -> MemInfo -> WGSL.Ident
+atomicFun f t info =
+  "atomic_" <> f <> "_" <> prettyText t <> if memShared info then "_shared" else "_global"
 
-genReadExp ::
-  PrimType ->
-  Space ->
-  VName ->
-  Count Elements (TExp Int64) ->
-  KernelM WGSL.Expression
-genReadExp t s mem i = do
+-- | Read an element. Memory not stored as words is read directly.
+genReadExp :: PrimType -> VName -> Count Elements (TExp Int64) -> KernelM WGSL.Expression
+genReadExp t mem i = do
   mem' <- getIdent mem
-  shared <- isShared mem'
-  atomic <- isAtomic mem'
+  info <- memInfo mem'
   i' <- indexExp i
+  pure $
+    if
+      | not $ memAtomic info -> WGSL.ExpIndex (WGSL.ExpIdent mem') i'
+      | t == IntType Int64 ->
+          let (lo, hi) = i64Words mem' i'
+              load w = call "atomicLoad" [WGSL.ExpUnary WGSL.AddressOf w]
+           in call "i64" [load lo, load hi]
+      | otherwise ->
+          let (word, offset) = wordAccess t mem' i'
+           in call (atomicFun "read" t info) [word, offset]
 
-  if atomic && t == IntType Int64
-    then
-      let (lo, hi) = i64Words mem' i'
-          load w = call "atomicLoad" [WGSL.ExpUnary WGSL.AddressOf w]
-       in pure $ call "i64" [load lo, load hi]
-    else
-      if (nativeAccessSpace s || not (packedType t) || shared) && not atomic
-        then pure $ WGSL.ExpIndex (WGSL.ExpIdent mem') i'
-        else
-          let access = genArrayAccess atomic t mem' i' (not shared)
-              fun = genArrayFun "read" t atomic shared
-           in pure $ call fun access
-
-genArrayRead ::
-  PrimType ->
-  Space ->
-  VName ->
-  VName ->
-  Count Elements (TExp Int64) ->
-  KernelM WGSL.Statement
-genArrayRead t s tgt mem i = do
-  tgt' <- getIdent tgt
-  read' <- genReadExp t s mem i
-  pure $ assign tgt' read'
-
+-- | Write an element. Memory not stored as words is written directly.
 genArrayWrite ::
   PrimType ->
-  Space ->
   VName ->
   Count Elements (TExp Int64) ->
   KernelM WGSL.Expression ->
   KernelM WGSL.Statement
-genArrayWrite t s mem i v = do
+genArrayWrite t mem i v = do
   mem' <- getIdent mem
-  shared <- isShared mem'
-  atomic <- isAtomic mem'
+  info <- memInfo mem'
   i' <- indexExp i
   v' <- v
-
-  if atomic && t == IntType Int64
-    then
-      let (lo, hi) = i64Words mem' i'
-          tmp = WGSL.ExpIdent "i64_tmp"
-          store w j =
-            callStm "atomicStore" [WGSL.ExpUnary WGSL.AddressOf w, WGSL.ExpIndex tmp (WGSL.ExpInt j WGSL.AbstractInt)]
-       in pure $ WGSL.Compound [WGSL.Let "i64_tmp" Nothing v', store lo 0, store hi 1]
-    else
-      if (nativeAccessSpace s || not (packedType t) || shared) && not atomic
-        then pure $ WGSL.Assign (WGSL.ExpIndex (WGSL.ExpIdent mem') i') WGSL.AssignSimple v'
-        else
-          let access = genArrayAccess atomic t mem' i' (not shared) ++ [v']
-              fun = genArrayFun "write" t atomic shared
-           in pure $ callStm fun access
+  pure $
+    if
+      | not $ memAtomic info ->
+          WGSL.Assign (WGSL.ExpIndex (WGSL.ExpIdent mem') i') WGSL.AssignSimple v'
+      | t == IntType Int64 ->
+          let (lo, hi) = i64Words mem' i'
+              tmp = WGSL.ExpIdent "i64_tmp"
+              store w j =
+                callStm "atomicStore" [WGSL.ExpUnary WGSL.AddressOf w, WGSL.ExpIndex tmp (WGSL.ExpInt j WGSL.AbstractInt)]
+           in WGSL.Compound [WGSL.Let "i64_tmp" Nothing v', store lo 0, store hi 1]
+      | otherwise ->
+          let (word, offset) = wordAccess t mem' i'
+           in callStm (atomicFun "write" t info) [word, offset, v']
 
 -- | WGSL has no 64-bit atomics, so an i64 buffer that is accessed atomically is
 -- an array of word pairs (low, high), and each half is accessed atomically by
@@ -586,17 +544,15 @@ genAtomicOp ::
   VName ->
   VName ->
   Count Elements (TExp Int64) ->
-  Exp ->
+  [Exp] ->
   KernelM WGSL.Statement
-genAtomicOp f t dest mem i e = do
+genAtomicOp f t dest mem i es = do
   mem' <- getIdent mem
-  shared <- isShared mem'
+  info <- memInfo mem'
   i' <- indexExp i
-  v' <- genWGSLExp e
-
-  let fun = genArrayFun f t True shared
-      args = genArrayAccess True t mem' i' (not shared) ++ [v']
-   in assign <$> getIdent dest <*> pure (call fun args)
+  es' <- mapM genWGSLExp es
+  let (word, offset) = wordAccess t mem' i'
+  assign <$> getIdent dest <*> pure (call (atomicFun f t info) (word : offset : es'))
 
 genCopy ::
   PrimType ->
@@ -610,11 +566,11 @@ genCopy ::
     [Count Elements (TExp Int64)]
   ) ->
   KernelM WGSL.Statement
-genCopy pt shape (dst, dst_space) (dst_offset, dst_strides) (src, src_space) (src_offset, src_strides) = do
+genCopy pt shape (dst, _) (dst_offset, dst_strides) (src, _) (src_offset, src_strides) = do
   shape' <- mapM (genWGSLExp . untyped . unCount) shape
   let dst_i = dst_offset + sum (zipWith (*) is' dst_strides)
       src_i = src_offset + sum (zipWith (*) is' src_strides)
-  body <- genArrayWrite pt dst_space dst dst_i $ genReadExp pt src_space src src_i
+  body <- genArrayWrite pt dst dst_i $ genReadExp pt src src_i
   pure . WGSL.Compound $ foldr loop [body] (zip iis shape')
   where
     is = map (VName "i") [0 .. length shape - 1]
@@ -757,16 +713,13 @@ genWGSLStm (DeclareMem name (Space "shared")) = do
 
   maybeElemPrimType <- findSingleMemoryType name
   case maybeElemPrimType of
-    Just elemPrimType@(_, atomic) -> do
-      let bufType =
-            wgslSharedBufferType
-              elemPrimType
-              (Just $ WGSL.ExpIdent sizeName)
+    Just typ -> do
+      let bufType = wgslBufferType typ (Just $ WGSL.ExpIdent sizeName)
 
       addOverride sizeName WGSL.I32 (Just $ WGSL.ExpInt 0 WGSL.AbstractInt)
       addDecl $
         WGSL.GlobalVariable [] WGSL.Workgroup Nothing moduleName (Just bufType) Nothing
-      addMem moduleName $ MemInfo {memShared = True, memAtomic = atomic}
+      addMem moduleName $ MemInfo {memShared = True, memAtomic = wordStorage typ}
       addRename name' moduleName
       pure $ WGSL.Comment $ "declare_shared: " <> name'
     Nothing ->
@@ -786,10 +739,10 @@ genWGSLStm s@(DeclareArray {}) = unsupported s
 genWGSLStm s@(Allocate {}) = unsupported s
 genWGSLStm s@(Free _ _) = pure $ WGSL.Comment $ "free: " <> prettyText s
 genWGSLStm (Copy pt shape dst dst_lmad src src_lmad) = genCopy pt shape dst dst_lmad src src_lmad
-genWGSLStm (Write mem i t s _ v) = genArrayWrite t s mem i (genWGSLExp v)
+genWGSLStm (Write mem i t _ _ v) = genArrayWrite t mem i (genWGSLExp v)
 genWGSLStm (SetScalar name e) =
   liftM2 assign (getIdent name) (genWGSLExp e)
-genWGSLStm (Read tgt mem i t s _) = genArrayRead t s tgt mem i
+genWGSLStm (Read tgt mem i t _ _) = assign <$> getIdent tgt <*> genReadExp t mem i
 genWGSLStm stm@(SetMem {}) =
   compilerLimitation . docText $
     "WebGPU backend Cannot handle SetMem statement"
@@ -852,33 +805,27 @@ genWGSLStm (Op (ImpGPU.Atomic _ op))
     isWrite ImpGPU.AtomicWrite {} = True
     isWrite _ = False
 genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicAdd t dest mem i e))) =
-  genAtomicOp "add" (IntType t) dest mem i e
+  genAtomicOp "add" (IntType t) dest mem i [e]
 genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicSMax t dest mem i e))) =
-  genAtomicOp "smax" (IntType t) dest mem i e
+  genAtomicOp "smax" (IntType t) dest mem i [e]
 genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicSMin t dest mem i e))) =
-  genAtomicOp "smin" (IntType t) dest mem i e
+  genAtomicOp "smin" (IntType t) dest mem i [e]
 genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicUMax t dest mem i e))) =
-  genAtomicOp "umax" (IntType t) dest mem i e
+  genAtomicOp "umax" (IntType t) dest mem i [e]
 genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicUMin t dest mem i e))) =
-  genAtomicOp "umin" (IntType t) dest mem i e
+  genAtomicOp "umin" (IntType t) dest mem i [e]
 genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicAnd t dest mem i e))) =
-  genAtomicOp "and" (IntType t) dest mem i e
+  genAtomicOp "and" (IntType t) dest mem i [e]
 genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicOr t dest mem i e))) =
-  genAtomicOp "or" (IntType t) dest mem i e
+  genAtomicOp "or" (IntType t) dest mem i [e]
 genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicXor t dest mem i e))) =
-  genAtomicOp "xor" (IntType t) dest mem i e
-genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicCmpXchg _ dest mem i cmp val))) = do
-  val' <- genWGSLExp val
-  cmp' <- genWGSLExp cmp
-  i' <- WGSL.ExpIndex . WGSL.ExpIdent <$> getIdent mem <*> indexExp i
-  liftM2 assign (getIdent dest) (pure $ WGSL.ExpMember (call "atomicCompareExchangeWeak" [WGSL.ExpUnary WGSL.AddressOf i', cmp', val']) "old_value")
-genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicXchg _ dest mem i e))) = do
-  idx <- WGSL.ExpIndex . WGSL.ExpIdent <$> getIdent mem <*> indexExp i
-  val <- genWGSLExp e
-  let xchg = call "atomicExchange" [WGSL.ExpUnary WGSL.AddressOf idx, val]
-  assign <$> getIdent dest <*> pure xchg
-genWGSLStm (Op (ImpGPU.Atomic s (ImpGPU.AtomicWrite t mem i v))) = genArrayWrite t s mem i (genWGSLExp v)
-genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicFAdd t dest mem i e))) = genAtomicOp "fadd" (FloatType t) dest mem i e
+  genAtomicOp "xor" (IntType t) dest mem i [e]
+genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicCmpXchg t dest mem i cmp val))) =
+  genAtomicOp "cmp_xchg" t dest mem i [cmp, val]
+genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicXchg t dest mem i e))) =
+  genAtomicOp "xchg" t dest mem i [e]
+genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicWrite t mem i v))) = genArrayWrite t mem i (genWGSLExp v)
+genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicFAdd t dest mem i e))) = genAtomicOp "fadd" (FloatType t) dest mem i [e]
 genWGSLStm (Op (ImpGPU.Barrier ImpGPU.FenceLocal)) =
   pure $ callStm "workgroupBarrier" []
 genWGSLStm (Op (ImpGPU.Barrier ImpGPU.FenceGlobal)) =
@@ -890,32 +837,39 @@ genWGSLStm (Op (ImpGPU.SharedAlloc name size)) = do
 
   maybeElemPrimType <- findSingleMemoryType name
   case maybeElemPrimType of
-    Just (elemPrimType, atomic) -> do
-      -- The atomic words of an i64 buffer are i32s (see 'i64Words').
+    Just typ@(elemPrimType, _) -> do
       let elemSize
-            | atomic, elemPrimType == IntType Int64 = 4
+            | wordStorage typ = 4
             | otherwise = primByteSize elemPrimType :: Int32
       -- WGSL does not permit arrays with zero elements, but the
-      -- allocation is empty whenever the kernel has no work to do.
+      -- allocation is empty whenever the kernel has no work to do. Words may
+      -- be partially used, so we round up.
       let sizeExp =
             BinOpExp
               (SMax Int32)
               (ValueExp (IntValue $ Int32Value 1))
-              ( zExt Int32 (untyped (unCount size))
-                  ~/~ ValueExp (IntValue $ Int32Value elemSize)
+              ( BinOpExp
+                  (SCeilDiv Int32 Unsafe)
+                  (zExt Int32 (untyped (unCount size)))
+                  (ValueExp (IntValue $ Int32Value elemSize))
               )
 
       addSharedMemSize sizeName sizeExp
       pure $ WGSL.Comment $ "shared_alloc: " <> name'
     Nothing ->
       pure $ WGSL.Comment $ "discard shared_alloc: " <> name'
-genWGSLStm (Op (ImpGPU.UniformRead tgt mem i _ _)) = do
+genWGSLStm (Op (ImpGPU.UniformRead tgt mem i t _)) = do
   tgt' <- getIdent tgt
   mem' <- getIdent mem
+  info <- memInfo mem'
   i' <- indexExp i
-  pure $
-    assign tgt' $
-      call "workgroupUniformLoad" [WGSL.ExpUnary WGSL.AddressOf $ WGSL.ExpIndex (WGSL.ExpIdent mem') i']
+  pure . assign tgt' $
+    if memAtomic info
+      then
+        -- Load the whole word uniformly, then extract the element.
+        let (word, offset) = wordAccess t mem' i'
+         in call ("unpack_" <> prettyText t) [call "workgroupUniformLoad" [word], offset]
+      else call "workgroupUniformLoad" [WGSL.ExpUnary WGSL.AddressOf $ WGSL.ExpIndex (WGSL.ExpIdent mem') i']
 genWGSLStm (Op (ImpGPU.ErrorSync f)) = genWGSLStm $ Op (ImpGPU.Barrier f)
 genWGSLStm (Op ImpGPU.WarpSync {}) = error "genWGSLStm: WarpSync not handled."
 genWGSLStm GetUserParam {} = error "genWGSLStm: GetUserParam not handled."
@@ -1208,7 +1162,7 @@ findMemoryTypes name = S.elems . find <$> asks (ImpGPU.kernelBody . krKernel)
     find _ = S.empty
 
 -- | The single type at which the kernel accesses the buffer, and whether any
--- access is atomic, in which case all accesses must be (see 'isAtomic').
+-- access is atomic.
 findSingleMemoryType :: VName -> KernelM (Maybe (PrimType, Bool))
 findSingleMemoryType name = do
   types <- findMemoryTypes name
@@ -1236,7 +1190,7 @@ genMemoryDecls = do
     moduleDecl (name, typ) = do
       ident <- mkGlobalIdent name
       slot <- assignBindSlot
-      addMem ident $ MemInfo {memShared = False, memAtomic = snd typ}
+      addMem ident $ MemInfo {memShared = False, memAtomic = wordStorage typ}
       addDecl $
         WGSL.GlobalVariable
           (WGSL.bindingAttribs 0 slot)

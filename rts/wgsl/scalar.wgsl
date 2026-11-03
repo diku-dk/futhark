@@ -188,6 +188,33 @@ fn futrts_ctzz64(x: i64) -> i32 {
     }
 }
 
+// Extract an element from a 32-bit word holding one or more elements, packed
+// from the least significant bits (see atomics.wgsl).
+
+fn unpack_bool(w: i32, offset: i32) -> bool {
+    return unpack_i8(w, offset) != 0;
+}
+
+fn unpack_i8(w: i32, offset: i32) -> i8 {
+    return norm_i8(w >> bitcast<u32>(offset * 8));
+}
+
+fn unpack_i16(w: i32, offset: i32) -> i16 {
+    return norm_i16(w >> bitcast<u32>(offset * 16));
+}
+
+fn unpack_i32(w: i32, offset: i32) -> i32 {
+    return w;
+}
+
+fn unpack_f16(w: i32, offset: i32) -> f16 {
+    return bitcast<vec2<f16>>(w)[offset];
+}
+
+fn unpack_f32(w: i32, offset: i32) -> f32 {
+    return bitcast<f32>(w);
+}
+
 fn futrts_isnan32(x: f32) -> bool {
     let exponent = (bitcast<u32>(x) >> 23) & 0xFF;
     let mantissa = bitcast<u32>(x) & 0x7fffff;
