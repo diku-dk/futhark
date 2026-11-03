@@ -74,7 +74,7 @@ data KernelState = KernelState
     -- general information about memory in scope
     ksSharedMem :: [(WGSL.Ident, Exp)],
     ksAtomicMem :: [WGSL.Ident],
-    ksScalars :: [WGSL.Type],
+    ksScalars :: [WGSL.Field],
     ksBindSlots :: [Int]
   }
 
@@ -125,7 +125,7 @@ assignBindSlot = do
 -- module.
 addOverride :: WGSL.Ident -> WGSL.Type -> Maybe WGSL.Exp -> KernelM ()
 addOverride ident typ e = do
-  addDecl $ WGSL.GlobalOverride ident typ e
+  addDecl $ WGSL.GlobalOverride [] ident typ e
   modify $ \s -> s {ksOverrides = ksOverrides s ++ [ident]}
 
 -- | Register an override identifier as describing the given dimension of the
@@ -154,8 +154,8 @@ isAtomic :: WGSL.Ident -> KernelM Bool
 isAtomic ident = elem ident <$> gets ksAtomicMem
 
 -- | Add a scalar struct field.
-addScalar :: WGSL.Type -> KernelM ()
-addScalar typ = modify $ \s -> s {ksScalars = ksScalars s ++ [typ]}
+addScalar :: WGSL.Field -> KernelM ()
+addScalar field = modify $ \s -> s {ksScalars = ksScalars s ++ [field]}
 
 entryParams :: [WGSL.Param]
 entryParams =
@@ -1110,7 +1110,7 @@ genScalarDecls = do
             Bool -> call "bool" [e]
             _ -> e
 
-      addScalar fieldPrimTyp
+      addScalar $ WGSL.Field [] name fieldPrimTyp
       addInitStmt $ WGSL.DeclareVar name varPrimTyp
       addInitStmt $
         assign name (wrapCopy $ WGSL.FieldExp (WGSL.VarExp bufferName) name)
@@ -1122,7 +1122,7 @@ genScalarDecls = do
         sclrs -> sclrs
   addDecl $
     WGSL.GlobalStruct $
-      WGSL.StructDecl structName (map (uncurry WGSL.Field) scalarFields)
+      WGSL.StructDecl structName (map (uncurry (WGSL.Field [])) scalarFields)
 
   slot <- assignBindSlot
   let bufferAttribs = WGSL.bindingAttribs 0 slot

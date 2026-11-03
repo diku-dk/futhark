@@ -12,7 +12,12 @@ import Test.Tasty.HUnit
 -- | The offsets, alignment and size of a structure, which the tests check
 -- together.
 structLayout :: [Type] -> (Maybe [Int], Maybe Int, Maybe Int)
-structLayout ts = (offsetOfMembers ts, alignOfStruct ts, sizeOfStruct ts)
+structLayout = structLayoutOf . map (Field [] "m")
+
+-- | As 'structLayout', but for members given in full, so that they may carry
+-- layout attributes.
+structLayoutOf :: [Field] -> (Maybe [Int], Maybe Int, Maybe Int)
+structLayoutOf fs = (offsetOfMembers fs, alignOfStruct fs, sizeOfStruct fs)
 
 -- | The alignment and size of a type, which the tests check together.
 layout :: Type -> Maybe (Int, Int)
@@ -567,6 +572,72 @@ structLayoutTests =
           @?= (Nothing, Nothing, Nothing)
     ]
 
+-- | @\@align@ and @\@size@ override a member's alignment and size.  See
+-- https://www.w3.org/TR/WGSL/#structure-member-layout.
+memberLayoutTests :: TestTree
+memberLayoutTests =
+  testGroup
+    "layout attributes"
+    [ testCase "alignOfMember" $
+        ( alignOfMember (Field [] "m" F32),
+          alignOfMember (Field [Attrib "align" [IntExp 16 AbstractInt]] "m" F32)
+        )
+          @?= (Just 4, Just 16),
+      testCase "sizeOfMember" $
+        ( sizeOfMember (Field [] "m" F32),
+          sizeOfMember (Field [Attrib "size" [IntExp 16 AbstractInt]] "m" F32)
+        )
+          @?= (Just 4, Just 16),
+      testCase "unrelated attribute" $
+        alignOfMember (Field [Attrib "location" [IntExp 0 AbstractInt]] "m" F32)
+          @?= Just 4,
+      -- struct A from the specification's example with explicit member sizes:
+      -- the @size(16) on the last member grows the structure from 24 to 32.
+      testCase "explicit size" $
+        structLayoutOf
+          [ Field [] "u" F32,
+            Field [] "v" F32,
+            Field [] "w" (Vec2 F32),
+            Field [Attrib "size" [IntExp 16 AbstractInt]] "x" F32
+          ]
+          @?= (Just [0, 4, 8, 16], Just 8, Just 32),
+      -- The same example's struct B places its @align(16) member at offset 48
+      -- rather than 40.
+      testCase "explicit alignment" $
+        structLayoutOf
+          [ Field [] "a" (Vec2 F32),
+            Field [] "b" (Vec3 F32),
+            Field [] "c" F32,
+            Field [] "d" F32,
+            Field [Attrib "align" [IntExp 16 AbstractInt]] "e" F32
+          ]
+          @?= (Just [0, 16, 28, 32, 48], Just 16, Just 64)
+    ]
+
+-- | A structure member may carry attributes, and so may an override
+-- declaration.
+attributeTests :: TestTree
+attributeTests =
+  testGroup
+    "attributes"
+    [ testCase "structure member" $
+        render
+          ( StructDecl
+              "S"
+              [ Field [] "a" I32,
+                Field [Attrib "size" [IntExp 16 AbstractInt]] "b" F32
+              ]
+          )
+          @?= "struct S {\n  a : i32,\n  @size(16) b : f32\n}",
+      testCase "override identifier" $
+        render
+          (GlobalOverride [Attrib "id" [IntExp 7 AbstractInt]] "n" I32 Nothing)
+          @?= "@id(7)\noverride n : i32;",
+      testCase "override without attributes" $
+        render (GlobalOverride [] "n" I32 (Just (IntExp 0 AbstractInt)))
+          @?= "override n : i32 = 0;"
+    ]
+
 -- | See https://www.w3.org/TR/WGSL/#host-shareable-types.
 hostShareableTests :: TestTree
 hostShareableTests =
@@ -709,7 +780,7 @@ moduleTests =
         render
           ( Module
               []
-              [GlobalStruct (StructDecl "S" [Field "a" I32, Field "b" F32])]
+              [GlobalStruct (StructDecl "S" [Field [] "a" I32, Field [] "b" F32])]
           )
           @?= "struct S {\n  a : i32,\n  b : f32\n}"
     ]
@@ -792,6 +863,7 @@ tests =
           opaqueTests,
           arrayLayoutTests,
           structLayoutTests,
+          memberLayoutTests,
           hostShareableTests
         ],
       testGroup
@@ -809,7 +881,12 @@ tests =
         ],
       testGroup
         "declarations"
-        [globalVarTests, funDeclTests, directiveTests, moduleTests]
+        [ globalVarTests,
+          funDeclTests,
+          attributeTests,
+          directiveTests,
+          moduleTests
+        ]
     ]
 
 main :: IO ()

@@ -32,6 +32,8 @@ module Language.WGSL
     sizeOf,
     strideOf,
     hostShareable,
+    alignOfMember,
+    sizeOfMember,
     alignOfStruct,
     offsetOfMembers,
     sizeOfStruct,
@@ -337,39 +339,63 @@ hostShareable (DepthTexture _) = False
 hostShareable Sampler = False
 hostShareable SamplerComparison = False
 
--- | @AlignOf@ of a structure with the given member types, which is the
--- greatest alignment of any member.  'Nothing' if there are no members, since
--- a WGSL structure must have at least one, or if some member has no
--- @AlignOf@.  Layout attributes are not taken into account.  See
--- https://www.w3.org/TR/WGSL/#structure-member-layout.
-alignOfStruct :: [Type] -> Maybe Int
-alignOfStruct [] = Nothing
-alignOfStruct members = maximum <$> mapM alignOf members
+-- | The value of the named attribute, if it is present with a literal
+-- argument.
+attribValue :: Ident -> [Attrib] -> Maybe Int
+attribValue name = foldr f Nothing
+  where
+    f (Attrib n [IntExp k _]) _ | n == name = Just k
+    f _ rest = rest
 
--- | @OffsetOfMember@ of every member of a structure with the given member
--- types.  These are known even when the structure has no @SizeOf@, as when its
--- last member is a runtime-sized array, because only the preceding members
--- contribute.  Layout attributes are not taken into account.
-offsetOfMembers :: [Type] -> Maybe [Int]
+-- | @AlignOfMember@ of a structure member: the argument of its @\@align@
+-- attribute if it has one, and otherwise the @AlignOf@ of its type.  See
+-- https://www.w3.org/TR/WGSL/#structure-member-layout.
+alignOfMember :: Field -> Maybe Int
+alignOfMember (Field attribs _ t) =
+  case attribValue "align" attribs of
+    Just k -> Just k
+    Nothing -> alignOf t
+
+-- | @SizeOfMember@ of a structure member: the argument of its @\@size@
+-- attribute if it has one, and otherwise the @SizeOf@ of its type.
+sizeOfMember :: Field -> Maybe Int
+sizeOfMember (Field attribs _ t) =
+  case attribValue "size" attribs of
+    Just k -> Just k
+    Nothing -> sizeOf t
+
+-- | @AlignOf@ of a structure with the given members, which is the greatest
+-- @AlignOfMember@ of any of them. 'Nothing' if there are no members or if some
+-- member has no @AlignOfMember@. See
+-- https://www.w3.org/TR/WGSL/#structure-member-layout.
+alignOfStruct :: [Field] -> Maybe Int
+alignOfStruct [] = Nothing
+alignOfStruct members = maximum <$> mapM alignOfMember members
+
+-- | @OffsetOfMember@ of every member of a structure with the given members.
+-- These are known even when the structure has no @SizeOf@, as when its last
+-- member is a runtime-sized array, because only the preceding members
+-- contribute.
+offsetOfMembers :: [Field] -> Maybe [Int]
 offsetOfMembers [] = Nothing
 offsetOfMembers members = do
-  aligns <- mapM alignOf $ drop 1 members
-  sizes <- mapM sizeOf $ init members
+  aligns <- mapM alignOfMember $ drop 1 members
+  sizes <- mapM sizeOfMember $ init members
   pure $
     scanl
       (\prev_off (al, prev_sz) -> roundUp al (prev_off + prev_sz))
       0
       (zip aligns sizes)
 
--- | @SizeOf@ of a structure with the given member types, which is the end of
--- its last member rounded up to the structure's alignment.  'Nothing' if any
--- member has no @SizeOf@, which includes a trailing runtime-sized array.
--- Layout attributes are not taken into account.
-sizeOfStruct :: [Type] -> Maybe Int
+-- | @SizeOf@ of a structure with the given members, which is the end of its
+-- last member rounded up to the structure's alignment.  'Nothing' if any
+-- member has no @SizeOfMember@, which includes a trailing runtime-sized
+-- array.
+sizeOfStruct :: [Field] -> Maybe Int
 sizeOfStruct members = do
   struct_align <- alignOfStruct members
   offsets <- offsetOfMembers members
-  last_size <- sizeOf $ last members
+  last_size <- sizeOfMember $ last members
   pure $ roundUp struct_align (last offsets + last_size)
 
 -- | A binary operator. See https://www.w3.org/TR/WGSL/#expressions.
@@ -523,7 +549,7 @@ data FunDecl = FunDecl
   }
   deriving (Eq, Ord, Show)
 
-data Field = Field Ident Type
+data Field = Field [Attrib] Ident Type
   deriving (Eq, Ord, Show)
 
 data StructDecl = StructDecl Ident [Field]
@@ -555,7 +581,7 @@ data GlobalDecl
   | -- | The access mode may only be given along with the address space, and
     -- defaults to the one of the address space when omitted.
     GlobalVar [Attrib] AddressSpace (Maybe AccessMode) Ident Type
-  | GlobalOverride Ident Type (Maybe Exp)
+  | GlobalOverride [Attrib] Ident Type (Maybe Exp)
   | -- | A module-scope @const_assert@.
     GlobalAssert Exp
   deriving (Eq, Ord, Show)
@@ -940,7 +966,8 @@ prettyAttribs [] = mempty
 prettyAttribs attribs = hsep (map pretty attribs) <> line
 
 instance Pretty Field where
-  pretty (Field name typ) = pretty name <+> ":" <+> pretty typ
+  pretty (Field attribs name typ) =
+    hsep $ map pretty attribs ++ [pretty name <+> ":" <+> pretty typ]
 
 instance Pretty StructDecl where
   pretty (StructDecl name fields) =
@@ -1021,11 +1048,17 @@ instance Pretty GlobalDecl where
       <+> ":"
       <+> pretty typ
       <> ";"
-  pretty (GlobalOverride name typ Nothing) =
-    "override" <+> pretty name <+> ":" <+> pretty typ <> ";"
+  pretty (GlobalOverride attribs name typ Nothing) =
+    prettyAttribs attribs
+      <> "override"
+      <+> pretty name
+      <+> ":"
+      <+> pretty typ
+      <> ";"
   pretty (GlobalAssert e) = "const_assert" <+> pretty e <> ";"
-  pretty (GlobalOverride name typ (Just initial)) =
-    "override"
+  pretty (GlobalOverride attribs name typ (Just initial)) =
+    prettyAttribs attribs
+      <> "override"
       <+> pretty name
       <+> ":"
       <+> pretty typ
