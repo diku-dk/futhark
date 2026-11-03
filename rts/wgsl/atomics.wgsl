@@ -154,7 +154,8 @@ fn atomic_write_f16_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32
     var y = x; y[offset] = val;
     while (!atomicCompareExchangeWeak(p, bitcast<i32>(x), bitcast<i32>(y)).exchanged) {
         x = bitcast<vec2<f16>>(atomicLoad(p));
-        y = x; y[offset] = val;;
+        y = x;
+        y[offset] = val;
     }
 }
 
