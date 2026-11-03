@@ -12,11 +12,11 @@ import Test.Tasty.HUnit
 -- | The offsets, alignment and size of a structure, which the tests check
 -- together.
 structLayout :: [Type] -> (Maybe [Int], Maybe Int, Maybe Int)
-structLayout = structLayoutOf . map (Field [] "m")
+structLayout = structLayoutOf . map (StructMember [] "m")
 
 -- | As 'structLayout', but for members given in full, so that they may carry
 -- layout attributes.
-structLayoutOf :: [Field] -> (Maybe [Int], Maybe Int, Maybe Int)
+structLayoutOf :: [StructMember] -> (Maybe [Int], Maybe Int, Maybe Int)
 structLayoutOf fs = (offsetOfMembers fs, alignOfStruct fs, sizeOfStruct fs)
 
 -- | The alignment and size of a type, which the tests check together.
@@ -24,12 +24,12 @@ layout :: Type -> Maybe (Int, Int)
 layout t = (,) <$> alignOf t <*> sizeOf t
 
 -- | A convenient literal for tests that only need some expression.
-one, two :: Exp
-one = IntExp 1 AbstractInt
-two = IntExp 2 AbstractInt
+one, two :: Expression
+one = ExpInt 1 AbstractInt
+two = ExpInt 2 AbstractInt
 
 -- | Render a statement sequence, as a code generator would.
-renderBody :: [Stmt] -> T.Text
+renderBody :: [Statement] -> T.Text
 renderBody =
   renderStrict . layoutPretty defaultLayoutOptions . vsep . map pretty
 
@@ -77,21 +77,21 @@ accessModeTests =
 globalVarTests :: TestTree
 globalVarTests =
   testGroup
-    "GlobalVar"
+    "GlobalVariable"
     [ testCase "without access mode" $
-        render (GlobalVar [] Workgroup Nothing "x" (Just I32) Nothing)
+        render (GlobalVariable [] Workgroup Nothing "x" (Just I32) Nothing)
           @?= "var<workgroup> x : i32;",
       testCase "with access mode" $
-        render (GlobalVar [] Storage (Just ReadWrite) "x" (Just (Array I32 Nothing)) Nothing)
+        render (GlobalVariable [] Storage (Just ReadWrite) "x" (Just (Array I32 Nothing)) Nothing)
           @?= "var<storage, read_write> x : array<i32>;",
       testCase "private" $
-        render (GlobalVar [] Private Nothing "x" (Just F32) Nothing)
+        render (GlobalVariable [] Private Nothing "x" (Just F32) Nothing)
           @?= "var<private> x : f32;",
       testCase "immediate" $
-        render (GlobalVar [] Immediate Nothing "x" (Just (Named "S")) Nothing)
+        render (GlobalVariable [] Immediate Nothing "x" (Just (Named "S")) Nothing)
           @?= "var<immediate> x : S;",
       testCase "with attributes" $
-        render (GlobalVar (bindingAttribs 0 1) Storage (Just Read) "x" (Just (Array F32 Nothing)) Nothing)
+        render (GlobalVariable (bindingAttribs 0 1) Storage (Just Read) "x" (Just (Array F32 Nothing)) Nothing)
           @?= "@group(0) @binding(1)\nvar<storage, read> x : array<f32>;"
     ]
 
@@ -172,14 +172,14 @@ assignTests =
   testGroup
     "Assign"
     [ testCase "variable" $
-        render (Assign (VarExp "x") SimpleAssign (VarExp "y")) @?= "x = y;",
+        render (Assign (ExpIdent "x") AssignSimple (ExpIdent "y")) @?= "x = y;",
       testCase "dereference" $
-        render (Assign (UnOpExp Indirection (VarExp "p")) SimpleAssign (VarExp "x")) @?= "(*p) = x;",
+        render (Assign (ExpUnary Indirection (ExpIdent "p")) AssignSimple (ExpIdent "x")) @?= "(*p) = x;",
       testCase "index" $
-        render (Assign (IndexExp (VarExp "a") (IntExp 0 AbstractInt)) SimpleAssign (IntExp 1 AbstractInt))
+        render (Assign (ExpIndex (ExpIdent "a") (ExpInt 0 AbstractInt)) AssignSimple (ExpInt 1 AbstractInt))
           @?= "a[0] = 1;",
       testCase "member" $
-        render (Assign (FieldExp (VarExp "s") "f") SimpleAssign (VarExp "y")) @?= "s.f = y;"
+        render (Assign (ExpMember (ExpIdent "s") "f") AssignSimple (ExpIdent "y")) @?= "s.f = y;"
     ]
 
 -- | A return statement supplies a value exactly when the enclosing function
@@ -191,7 +191,7 @@ returnTests =
     [ testCase "without value" $
         render (Return Nothing) @?= "return;",
       testCase "with value" $
-        render (Return (Just (VarExp "x"))) @?= "return x;"
+        render (Return (Just (ExpIdent "x"))) @?= "return x;"
     ]
 
 -- | A function declaration has at most one return type, which may carry
@@ -199,24 +199,24 @@ returnTests =
 funDeclTests :: TestTree
 funDeclTests =
   testGroup
-    "FunDecl"
+    "FunctionDecl"
     [ testCase "without return type" $
-        render (FunDecl "f" [] [Param [] "a" I32] Nothing [Call "g" [] [VarExp "a"]])
+        render (FunctionDecl "f" [] [Param [] "a" I32] Nothing [Call "g" [] [ExpIdent "a"]])
           @?= "fn f(\n  a : i32\n) {\n  g(a);\n}",
       testCase "with return type" $
         render
-          (FunDecl "f" [] [] (Just ([], I32)) [Return (Just (IntExp 1 AbstractInt))])
+          (FunctionDecl "f" [] [] (Just ([], I32)) [Return (Just (ExpInt 1 AbstractInt))])
           @?= "fn f() -> i32 {\n  return 1;\n}",
       testCase "empty body" $
-        render (FunDecl "f" [] [] Nothing []) @?= "fn f() { }",
+        render (FunctionDecl "f" [] [] Nothing []) @?= "fn f() { }",
       testCase "with return attributes" $
         render
-          ( FunDecl
+          ( FunctionDecl
               "vs"
-              [Attrib "vertex" []]
+              [Attribute "vertex" []]
               []
-              (Just ([Attrib "builtin" [VarExp "position"]], Vec4 F32))
-              [Return (Just (VarExp "p"))]
+              (Just ([Attribute "builtin" [ExpIdent "position"]], Vec4 F32))
+              [Return (Just (ExpIdent "p"))]
           )
           @?= "@vertex\nfn vs() -> @builtin(position) vec4<f32> {\n  return p;\n}"
     ]
@@ -233,20 +233,20 @@ sequenceTests =
         renderBody [Call "f" [] [], Comment "note", Call "g" [] []]
           @?= "f();\n// note\ng();",
       testCase "compound statement" $
-        renderBody [If (VarExp "c") [Call "f" [] []] [] Nothing, Call "g" [] []]
+        renderBody [If (ExpIdent "c") [Call "f" [] []] [] Nothing, Call "g" [] []]
           @?= "if c {\n  f();\n}\ng();",
       -- An empty body used to render as a stray empty statement.
       testCase "empty body" $
-        render (While (VarExp "c") []) @?= "while c { }",
+        render (While (ExpIdent "c") []) @?= "while c { }",
       testCase "empty statement" $
-        render (While (VarExp "c") [Empty]) @?= "while c {\n  ;\n}",
+        render (While (ExpIdent "c") [Empty]) @?= "while c {\n  ;\n}",
       testCase "block introduces a scope" $
         render (Compound [Let "x" Nothing one]) @?= "{\n  let x = 1;\n}",
       -- An absent else clause is not the same as an empty one.
       testCase "absent else" $
-        render (If (VarExp "c") [] [] Nothing) @?= "if c { }",
+        render (If (ExpIdent "c") [] [] Nothing) @?= "if c { }",
       testCase "empty else" $
-        render (If (VarExp "c") [] [] (Just [])) @?= "if c { } else { }"
+        render (If (ExpIdent "c") [] [] (Just [])) @?= "if c { } else { }"
     ]
 
 -- | A for loop's update is an assignment or a call. See
@@ -260,13 +260,13 @@ forTests =
           ( For
               "i"
               one
-              (BinOpExp Less (VarExp "i") one)
-              (UpdateAssign (VarExp "i") SimpleAssign one)
+              (ExpBinary Less (ExpIdent "i") one)
+              (UpdateAssign (ExpIdent "i") AssignSimple one)
               [Call "f" [] []]
           )
           @?= "for (var i = 1; (i < 1); i = 1) {\n  f();\n}",
       testCase "call update" $
-        render (For "i" one (VarExp "c") (UpdateCall "step" [] [VarExp "i"]) [])
+        render (For "i" one (ExpIdent "c") (UpdateCall "step" [] [ExpIdent "i"]) [])
           @?= "for (var i = 1; c; step(i)) { }"
     ]
 
@@ -275,20 +275,20 @@ forTests =
 callTests :: TestTree
 callTests =
   testGroup
-    "CallExp"
+    "ExpCall"
     [ testCase "without template arguments" $
-        render (CallExp "f" [] [VarExp "x"]) @?= "f(x)",
+        render (ExpCall "f" [] [ExpIdent "x"]) @?= "f(x)",
       testCase "without arguments" $
-        render (CallExp "atomicLoad" [] []) @?= "atomicLoad()",
+        render (ExpCall "atomicLoad" [] []) @?= "atomicLoad()",
       testCase "with a type argument" $
-        render (CallExp "vec2" [TypeExp F32] [one, one])
+        render (ExpCall "vec2" [ExpType F32] [one, one])
           @?= "vec2<f32>(1, 1)",
       testCase "bitcast" $
-        render (bitcast I32 (VarExp "x")) @?= "bitcast<i32>(x)",
+        render (bitcast I32 (ExpIdent "x")) @?= "bitcast<i32>(x)",
       -- The template argument list end is disambiguated by the grammar, so a
       -- nested list needs no space between the closing delimiters.
       testCase "nested template arguments" $
-        render (bitcast (Vec2 F16) (VarExp "x"))
+        render (bitcast (Vec2 F16) (ExpIdent "x"))
           @?= "bitcast<vec2<f16>>(x)"
     ]
 
@@ -311,7 +311,7 @@ layoutTests =
       testCase "vec4<f16>" $ layout (Vec4 F16) @?= Just (8, 8),
       testCase "named type" $ layout (Named "S") @?= Nothing,
       testCase "pointer" $ layout (Ptr I32 Function Nothing) @?= Nothing,
-      testCase "texture" $ layout (SampledTexture Tex2d F32) @?= Nothing,
+      testCase "texture" $ layout (TextureSampled Tex2d F32) @?= Nothing,
       testCase "sampler" $ layout Sampler @?= Nothing
     ]
 
@@ -330,12 +330,12 @@ opaqueTests =
       testCase "sampled" $
         map
           render
-          [ SampledTexture Tex1d F32,
-            SampledTexture Tex2d F32,
-            SampledTexture Tex2dArray I32,
-            SampledTexture Tex3d U32,
-            SampledTexture TexCube F32,
-            SampledTexture TexCubeArray U32
+          [ TextureSampled Tex1d F32,
+            TextureSampled Tex2d F32,
+            TextureSampled Tex2dArray I32,
+            TextureSampled Tex3d U32,
+            TextureSampled TexCube F32,
+            TextureSampled TexCubeArray U32
           ]
           @?= [ "texture_1d<f32>",
                 "texture_2d<f32>",
@@ -345,16 +345,16 @@ opaqueTests =
                 "texture_cube_array<u32>"
               ],
       testCase "multisampled" $
-        render (MultisampledTexture F32) @?= "texture_multisampled_2d<f32>",
-      testCase "external" $ render ExternalTexture @?= "texture_external",
+        render (TextureMultisampled F32) @?= "texture_multisampled_2d<f32>",
+      testCase "external" $ render TextureExternal @?= "texture_external",
       testCase "depth" $
         map
           render
-          [ DepthTexture Depth2d,
-            DepthTexture Depth2dArray,
-            DepthTexture DepthCube,
-            DepthTexture DepthCubeArray,
-            DepthTexture DepthMultisampled2d
+          [ TextureDepth Depth2d,
+            TextureDepth Depth2dArray,
+            TextureDepth DepthCube,
+            TextureDepth DepthCubeArray,
+            TextureDepth DepthMultisampled2d
           ]
           @?= [ "texture_depth_2d",
                 "texture_depth_2d_array",
@@ -365,10 +365,10 @@ opaqueTests =
       testCase "storage" $
         map
           render
-          [ StorageTexture StorageTex1d Rgba8Unorm Write,
-            StorageTexture StorageTex2d R32Float Read,
-            StorageTexture StorageTex2dArray Rgb10a2Uint ReadWrite,
-            StorageTexture StorageTex3d Rg11b10Ufloat Write
+          [ TextureStorage StorageTex1d Rgba8Unorm Write,
+            TextureStorage StorageTex2d R32Float Read,
+            TextureStorage StorageTex2dArray Rgb10a2Uint ReadWrite,
+            TextureStorage StorageTex3d Rg11b10Ufloat Write
           ]
           @?= [ "texture_storage_1d<rgba8unorm, write>",
                 "texture_storage_2d<r32float, read>",
@@ -382,11 +382,11 @@ opaqueTests =
 -- | One of every texture and sampler family.
 opaques :: [Type]
 opaques =
-  [ SampledTexture Tex2d F32,
-    MultisampledTexture F32,
-    ExternalTexture,
-    StorageTexture StorageTex2d Rgba8Unorm Write,
-    DepthTexture Depth2d,
+  [ TextureSampled Tex2d F32,
+    TextureMultisampled F32,
+    TextureExternal,
+    TextureStorage StorageTex2d Rgba8Unorm Write,
+    TextureDepth Depth2d,
     Sampler,
     SamplerComparison
   ]
@@ -434,10 +434,10 @@ representativeTypes =
        ]
     ++ [Atomic I32, Atomic U32]
     ++ [ Array F32 Nothing,
-         Array F32 (Just (IntExp 8 AbstractInt)),
-         Array F32 (Just (IntExp 8 LitI32)),
-         Array (Named "S") (Just (IntExp 3 AbstractInt)),
-         Array (Array F32 (Just (IntExp 2 AbstractInt))) Nothing
+         Array F32 (Just (ExpInt 8 AbstractInt)),
+         Array F32 (Just (ExpInt 8 LitI32)),
+         Array (Named "S") (Just (ExpInt 3 AbstractInt)),
+         Array (Array F32 (Just (ExpInt 2 AbstractInt))) Nothing
        ]
     ++ [ Ptr I32 Function Nothing,
          Ptr I32 Function (Just ReadWrite),
@@ -445,26 +445,26 @@ representativeTypes =
          Ptr (Array F32 Nothing) Private Nothing
        ]
     ++ [Named "S", Named "T"]
-    ++ [ SampledTexture Tex1d F32,
-         SampledTexture Tex2d F32,
-         SampledTexture Tex2d I32,
-         SampledTexture Tex2dArray F32,
-         SampledTexture Tex3d F32,
-         SampledTexture TexCube F32,
-         SampledTexture TexCubeArray F32,
-         MultisampledTexture F32,
-         ExternalTexture,
-         StorageTexture StorageTex1d Rgba8Unorm Write,
-         StorageTexture StorageTex2d Rgba8Unorm Write,
-         StorageTexture StorageTex2d R32Float Write,
-         StorageTexture StorageTex2d R32Float Read,
-         StorageTexture StorageTex2dArray Rgba8Unorm Write,
-         StorageTexture StorageTex3d Rgba8Unorm Write,
-         DepthTexture Depth2d,
-         DepthTexture Depth2dArray,
-         DepthTexture DepthCube,
-         DepthTexture DepthCubeArray,
-         DepthTexture DepthMultisampled2d,
+    ++ [ TextureSampled Tex1d F32,
+         TextureSampled Tex2d F32,
+         TextureSampled Tex2d I32,
+         TextureSampled Tex2dArray F32,
+         TextureSampled Tex3d F32,
+         TextureSampled TexCube F32,
+         TextureSampled TexCubeArray F32,
+         TextureMultisampled F32,
+         TextureExternal,
+         TextureStorage StorageTex1d Rgba8Unorm Write,
+         TextureStorage StorageTex2d Rgba8Unorm Write,
+         TextureStorage StorageTex2d R32Float Write,
+         TextureStorage StorageTex2d R32Float Read,
+         TextureStorage StorageTex2dArray Rgba8Unorm Write,
+         TextureStorage StorageTex3d Rgba8Unorm Write,
+         TextureDepth Depth2d,
+         TextureDepth Depth2dArray,
+         TextureDepth DepthCube,
+         TextureDepth DepthCubeArray,
+         TextureDepth DepthMultisampled2d,
          Sampler,
          SamplerComparison
        ]
@@ -497,20 +497,20 @@ typeSpellingTests =
       testCase "atomic" $ render (Atomic U32) @?= "atomic<u32>",
       testCase "runtime-sized array" $ render (Array F32 Nothing) @?= "array<f32>",
       testCase "fixed-size array" $
-        render (Array F32 (Just (IntExp 8 AbstractInt))) @?= "array<f32, 8>",
+        render (Array F32 (Just (ExpInt 8 AbstractInt))) @?= "array<f32, 8>",
       -- Element and store types are no longer restricted to scalars.
       testCase "array of struct" $
-        render (Array (Named "S") (Just (IntExp 3 AbstractInt))) @?= "array<S, 3>",
+        render (Array (Named "S") (Just (ExpInt 3 AbstractInt))) @?= "array<S, 3>",
       testCase "array of array" $
         render
           ( Array
-              (Array F32 (Just (IntExp 2 AbstractInt)))
-              (Just (IntExp 3 AbstractInt))
+              (Array F32 (Just (ExpInt 2 AbstractInt)))
+              (Just (ExpInt 3 AbstractInt))
           )
           @?= "array<array<f32, 2>, 3>",
       -- The specification's own example of a pointer type.
       testCase "pointer to array" $
-        render (Ptr (Array F32 (Just (IntExp 50 AbstractInt))) Private Nothing)
+        render (Ptr (Array F32 (Just (ExpInt 50 AbstractInt))) Private Nothing)
           @?= "ptr<private, array<f32, 50>>",
       testCase "sampler" $ render Sampler @?= "sampler"
     ]
@@ -525,16 +525,16 @@ arrayLayoutTests =
         map strideOf [F32, Vec3 F32, F16, Named "S"]
           @?= [Just 4, Just 16, Just 2, Nothing],
       testCase "array<f32, 8>" $
-        layout (Array F32 (Just (IntExp 8 AbstractInt))) @?= Just (4, 32),
+        layout (Array F32 (Just (ExpInt 8 AbstractInt))) @?= Just (4, 32),
       -- The element is padded from 12 bytes to a stride of 16.
       testCase "array<vec3<f32>, 8>" $
-        layout (Array (Vec3 F32) (Just (IntExp 8 AbstractInt)))
+        layout (Array (Vec3 F32) (Just (ExpInt 8 AbstractInt)))
           @?= Just (16, 128),
       testCase "runtime-sized array" $
         (alignOf (Array F32 Nothing), sizeOf (Array F32 Nothing))
           @?= (Just 4, Nothing),
       testCase "overridable element count" $
-        layout (Array F32 (Just (VarExp "n"))) @?= Nothing
+        layout (Array F32 (Just (ExpIdent "n"))) @?= Nothing
     ]
 
 -- | See https://www.w3.org/TR/WGSL/#structure-member-layout.
@@ -577,51 +577,51 @@ memberLayoutTests =
   testGroup
     "layout attributes"
     [ testCase "alignOfMember" $
-        ( alignOfMember (Field [] "m" F32),
-          alignOfMember (Field [Attrib "align" [IntExp 16 AbstractInt]] "m" F32)
+        ( alignOfMember (StructMember [] "m" F32),
+          alignOfMember (StructMember [Attribute "align" [ExpInt 16 AbstractInt]] "m" F32)
         )
           @?= (Just 4, Just 16),
       testCase "sizeOfMember" $
-        ( sizeOfMember (Field [] "m" F32),
-          sizeOfMember (Field [Attrib "size" [IntExp 16 AbstractInt]] "m" F32)
+        ( sizeOfMember (StructMember [] "m" F32),
+          sizeOfMember (StructMember [Attribute "size" [ExpInt 16 AbstractInt]] "m" F32)
         )
           @?= (Just 4, Just 16),
       testCase "unrelated attribute" $
-        alignOfMember (Field [Attrib "location" [IntExp 0 AbstractInt]] "m" F32)
+        alignOfMember (StructMember [Attribute "location" [ExpInt 0 AbstractInt]] "m" F32)
           @?= Just 4,
       -- The argument of @align or @size need only be a const-expression, and
       -- one that is not a literal leaves the member's layout unknown.  It
       -- must not fall back to the layout of the member's type.
       testCase "alignment that is not a literal" $
-        ( alignOfMember (Field [Attrib "align" [VarExp "N"]] "m" F32),
-          sizeOfMember (Field [Attrib "size" [VarExp "N"]] "m" F32)
+        ( alignOfMember (StructMember [Attribute "align" [ExpIdent "N"]] "m" F32),
+          sizeOfMember (StructMember [Attribute "size" [ExpIdent "N"]] "m" F32)
         )
           @?= (Nothing, Nothing),
       testCase "structure with an unknown member alignment" $
         structLayoutOf
-          [ Field [] "a" F32,
-            Field [Attrib "align" [VarExp "N"]] "b" F32
+          [ StructMember [] "a" F32,
+            StructMember [Attribute "align" [ExpIdent "N"]] "b" F32
           ]
           @?= (Nothing, Nothing, Nothing),
       -- struct A from the specification's example with explicit member sizes:
       -- the @size(16) on the last member grows the structure from 24 to 32.
       testCase "explicit size" $
         structLayoutOf
-          [ Field [] "u" F32,
-            Field [] "v" F32,
-            Field [] "w" (Vec2 F32),
-            Field [Attrib "size" [IntExp 16 AbstractInt]] "x" F32
+          [ StructMember [] "u" F32,
+            StructMember [] "v" F32,
+            StructMember [] "w" (Vec2 F32),
+            StructMember [Attribute "size" [ExpInt 16 AbstractInt]] "x" F32
           ]
           @?= (Just [0, 4, 8, 16], Just 8, Just 32),
       -- The same example's struct B places its @align(16) member at offset 48
       -- rather than 40.
       testCase "explicit alignment" $
         structLayoutOf
-          [ Field [] "a" (Vec2 F32),
-            Field [] "b" (Vec3 F32),
-            Field [] "c" F32,
-            Field [] "d" F32,
-            Field [Attrib "align" [IntExp 16 AbstractInt]] "e" F32
+          [ StructMember [] "a" (Vec2 F32),
+            StructMember [] "b" (Vec3 F32),
+            StructMember [] "c" F32,
+            StructMember [] "d" F32,
+            StructMember [Attribute "align" [ExpInt 16 AbstractInt]] "e" F32
           ]
           @?= (Just [0, 16, 28, 32, 48], Just 16, Just 64)
     ]
@@ -636,17 +636,17 @@ attributeTests =
         render
           ( StructDecl
               "S"
-              [ Field [] "a" I32,
-                Field [Attrib "size" [IntExp 16 AbstractInt]] "b" F32
+              [ StructMember [] "a" I32,
+                StructMember [Attribute "size" [ExpInt 16 AbstractInt]] "b" F32
               ]
           )
           @?= "struct S {\n  a : i32,\n  @size(16) b : f32\n}",
       testCase "override identifier" $
         render
-          (GlobalOverride [Attrib "id" [IntExp 7 AbstractInt]] "n" (Just I32) Nothing)
+          (GlobalOverride [Attribute "id" [ExpInt 7 AbstractInt]] "n" (Just I32) Nothing)
           @?= "@id(7)\noverride n : i32;",
       testCase "override without attributes" $
-        render (GlobalOverride [] "n" (Just I32) (Just (IntExp 0 AbstractInt)))
+        render (GlobalOverride [] "n" (Just I32) (Just (ExpInt 0 AbstractInt)))
           @?= "override n : i32 = 0;"
     ]
 
@@ -663,9 +663,9 @@ hostShareableTests =
       testCase "runtime-sized array" $
         hostShareable (Array F32 Nothing) @?= True,
       testCase "fixed-size array" $
-        hostShareable (Array F32 (Just (IntExp 8 AbstractInt))) @?= True,
+        hostShareable (Array F32 (Just (ExpInt 8 AbstractInt))) @?= True,
       testCase "overridable element count" $
-        hostShareable (Array F32 (Just (VarExp "n"))) @?= False,
+        hostShareable (Array F32 (Just (ExpIdent "n"))) @?= False,
       testCase "named type" $ hostShareable (Named "S") @?= False,
       testCase "pointer" $
         hostShareable (Ptr I32 Function Nothing) @?= False
@@ -679,7 +679,7 @@ operatorTests =
     "operators"
     [ testCase "binary" $
         map
-          (\op -> render (BinOpExp op (VarExp "a") (VarExp "b")))
+          (\op -> render (ExpBinary op (ExpIdent "a") (ExpIdent "b")))
           [ Add,
             Subtract,
             Multiply,
@@ -720,7 +720,7 @@ operatorTests =
               ],
       testCase "unary" $
         map
-          (\op -> render (UnOpExp op (VarExp "a")))
+          (\op -> render (ExpUnary op (ExpIdent "a")))
           [Negate, LogicalNegate, BitwiseComplement, Indirection, AddressOf]
           @?= ["(-a)", "(!a)", "(~a)", "(*a)", "(&a)"]
     ]
@@ -779,20 +779,20 @@ moduleTests =
         render
           ( Module
               [Enable (EnableF16 :| [])]
-              [GlobalVar [] Private Nothing "x" (Just F16) Nothing]
+              [GlobalVariable [] Private Nothing "x" (Just F16) Nothing]
           )
           @?= "enable f16;\nvar<private> x : f16;",
       testCase "without directives" $
-        render (Module [] [GlobalVar [] Private Nothing "x" (Just F32) Nothing])
+        render (Module [] [GlobalVariable [] Private Nothing "x" (Just F32) Nothing])
           @?= "var<private> x : f32;",
       testCase "const_assert" $
-        render (Module [] [GlobalAssert (VarExp "c")])
+        render (Module [] [GlobalAssert (ExpIdent "c")])
           @?= "const_assert c;",
       testCase "structure" $
         render
           ( Module
               []
-              [GlobalStruct (StructDecl "S" [Field [] "a" I32, Field [] "b" F32])]
+              [GlobalStruct (StructDecl "S" [StructMember [] "a" I32, StructMember [] "b" F32])]
           )
           @?= "struct S {\n  a : i32,\n  b : f32\n}"
     ]
@@ -804,14 +804,14 @@ elseIfTests =
   testGroup
     "else if"
     [ testCase "one clause" $
-        render (If (VarExp "a") [Break] [(VarExp "b", [Continue])] Nothing)
+        render (If (ExpIdent "a") [Break] [(ExpIdent "b", [Continue])] Nothing)
           @?= "if a {\n  break;\n} else if b {\n  continue;\n}",
       testCase "chain with else" $
         render
           ( If
-              (VarExp "a")
+              (ExpIdent "a")
               [Break]
-              [(VarExp "b", [Continue]), (VarExp "c", [Discard])]
+              [(ExpIdent "b", [Continue]), (ExpIdent "c", [Discard])]
               (Just [Return Nothing])
           )
           @?= "if a {\n  break;\n} else if b {\n  continue;\n}"
@@ -824,20 +824,20 @@ switchTests =
   testGroup
     "switch"
     [ testCase "several selectors" $
-        render (Switch (VarExp "x") (Case (CaseExp one :| [CaseExp two]) [Break] :| []))
+        render (Switch (ExpIdent "x") (Case (CaseExp one :| [CaseExp two]) [Break] :| []))
           @?= "switch x {\n  case 1, 2: {\n    break;\n  }\n}",
       -- 'default' may appear among a case clause's selectors, as well as
       -- being a clause of its own.
       testCase "default as a selector" $
-        render (Switch (VarExp "x") (Case (CaseExp one :| [CaseDefault]) [] :| []))
+        render (Switch (ExpIdent "x") (Case (CaseExp one :| [CaseDefault]) [] :| []))
           @?= "switch x {\n  case 1, default: { }\n}",
       testCase "default clause" $
-        render (Switch (VarExp "x") (DefaultCase [Discard] :| []))
+        render (Switch (ExpIdent "x") (DefaultCase [Discard] :| []))
           @?= "switch x {\n  default: {\n    discard;\n  }\n}",
       testCase "several clauses" $
         render
           ( Switch
-              (VarExp "x")
+              (ExpIdent "x")
               (Case (CaseExp one :| []) [Break] :| [DefaultCase []])
           )
           @?= "switch x {\n  case 1: {\n    break;\n  }\n  default: { }\n}"
@@ -852,10 +852,10 @@ loopTests =
     [ testCase "without continuing" $
         render (Loop [Break] Nothing) @?= "loop {\n  break;\n}",
       testCase "with continuing" $
-        render (Loop [Call "f" [] []] (Just (Continuing [Assign (VarExp "i") SimpleAssign one] Nothing)))
+        render (Loop [Call "f" [] []] (Just (Continuing [Assign (ExpIdent "i") AssignSimple one] Nothing)))
           @?= "loop {\n  f();\n  continuing {\n    i = 1;\n  }\n}",
       testCase "with break if" $
-        render (Loop [] (Just (Continuing [] (Just (VarExp "done")))))
+        render (Loop [] (Just (Continuing [] (Just (ExpIdent "done")))))
           @?= "loop {\n  continuing {\n    break if done;\n  }\n}",
       testCase "jumps" $
         map render [Break, Continue, Discard]
@@ -870,18 +870,18 @@ assignOpTests =
     "assignment operators"
     [ testCase "every operator" $
         map
-          (\op -> render (Assign (VarExp "x") op one))
-          [ SimpleAssign,
-            AddAssign,
-            SubtractAssign,
-            MultiplyAssign,
-            DivideAssign,
-            RemainderAssign,
-            BitwiseAndAssign,
-            BitwiseOrAssign,
-            BitwiseExclusiveOrAssign,
-            ShiftLeftAssign,
-            ShiftRightAssign
+          (\op -> render (Assign (ExpIdent "x") op one))
+          [ AssignSimple,
+            AssignAdd,
+            AssignSubtract,
+            AssignMultiply,
+            AssignDivide,
+            AssignRemainder,
+            AssignBitwiseAnd,
+            AssignBitwiseOr,
+            AssignBitwiseExclusiveOr,
+            AssignShiftLeft,
+            AssignShiftRight
           ]
           @?= [ "x = 1;",
                 "x += 1;",
@@ -896,12 +896,12 @@ assignOpTests =
                 "x >>= 1;"
               ],
       testCase "phony assignment" $
-        render (PhonyAssign (CallExp "f" [] [])) @?= "_ = f();",
+        render (PhonyAssign (ExpCall "f" [] [])) @?= "_ = f();",
       testCase "increment and decrement" $
-        map render [Increment (VarExp "x"), Decrement (IndexExp (VarExp "a") one)]
+        map render [Increment (ExpIdent "x"), Decrement (ExpIndex (ExpIdent "a") one)]
           @?= ["x++;", "a[1]--;"],
       testCase "const_assert" $
-        render (ConstAssert (VarExp "c")) @?= "const_assert c;"
+        render (ConstAssert (ExpIdent "c")) @?= "const_assert c;"
     ]
 
 -- | A @let@, @const@ or @var@ names an optionally typed identifier, and a
@@ -920,9 +920,9 @@ localDeclTests =
       testCase "var" $
         map
           render
-          [ DeclareVar "a" (Just I32) Nothing,
-            DeclareVar "a" (Just I32) (Just one),
-            DeclareVar "a" Nothing (Just one)
+          [ Var "a" (Just I32) Nothing,
+            Var "a" (Just I32) (Just one),
+            Var "a" Nothing (Just one)
           ]
           @?= ["var a : i32;", "var a : i32 = 1;", "var a = 1;"]
     ]
@@ -935,12 +935,12 @@ forUpdateTests =
     "for updates"
     [ testCase "every form" $
         map
-          (\u -> render (For "i" one (VarExp "c") u []))
-          [ UpdateAssign (VarExp "i") AddAssign one,
-            UpdatePhonyAssign (VarExp "i"),
-            UpdateIncrement (VarExp "i"),
-            UpdateDecrement (VarExp "i"),
-            UpdateCall "step" [] [VarExp "i"]
+          (\u -> render (For "i" one (ExpIdent "c") u []))
+          [ UpdateAssign (ExpIdent "i") AssignAdd one,
+            UpdatePhonyAssign (ExpIdent "i"),
+            UpdateIncrement (ExpIdent "i"),
+            UpdateDecrement (ExpIdent "i"),
+            UpdateCall "step" [] [ExpIdent "i"]
           ]
           @?= [ "for (var i = 1; c; i += 1) { }",
                 "for (var i = 1; c; _ = i) { }",
@@ -966,9 +966,9 @@ globalDeclTests =
       testCase "variable initialiser" $
         map
           render
-          [ GlobalVar [] Private Nothing "x" (Just F32) Nothing,
-            GlobalVar [] Private Nothing "x" Nothing (Just one),
-            GlobalVar [] Private Nothing "x" (Just F32) (Just one)
+          [ GlobalVariable [] Private Nothing "x" (Just F32) Nothing,
+            GlobalVariable [] Private Nothing "x" Nothing (Just one),
+            GlobalVariable [] Private Nothing "x" (Just F32) (Just one)
           ]
           @?= ["var<private> x : f32;", "var<private> x = 1;", "var<private> x : f32 = 1;"],
       testCase "override without a type" $
@@ -976,32 +976,32 @@ globalDeclTests =
     ]
 
 -- | An index may be applied to any expression, and chained.  Swizzles use
--- the same slot as member access, so 'FieldExp' spells them.  See
+-- the same slot as member access, so 'ExpMember' spells them.  See
 -- https://www.w3.org/TR/WGSL/#component-reference-expr.
 indexTests :: TestTree
 indexTests =
   testGroup
     "indexing"
     [ testCase "identifier" $
-        render (IndexExp (VarExp "a") (VarExp "i")) @?= "a[i]",
+        render (ExpIndex (ExpIdent "a") (ExpIdent "i")) @?= "a[i]",
       -- Indexing a nested array needs an index of an index.
       testCase "chained" $
-        render (IndexExp (IndexExp (VarExp "a") (VarExp "i")) (VarExp "j"))
+        render (ExpIndex (ExpIndex (ExpIdent "a") (ExpIdent "i")) (ExpIdent "j"))
           @?= "a[i][j]",
       testCase "call result" $
-        render (IndexExp (CallExp "f" [] [VarExp "x"]) (VarExp "i")) @?= "f(x)[i]",
+        render (ExpIndex (ExpCall "f" [] [ExpIdent "x"]) (ExpIdent "i")) @?= "f(x)[i]",
       testCase "through a pointer" $
-        render (IndexExp (UnOpExp Indirection (VarExp "p")) (VarExp "i"))
+        render (ExpIndex (ExpUnary Indirection (ExpIdent "p")) (ExpIdent "i"))
           @?= "(*p)[i]",
       testCase "member" $
-        render (IndexExp (FieldExp (VarExp "s") "f") (VarExp "i")) @?= "s.f[i]",
+        render (ExpIndex (ExpMember (ExpIdent "s") "f") (ExpIdent "i")) @?= "s.f[i]",
       testCase "swizzle of an index" $
-        render (FieldExp (IndexExp (VarExp "a") (VarExp "i")) "xyz") @?= "a[i].xyz",
+        render (ExpMember (ExpIndex (ExpIdent "a") (ExpIdent "i")) "xyz") @?= "a[i].xyz",
       testCase "as an assignment target" $
         render
           ( Assign
-              (IndexExp (IndexExp (VarExp "a") (VarExp "i")) (VarExp "j"))
-              SimpleAssign
+              (ExpIndex (ExpIndex (ExpIdent "a") (ExpIdent "i")) (ExpIdent "j"))
+              AssignSimple
               one
           )
           @?= "a[i][j] = 1;"

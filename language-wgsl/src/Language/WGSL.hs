@@ -9,13 +9,18 @@
 -- but fine for code generation. I would not be opposed to adding a concrete
 -- syntax module in the future.
 --
--- Deviations from the specification: statements cannot carry attributes;
--- assignment targets are ordinary expressions, not a separate
--- @lhs_expression@; expressions are always fully parenthesised, so operator
--- precedence is not modelled; and 'Comment' is an addition, as WGSL has no
--- comment statement.
+-- To produce WGSL code as text, use the 'Pretty' instance for the various
+-- constructs.
 --
--- To produce WGSL code as text, use the 'Pretty' instance.
+-- Known and intentional deviations from the specification:
+--
+-- 1. Statements do not have attributes
+--
+-- 2. Assignment targets are ordinary expressions, not a separate
+--    @lhs_expression@.
+--
+-- 3. When printed, expressions are always fully parenthesised, so operator
+--    precedence is not modelled.
 module Language.WGSL
   ( -- * Identifiers
     Ident,
@@ -45,29 +50,29 @@ module Language.WGSL
     sizeOfStruct,
 
     -- * Expressions
-    Exp (..),
-    BinOp (..),
-    UnOp (..),
-    IntLitType (..),
-    FloatLitType (..),
+    Expression (..),
+    BinaryOperator (..),
+    UnaryOperator (..),
+    IntLiteralType (..),
+    FloatLiteralType (..),
     intExp,
     floatExp,
     bitcast,
 
     -- * Statements
-    Stmt (..),
-    AssignOp (..),
+    Statement (..),
+    AssignmentOperator (..),
     ForUpdate (..),
     SwitchClause (..),
     CaseSelector (..),
     Continuing (..),
 
     -- * Declarations
-    Attrib (..),
+    Attribute (..),
     bindingAttribs,
     Param (..),
-    FunDecl (..),
-    Field (..),
+    FunctionDecl (..),
+    StructMember (..),
     StructDecl (..),
     GlobalDecl (..),
 
@@ -111,25 +116,25 @@ data Type
   | Mat4x4 Type
   | Atomic Type
   | -- | An array, which is runtime-sized when the element count is absent.
-    Array Type (Maybe Exp)
+    Array Type (Maybe Expression)
   | Ptr Type AddressSpace (Maybe AccessMode)
   | -- | A structure or type alias, referred to by name. Its definition is not
     -- known here, so it has no layout.
     Named Ident
   | -- | See https://www.w3.org/TR/WGSL/#sampled-texture-type.
-    SampledTexture TextureDim Type
+    TextureSampled TextureDim Type
   | -- | Always two-dimensional.  See
     -- https://www.w3.org/TR/WGSL/#multisampled-texture-type.
-    MultisampledTexture Type
+    TextureMultisampled Type
   | -- | An external sampled texture type.  See
     -- https://www.w3.org/TR/WGSL/#external-texture-type.
-    ExternalTexture
+    TextureExternal
   | -- | A storage texture type.  See
     -- https://www.w3.org/TR/WGSL/#texture-storage.
-    StorageTexture StorageTextureDim TexelFormat AccessMode
+    TextureStorage StorageTextureDim TexelFormat AccessMode
   | -- | A depth texture type.  See
     -- https://www.w3.org/TR/WGSL/#texture-depth.
-    DepthTexture DepthTexture
+    TextureDepth DepthTexture
   | -- | A sampler.  See https://www.w3.org/TR/WGSL/#sampler-type.
     Sampler
   | -- | A comparison sampler.
@@ -246,11 +251,11 @@ alignOf (Atomic _) = Just 4
 alignOf (Array t _) = alignOf t
 alignOf Ptr {} = Nothing
 alignOf (Named _) = Nothing
-alignOf SampledTexture {} = Nothing
-alignOf (MultisampledTexture _) = Nothing
-alignOf ExternalTexture = Nothing
-alignOf StorageTexture {} = Nothing
-alignOf (DepthTexture _) = Nothing
+alignOf TextureSampled {} = Nothing
+alignOf (TextureMultisampled _) = Nothing
+alignOf TextureExternal = Nothing
+alignOf TextureStorage {} = Nothing
+alignOf (TextureDepth _) = Nothing
 alignOf Sampler = Nothing
 alignOf SamplerComparison = Nothing
 
@@ -277,16 +282,16 @@ sizeOf (Mat2x4 t) = (2 *) <$> strideOf (Vec4 t)
 sizeOf (Mat3x4 t) = (3 *) <$> strideOf (Vec4 t)
 sizeOf (Mat4x4 t) = (4 *) <$> strideOf (Vec4 t)
 sizeOf (Atomic _) = Just 4
-sizeOf (Array t (Just (IntExp n _)))
+sizeOf (Array t (Just (ExpInt n _)))
   | n >= 0 = (n *) <$> strideOf t
 sizeOf Array {} = Nothing
 sizeOf Ptr {} = Nothing
 sizeOf (Named _) = Nothing
-sizeOf SampledTexture {} = Nothing
-sizeOf (MultisampledTexture _) = Nothing
-sizeOf ExternalTexture = Nothing
-sizeOf StorageTexture {} = Nothing
-sizeOf (DepthTexture _) = Nothing
+sizeOf TextureSampled {} = Nothing
+sizeOf (TextureMultisampled _) = Nothing
+sizeOf TextureExternal = Nothing
+sizeOf TextureStorage {} = Nothing
+sizeOf (TextureDepth _) = Nothing
 sizeOf Sampler = Nothing
 sizeOf SamplerComparison = Nothing
 
@@ -323,48 +328,48 @@ hostShareable (Atomic _) = True
 -- footprint, so its element count must be a literal.  A runtime-sized array
 -- has no count at all.
 hostShareable (Array t Nothing) = hostShareable t
-hostShareable (Array t (Just (IntExp _ _))) = hostShareable t
+hostShareable (Array t (Just (ExpInt _ _))) = hostShareable t
 hostShareable Array {} = False
 hostShareable Ptr {} = False
 hostShareable (Named _) = False
-hostShareable SampledTexture {} = False
-hostShareable (MultisampledTexture _) = False
-hostShareable ExternalTexture = False
-hostShareable StorageTexture {} = False
-hostShareable (DepthTexture _) = False
+hostShareable TextureSampled {} = False
+hostShareable (TextureMultisampled _) = False
+hostShareable TextureExternal = False
+hostShareable TextureStorage {} = False
+hostShareable (TextureDepth _) = False
 hostShareable Sampler = False
 hostShareable SamplerComparison = False
 
 -- | @AlignOfMember@ of a structure member.  'Nothing' if its @\@align@
 -- argument is not a literal.  See
 -- https://www.w3.org/TR/WGSL/#structure-member-layout.
-alignOfMember :: Field -> Maybe Int
-alignOfMember (Field attribs _ t) =
-  case [args | Attrib name args <- attribs, name == "align"] of
+alignOfMember :: StructMember -> Maybe Int
+alignOfMember (StructMember attribs _ t) =
+  case [args | Attribute name args <- attribs, name == "align"] of
     [] -> alignOf t
-    [[IntExp k _]] -> Just k
+    [[ExpInt k _]] -> Just k
     _ -> Nothing
 
 -- | @SizeOfMember@ of a structure member.  'Nothing' if its @\@size@
 -- argument is not a literal.  See
 -- https://www.w3.org/TR/WGSL/#structure-member-layout.
-sizeOfMember :: Field -> Maybe Int
-sizeOfMember (Field attribs _ t) =
-  case [args | Attrib name args <- attribs, name == "size"] of
+sizeOfMember :: StructMember -> Maybe Int
+sizeOfMember (StructMember attribs _ t) =
+  case [args | Attribute name args <- attribs, name == "size"] of
     [] -> sizeOf t
-    [[IntExp k _]] -> Just k
+    [[ExpInt k _]] -> Just k
     _ -> Nothing
 
 -- | @AlignOf@ of a structure with the given members.  'Nothing' if there are
 -- no members.  See https://www.w3.org/TR/WGSL/#structure-member-layout.
-alignOfStruct :: [Field] -> Maybe Int
+alignOfStruct :: [StructMember] -> Maybe Int
 alignOfStruct [] = Nothing
 alignOfStruct members = maximum <$> mapM alignOfMember members
 
 -- | @OffsetOfMember@ of every member of a structure, which is known even when
 -- the structure has no @SizeOf@.  See
 -- https://www.w3.org/TR/WGSL/#structure-member-layout.
-offsetOfMembers :: [Field] -> Maybe [Int]
+offsetOfMembers :: [StructMember] -> Maybe [Int]
 offsetOfMembers [] = Nothing
 offsetOfMembers members = do
   aligns <- mapM alignOfMember $ drop 1 members
@@ -378,7 +383,7 @@ offsetOfMembers members = do
 -- | @SizeOf@ of a structure with the given members.  'Nothing' if any member
 -- has no @SizeOfMember@.  See
 -- https://www.w3.org/TR/WGSL/#structure-member-layout.
-sizeOfStruct :: [Field] -> Maybe Int
+sizeOfStruct :: [StructMember] -> Maybe Int
 sizeOfStruct members = do
   struct_align <- alignOfStruct members
   offsets <- offsetOfMembers members
@@ -386,7 +391,7 @@ sizeOfStruct members = do
   pure $ roundUp struct_align (last offsets + last_size)
 
 -- | A binary operator. See https://www.w3.org/TR/WGSL/#expressions.
-data BinOp
+data BinaryOperator
   = Add
   | Subtract
   | Multiply
@@ -408,7 +413,7 @@ data BinOp
   deriving (Eq, Ord, Show)
 
 -- | A unary operator.  See https://www.w3.org/TR/WGSL/#expressions.
-data UnOp
+data UnaryOperator
   = Negate
   | LogicalNegate
   | BitwiseComplement
@@ -418,7 +423,7 @@ data UnOp
 
 -- | The type denoted by an integer literal, which is determined by its
 -- suffix.  See https://www.w3.org/TR/WGSL/#numeric-literals.
-data IntLitType
+data IntLiteralType
   = -- | No suffix.
     AbstractInt
   | -- | The @i@ suffix.
@@ -429,7 +434,7 @@ data IntLitType
 
 -- | The type denoted by a floating point literal, which is determined by its
 -- suffix.  See https://www.w3.org/TR/WGSL/#numeric-literals.
-data FloatLitType
+data FloatLiteralType
   = -- | No suffix.
     AbstractFloat
   | -- | The @f@ suffix.
@@ -439,95 +444,95 @@ data FloatLitType
   deriving (Eq, Ord, Show)
 
 -- | An expression.  See https://www.w3.org/TR/WGSL/#expressions.
-data Exp
-  = BoolExp Bool
+data Expression
+  = ExpBool Bool
   | -- | An integer literal.  Prefer 'intExp', which checks that the value can
     -- be denoted by a literal of the given type.
-    IntExp Int IntLitType
+    ExpInt Int IntLiteralType
   | -- | A floating point literal.  Prefer 'floatExp'.
-    FloatExp Double FloatLitType
-  | VarExp Ident
-  | BinOpExp BinOp Exp Exp
-  | UnOpExp UnOp Exp
+    ExpFloat Double FloatLiteralType
+  | ExpIdent Ident
+  | ExpBinary BinaryOperator Expression Expression
+  | ExpUnary UnaryOperator Expression
   | -- | A call.  The first list is the callee's template arguments, as in
     -- @bitcast<i32>(x)@.
-    CallExp Ident [Exp] [Exp]
+    ExpCall Ident [Expression] [Expression]
   | -- | A type in expression position, as a template argument is.
-    TypeExp Type
-  | IndexExp Exp Exp
-  | FieldExp Exp Ident
+    ExpType Type
+  | ExpIndex Expression Expression
+  | ExpMember Expression Ident
   deriving (Eq, Ord, Show)
 
 -- | A statement.  See https://www.w3.org/TR/WGSL/#statements.
-data Stmt
+data Statement
   = -- | The empty statement.
     Empty
   | -- | A line comment, which is not a statement in WGSL, but is useful in
     -- generated code.  May contain linebreaks.
     Comment T.Text
-  | Compound [Stmt]
+  | Compound [Statement]
   | -- | @let x = e@, with an optional type.
-    Let Ident (Maybe Type) Exp
+    Let Ident (Maybe Type) Expression
   | -- | @const x = e@, with an optional type.
-    Const Ident (Maybe Type) Exp
+    Const Ident (Maybe Type) Expression
   | -- | @var x : T = e@.
-    DeclareVar Ident (Maybe Type) (Maybe Exp)
-  | Assign Exp AssignOp Exp
+    Var Ident (Maybe Type) (Maybe Expression)
+  | Assign Expression AssignmentOperator Expression
   | -- | @_ = e@.
-    PhonyAssign Exp
-  | Increment Exp
-  | Decrement Exp
+    PhonyAssign Expression
+  | Increment Expression
+  | Decrement Expression
   | -- | @const_assert e@.  'GlobalAssert' is its module-scope counterpart.
-    ConstAssert Exp
+    ConstAssert Expression
   | -- | An @if@, its @else if@ clauses, and its optional @else@ clause.
-    If Exp [Stmt] [(Exp, [Stmt])] (Maybe [Stmt])
-  | Switch Exp (NonEmpty SwitchClause)
+    If Expression [Statement] [(Expression, [Statement])] (Maybe [Statement])
+  | Switch Expression (NonEmpty SwitchClause)
   | -- | A @loop@, with its optional @continuing@ block.
-    Loop [Stmt] (Maybe Continuing)
-  | For Ident Exp Exp ForUpdate [Stmt]
-  | While Exp [Stmt]
+    Loop [Statement] (Maybe Continuing)
+  | For Ident Expression Expression ForUpdate [Statement]
+  | While Expression [Statement]
   | Break
   | Continue
   | Discard
-  | Call Ident [Exp] [Exp]
-  | Return (Maybe Exp)
+  | Call Ident [Expression] [Expression]
+  | Return (Maybe Expression)
   deriving (Eq, Ord, Show)
 
 -- | A clause of a @switch@ statement.  See
 -- https://www.w3.org/TR/WGSL/#switch-statement.
 data SwitchClause
   = -- | A @case@ with one or more selectors.
-    Case (NonEmpty CaseSelector) [Stmt]
+    Case (NonEmpty CaseSelector) [Statement]
   | -- | A @default@ clause on its own.
-    DefaultCase [Stmt]
+    DefaultCase [Statement]
   deriving (Eq, Ord, Show)
 
 -- | A selector of a @case@ clause.  See
 -- https://www.w3.org/TR/WGSL/#switch-statement.
 data CaseSelector
-  = CaseExp Exp
+  = CaseExp Expression
   | CaseDefault
   deriving (Eq, Ord, Show)
 
 -- | The @continuing@ block of a @loop@, which may end in a @break if@.  See
 -- https://www.w3.org/TR/WGSL/#continuing-statement.
-data Continuing = Continuing [Stmt] (Maybe Exp)
+data Continuing = Continuing [Statement] (Maybe Expression)
   deriving (Eq, Ord, Show)
 
 -- | The operator of an assignment: plain assignment, or one of the compound
 -- assignment operators.  See https://www.w3.org/TR/WGSL/#assignment.
-data AssignOp
-  = SimpleAssign
-  | AddAssign
-  | SubtractAssign
-  | MultiplyAssign
-  | DivideAssign
-  | RemainderAssign
-  | BitwiseAndAssign
-  | BitwiseOrAssign
-  | BitwiseExclusiveOrAssign
-  | ShiftLeftAssign
-  | ShiftRightAssign
+data AssignmentOperator
+  = AssignSimple
+  | AssignAdd
+  | AssignSubtract
+  | AssignMultiply
+  | AssignDivide
+  | AssignRemainder
+  | AssignBitwiseAnd
+  | AssignBitwiseOr
+  | AssignBitwiseExclusiveOr
+  | AssignShiftLeft
+  | AssignShiftRight
   deriving (Eq, Ord, Show)
 
 -- | The update of a @for@ loop, which the grammar restricts to the statements
@@ -536,40 +541,40 @@ data AssignOp
 -- https://www.w3.org/TR/WGSL/#for-statement.
 data ForUpdate
   = -- | The left-hand side must be an assignable expression.
-    UpdateAssign Exp AssignOp Exp
-  | UpdatePhonyAssign Exp
-  | UpdateIncrement Exp
-  | UpdateDecrement Exp
-  | UpdateCall Ident [Exp] [Exp]
+    UpdateAssign Expression AssignmentOperator Expression
+  | UpdatePhonyAssign Expression
+  | UpdateIncrement Expression
+  | UpdateDecrement Expression
+  | UpdateCall Ident [Expression] [Expression]
   deriving (Eq, Ord, Show)
 
 -- | An attribute.  See https://www.w3.org/TR/WGSL/#attributes.
-data Attrib = Attrib Ident [Exp]
+data Attribute = Attribute Ident [Expression]
   deriving (Eq, Ord, Show)
 
 -- | A formal parameter of a function.  See
 -- https://www.w3.org/TR/WGSL/#function-declaration-sec.
-data Param = Param [Attrib] Ident Type
+data Param = Param [Attribute] Ident Type
   deriving (Eq, Ord, Show)
 
 -- | A function declaration.  See
 -- https://www.w3.org/TR/WGSL/#function-declaration-sec.
-data FunDecl = FunDecl
-  { funName :: Ident,
-    funAttribs :: [Attrib],
-    funParams :: [Param],
-    funReturn :: Maybe ([Attrib], Type),
-    funBody :: [Stmt]
+data FunctionDecl = FunctionDecl
+  { functionName :: Ident,
+    functionAttributes :: [Attribute],
+    functionParams :: [Param],
+    functionReturn :: Maybe ([Attribute], Type),
+    functionBody :: [Statement]
   }
   deriving (Eq, Ord, Show)
 
 -- | A structure member.  See https://www.w3.org/TR/WGSL/#struct-types.
-data Field = Field [Attrib] Ident Type
+data StructMember = StructMember [Attribute] Ident Type
   deriving (Eq, Ord, Show)
 
 -- | A structure declaration.  See
 -- https://www.w3.org/TR/WGSL/#struct-types.
-data StructDecl = StructDecl Ident [Field]
+data StructDecl = StructDecl Ident [StructMember]
   deriving (Eq, Ord, Show)
 
 -- | The access modes supported by a memory view.  See
@@ -591,18 +596,18 @@ data AddressSpace
 -- | A module-scope declaration.  See
 -- https://www.w3.org/TR/WGSL/#module-scope-declarations.
 data GlobalDecl
-  = GlobalFun FunDecl
+  = GlobalFunction FunctionDecl
   | GlobalStruct StructDecl
   | -- | The access mode may only be given along with the address space, and
     -- defaults to the one of the address space when omitted.
-    GlobalVar [Attrib] AddressSpace (Maybe AccessMode) Ident (Maybe Type) (Maybe Exp)
-  | GlobalOverride [Attrib] Ident (Maybe Type) (Maybe Exp)
+    GlobalVariable [Attribute] AddressSpace (Maybe AccessMode) Ident (Maybe Type) (Maybe Expression)
+  | GlobalOverride [Attribute] Ident (Maybe Type) (Maybe Expression)
   | -- | A module-scope @const@, which takes no attributes.
-    GlobalConst Ident (Maybe Type) Exp
+    GlobalConst Ident (Maybe Type) Expression
   | -- | A type alias.
     GlobalAlias Ident Type
   | -- | A module-scope @const_assert@.
-    GlobalAssert Exp
+    GlobalAssert Expression
   deriving (Eq, Ord, Show)
 
 -- | A WGSL module: its directives, then its declarations.  See
@@ -656,17 +661,17 @@ data LanguageExtension
 
 -- | The @\@group@ and @\@binding@ attributes for the given group and
 -- binding.
-bindingAttribs :: Int -> Int -> [Attrib]
+bindingAttribs :: Int -> Int -> [Attribute]
 bindingAttribs grp binding =
-  [ Attrib "group" [IntExp grp AbstractInt],
-    Attrib "binding" [IntExp binding AbstractInt]
+  [ Attribute "group" [ExpInt grp AbstractInt],
+    Attribute "binding" [ExpInt binding AbstractInt]
   ]
 
 -- | Construct an integer literal, or 'Nothing' if the value cannot be denoted
 -- by a literal of the given type.
-intExp :: Int -> IntLitType -> Maybe Exp
+intExp :: Int -> IntLiteralType -> Maybe Expression
 intExp v t
-  | representable = Just $ IntExp v t
+  | representable = Just $ ExpInt v t
   | otherwise = Nothing
   where
     representable = case t of
@@ -677,11 +682,11 @@ intExp v t
 
 -- | Construct a floating point literal, or 'Nothing' if the value cannot be
 -- denoted by a literal of the given type.
-floatExp :: Double -> FloatLitType -> Maybe Exp
+floatExp :: Double -> FloatLiteralType -> Maybe Expression
 floatExp v t
   | isNaN v || isInfinite v = Nothing
   | maybe False (abs v >) largestFinite = Nothing
-  | otherwise = Just $ FloatExp v t
+  | otherwise = Just $ ExpFloat v t
   where
     largestFinite = case t of
       -- Any finite Double denotes an AbstractFloat.
@@ -691,15 +696,15 @@ floatExp v t
 
 -- | Reinterpret the bits of an expression as another type.  See
 -- https://www.w3.org/TR/WGSL/#bitcast-builtin.
-bitcast :: Type -> Exp -> Exp
-bitcast t e = CallExp "bitcast" [TypeExp t] [e]
+bitcast :: Type -> Expression -> Expression
+bitcast t e = ExpCall "bitcast" [ExpType t] [e]
 
 -- | A template argument list, which is omitted when empty.
 templateArgs :: [Doc a] -> Doc a
 templateArgs [] = mempty
 templateArgs args = "<" <> commasep args <> ">"
 
-templateList :: [Exp] -> Doc a
+templateList :: [Expression] -> Doc a
 templateList = templateArgs . map pretty
 
 -- | Separate with commas.
@@ -742,13 +747,13 @@ instance Pretty Type where
   pretty (Ptr t as am) =
     generator "ptr" $ [pretty as, pretty t] ++ maybe [] (pure . pretty) am
   pretty (Named t) = pretty t
-  pretty (SampledTexture dim t) = generator (textureDim dim) [pretty t]
-  pretty (MultisampledTexture t) =
+  pretty (TextureSampled dim t) = generator (textureDim dim) [pretty t]
+  pretty (TextureMultisampled t) =
     generator "texture_multisampled_2d" [pretty t]
-  pretty ExternalTexture = "texture_external"
-  pretty (StorageTexture dim fmt am) =
+  pretty TextureExternal = "texture_external"
+  pretty (TextureStorage dim fmt am) =
     generator (storageTextureDim dim) [pretty fmt, pretty am]
-  pretty (DepthTexture d) = pretty d
+  pretty (TextureDepth d) = pretty d
   pretty Sampler = "sampler"
   pretty SamplerComparison = "sampler_comparison"
 
@@ -821,17 +826,17 @@ instance Pretty TexelFormat where
 generator :: Ident -> [Doc a] -> Doc a
 generator name args = pretty name <> templateArgs args
 
-intSuffix :: IntLitType -> Doc a
+intSuffix :: IntLiteralType -> Doc a
 intSuffix AbstractInt = mempty
 intSuffix LitI32 = "i"
 intSuffix LitU32 = "u"
 
-floatSuffix :: FloatLitType -> Doc a
+floatSuffix :: FloatLiteralType -> Doc a
 floatSuffix AbstractFloat = mempty
 floatSuffix LitF32 = "f"
 floatSuffix LitF16 = "h"
 
-instance Pretty BinOp where
+instance Pretty BinaryOperator where
   pretty Add = "+"
   pretty Subtract = "-"
   pretty Multiply = "*"
@@ -851,28 +856,28 @@ instance Pretty BinOp where
   pretty ShortCircuitAnd = "&&"
   pretty ShortCircuitOr = "||"
 
-instance Pretty UnOp where
+instance Pretty UnaryOperator where
   pretty Negate = "-"
   pretty LogicalNegate = "!"
   pretty BitwiseComplement = "~"
   pretty Indirection = "*"
   pretty AddressOf = "&"
 
-instance Pretty Exp where
-  pretty (BoolExp True) = "true"
-  pretty (BoolExp False) = "false"
-  pretty (IntExp x t) = pretty x <> intSuffix t
-  pretty (FloatExp x t) = pretty x <> floatSuffix t
-  pretty (VarExp x) = pretty x
-  pretty (UnOpExp op e) = parens (pretty op <> pretty e)
-  pretty (BinOpExp op e1 e2) = parens (pretty e1 <+> pretty op <+> pretty e2)
-  pretty (CallExp f targs args) =
+instance Pretty Expression where
+  pretty (ExpBool True) = "true"
+  pretty (ExpBool False) = "false"
+  pretty (ExpInt x t) = pretty x <> intSuffix t
+  pretty (ExpFloat x t) = pretty x <> floatSuffix t
+  pretty (ExpIdent x) = pretty x
+  pretty (ExpUnary op e) = parens (pretty op <> pretty e)
+  pretty (ExpBinary op e1 e2) = parens (pretty e1 <+> pretty op <+> pretty e2)
+  pretty (ExpCall f targs args) =
     pretty f <> templateList targs <> parens (commasep $ map pretty args)
-  pretty (TypeExp t) = pretty t
-  pretty (IndexExp e i) = pretty e <> brackets (pretty i)
-  pretty (FieldExp x y) = pretty x <> "." <> pretty y
+  pretty (ExpType t) = pretty t
+  pretty (ExpIndex e i) = pretty e <> brackets (pretty i)
+  pretty (ExpMember x y) = pretty x <> "." <> pretty y
 
-instance Pretty Stmt where
+instance Pretty Statement where
   pretty Empty = ";"
   pretty (Comment c) = vsep (map ("//" <+>) (pretty <$> T.lines c))
   pretty (Compound body) = block body
@@ -880,7 +885,7 @@ instance Pretty Stmt where
     "let" <+> optionallyTyped x t <+> "=" <+> pretty e <> ";"
   pretty (Const x t e) =
     "const" <+> optionallyTyped x t <+> "=" <+> pretty e <> ";"
-  pretty (DeclareVar x t e) =
+  pretty (Var x t e) =
     "var" <+> optionallyTyped x t <> prettyInit e <> ";"
   pretty (Assign lhs op e) = pretty lhs <+> pretty op <+> pretty e <> ";"
   pretty (PhonyAssign e) = "_" <+> "=" <+> pretty e <> ";"
@@ -943,7 +948,7 @@ instance Pretty Continuing where
 
 -- | A brace-enclosed statement sequence, as every block in WGSL is.  See
 -- https://www.w3.org/TR/WGSL/#compound-statement-section.
-block :: [Stmt] -> Doc a
+block :: [Statement] -> Doc a
 block = braceBlock . map pretty
 
 -- | An @optionally_typed_ident@.
@@ -951,21 +956,21 @@ optionallyTyped :: Ident -> Maybe Type -> Doc a
 optionallyTyped x t = pretty x <> maybe mempty ((" :" <+>) . pretty) t
 
 -- | An optional initialiser.
-prettyInit :: Maybe Exp -> Doc a
+prettyInit :: Maybe Expression -> Doc a
 prettyInit = maybe mempty ((" =" <+>) . pretty)
 
-instance Pretty AssignOp where
-  pretty SimpleAssign = "="
-  pretty AddAssign = "+="
-  pretty SubtractAssign = "-="
-  pretty MultiplyAssign = "*="
-  pretty DivideAssign = "/="
-  pretty RemainderAssign = "%="
-  pretty BitwiseAndAssign = "&="
-  pretty BitwiseOrAssign = "|="
-  pretty BitwiseExclusiveOrAssign = "^="
-  pretty ShiftLeftAssign = "<<="
-  pretty ShiftRightAssign = ">>="
+instance Pretty AssignmentOperator where
+  pretty AssignSimple = "="
+  pretty AssignAdd = "+="
+  pretty AssignSubtract = "-="
+  pretty AssignMultiply = "*="
+  pretty AssignDivide = "/="
+  pretty AssignRemainder = "%="
+  pretty AssignBitwiseAnd = "&="
+  pretty AssignBitwiseOr = "|="
+  pretty AssignBitwiseExclusiveOr = "^="
+  pretty AssignShiftLeft = "<<="
+  pretty AssignShiftRight = ">>="
 
 -- | A brace-enclosed, indented sequence.
 braceBlock :: [Doc a] -> Doc a
@@ -980,9 +985,9 @@ instance Pretty ForUpdate where
   pretty (UpdateCall f targs args) =
     pretty f <> templateList targs <> parens (commasep $ map pretty args)
 
-instance Pretty Attrib where
-  pretty (Attrib name []) = "@" <> pretty name
-  pretty (Attrib name args) =
+instance Pretty Attribute where
+  pretty (Attribute name []) = "@" <> pretty name
+  pretty (Attribute name args) =
     "@" <> pretty name <> parens (commasep $ map pretty args)
 
 instance Pretty Param where
@@ -993,8 +998,8 @@ prettyParams :: [Param] -> Doc a
 prettyParams [] = "()"
 prettyParams params = "(" </> indent 2 (commastack (map pretty params)) </> ")"
 
-instance Pretty FunDecl where
-  pretty (FunDecl name attribs params ret body) =
+instance Pretty FunctionDecl where
+  pretty (FunctionDecl name attribs params ret body) =
     prettyAttribs attribs <> header <+> block body
     where
       header = case ret of
@@ -1007,12 +1012,12 @@ instance Pretty FunDecl where
             <+> hsep (map pretty ret_attribs ++ [pretty t])
 
 -- | Attributes, followed by a line break if there are any at all.
-prettyAttribs :: [Attrib] -> Doc a
+prettyAttribs :: [Attribute] -> Doc a
 prettyAttribs [] = mempty
 prettyAttribs attribs = hsep (map pretty attribs) <> line
 
-instance Pretty Field where
-  pretty (Field attribs name typ) =
+instance Pretty StructMember where
+  pretty (StructMember attribs name typ) =
     hsep $ map pretty attribs ++ [pretty name <+> ":" <+> pretty typ]
 
 instance Pretty StructDecl where
@@ -1082,9 +1087,9 @@ instance Pretty Module where
     stack $ map pretty directives ++ map pretty decls
 
 instance Pretty GlobalDecl where
-  pretty (GlobalFun fun) = pretty fun
+  pretty (GlobalFunction fun) = pretty fun
   pretty (GlobalStruct struct) = pretty struct
-  pretty (GlobalVar attribs as am name typ e) =
+  pretty (GlobalVariable attribs as am name typ e) =
     prettyAttribs attribs
       <> "var<"
       <> pretty as

@@ -61,8 +61,8 @@ newtype KernelR = KernelR {krKernel :: ImpGPU.Kernel}
 data KernelState = KernelState
   { -- Kernel declarations and body
     ksDecls :: [WGSL.GlobalDecl],
-    ksInits :: [WGSL.Stmt],
-    ksBody :: [WGSL.Stmt],
+    ksInits :: [WGSL.Statement],
+    ksBody :: [WGSL.Statement],
     -- | Identifier replacement map. We have to rename some identifiers; when
     -- translating Imp Code and PrimExps this map is consulted to respect the
     -- renaming.
@@ -74,7 +74,7 @@ data KernelState = KernelState
     -- general information about memory in scope
     ksSharedMem :: [(WGSL.Ident, Exp)],
     ksAtomicMem :: [WGSL.Ident],
-    ksScalars :: [WGSL.Field],
+    ksScalars :: [WGSL.StructMember],
     ksBindSlots :: [Int]
   }
 
@@ -98,10 +98,10 @@ addDecl decl = modify $ \s -> s {ksDecls = ksDecls s ++ [decl]}
 prependDecl :: WGSL.GlobalDecl -> KernelM ()
 prependDecl decl = modify $ \s -> s {ksDecls = decl : ksDecls s}
 
-addInitStmt :: WGSL.Stmt -> KernelM ()
+addInitStmt :: WGSL.Statement -> KernelM ()
 addInitStmt stmt = modify $ \s -> s {ksInits = ksInits s ++ [stmt]}
 
-addBodyStmt :: WGSL.Stmt -> KernelM ()
+addBodyStmt :: WGSL.Statement -> KernelM ()
 addBodyStmt stmt = modify $ \s -> s {ksBody = ksBody s ++ [stmt]}
 
 -- | Produces an identifier for the given name, respecting the name replacements
@@ -123,7 +123,7 @@ assignBindSlot = do
 
 -- | Add an override declaration to the current kernel's interface and into the
 -- module.
-addOverride :: WGSL.Ident -> WGSL.Type -> Maybe WGSL.Exp -> KernelM ()
+addOverride :: WGSL.Ident -> WGSL.Type -> Maybe WGSL.Expression -> KernelM ()
 addOverride ident typ e = do
   addDecl $ WGSL.GlobalOverride [] ident (Just typ) e
   modify $ \s -> s {ksOverrides = ksOverrides s ++ [ident]}
@@ -154,17 +154,17 @@ isAtomic :: WGSL.Ident -> KernelM Bool
 isAtomic ident = elem ident <$> gets ksAtomicMem
 
 -- | Add a scalar struct field.
-addScalar :: WGSL.Field -> KernelM ()
+addScalar :: WGSL.StructMember -> KernelM ()
 addScalar field = modify $ \s -> s {ksScalars = ksScalars s ++ [field]}
 
 entryParams :: [WGSL.Param]
 entryParams =
   [ WGSL.Param
-      [WGSL.Attrib "builtin" [WGSL.VarExp "workgroup_id"]]
+      [WGSL.Attribute "builtin" [WGSL.ExpIdent "workgroup_id"]]
       "workgroup_id"
       (WGSL.Vec3 WGSL.U32),
     WGSL.Param
-      [WGSL.Attrib "builtin" [WGSL.VarExp "local_invocation_id"]]
+      [WGSL.Attribute "builtin" [WGSL.ExpIdent "local_invocation_id"]]
       "local_id"
       (WGSL.Vec3 WGSL.U32)
   ]
@@ -203,16 +203,16 @@ genKernel kernel = do
   let name = nameToText $ ImpGPU.kernelName kernel
   let blockDimNames = [n | (_, n, _) <- ksBlockDims s]
   let attribs =
-        [ WGSL.Attrib "compute" [],
-          WGSL.Attrib "workgroup_size" (map WGSL.VarExp blockDimNames)
+        [ WGSL.Attribute "compute" [],
+          WGSL.Attribute "workgroup_size" (map WGSL.ExpIdent blockDimNames)
         ]
   let wgslFun =
-        WGSL.FunDecl
-          { WGSL.funName = textToIdent name,
-            WGSL.funAttribs = attribs,
-            WGSL.funParams = entryParams,
-            WGSL.funReturn = Nothing,
-            WGSL.funBody = ksInits s ++ ksBody s
+        WGSL.FunctionDecl
+          { WGSL.functionName = textToIdent name,
+            WGSL.functionAttributes = attribs,
+            WGSL.functionParams = entryParams,
+            WGSL.functionReturn = Nothing,
+            WGSL.functionBody = ksInits s ++ ksBody s
           }
   addCode $ prettyText wgslFun
 
@@ -250,7 +250,7 @@ genKernel kernel = do
       -- for more details.
       lsw <- builtinLockstepWidth
       addInitStmt $
-        WGSL.Let "_dummy_lockstep_width" Nothing (WGSL.VarExp lsw)
+        WGSL.Let "_dummy_lockstep_width" Nothing (WGSL.ExpIdent lsw)
 
       wgslBody <- genWGSLStms (ImpGPU.kernelBody kernel)
       mapM_ addBodyStmt wgslBody
@@ -290,20 +290,20 @@ generateDeviceFun fname device_func = do
       -- parameters.  A single result is returned directly; several results are
       -- written through pointer parameters, as WGSL functions return at most
       -- one value.
-      let declare (WGSL.Param _ v typ) = WGSL.DeclareVar v (Just typ) Nothing
+      let declare (WGSL.Param _ v typ) = WGSL.Var v (Just typ) Nothing
           outPtrParam (WGSL.Param a v t) =
             WGSL.Param a (v <> "_out") (WGSL.Ptr t WGSL.Function Nothing)
           writeOutPtr (WGSL.Param _ v _) =
             WGSL.Assign
-              (WGSL.UnOpExp WGSL.Indirection (WGSL.VarExp (v <> "_out")))
-              WGSL.SimpleAssign
-              (WGSL.VarExp v)
+              (WGSL.ExpUnary WGSL.Indirection (WGSL.ExpIdent (v <> "_out")))
+              WGSL.AssignSimple
+              (WGSL.ExpIdent v)
           (fun_params, fun_return, fun_body) = case out_params of
             [] -> (in_params, Nothing, body)
             [p@(WGSL.Param _ v typ)] ->
               ( in_params,
                 Just ([], typ),
-                [declare p] ++ body ++ [WGSL.Return $ Just $ WGSL.VarExp v]
+                [declare p] ++ body ++ [WGSL.Return $ Just $ WGSL.ExpIdent v]
               )
             _ ->
               ( in_params ++ map outPtrParam out_params,
@@ -311,14 +311,14 @@ generateDeviceFun fname device_func = do
                 map declare out_params ++ body ++ map writeOutPtr out_params
               )
       let wgslFun =
-            WGSL.FunDecl
-              { WGSL.funName = "futrts_" <> textToIdent (nameToText fname),
-                WGSL.funAttribs = mempty,
-                WGSL.funParams = fun_params,
-                WGSL.funReturn = fun_return,
-                WGSL.funBody = fun_body
+            WGSL.FunctionDecl
+              { WGSL.functionName = "futrts_" <> textToIdent (nameToText fname),
+                WGSL.functionAttributes = mempty,
+                WGSL.functionParams = fun_params,
+                WGSL.functionReturn = fun_return,
+                WGSL.functionBody = fun_body
               }
-       in prependDecl $ WGSL.GlobalFun wgslFun
+       in prependDecl $ WGSL.GlobalFunction wgslFun
 
   lift $ State.modify $ \s ->
     s
@@ -435,7 +435,7 @@ wgslPrimType Bool = WGSL.Bool
 -- TODO: Make sure we do not ever codegen statements involving Unit variables
 wgslPrimType Unit = WGSL.F16 -- error "TODO: no unit in WGSL"
 
-wgslBufferType :: (PrimType, Bool, Signedness) -> Maybe WGSL.Exp -> WGSL.Type
+wgslBufferType :: (PrimType, Bool, Signedness) -> Maybe WGSL.Expression -> WGSL.Type
 wgslBufferType (Bool, _, _) = WGSL.Array $ WGSL.Atomic wgslInt8
 wgslBufferType (IntType Int8, _, _) = WGSL.Array $ WGSL.Atomic wgslInt8
 wgslBufferType (IntType Int16, _, _) = WGSL.Array $ WGSL.Atomic wgslInt16
@@ -450,7 +450,7 @@ wgslBufferType (t, _, _) = WGSL.Array $ wgslPrimType t
 
 wgslSharedBufferType ::
   (PrimType, Bool, Signedness) ->
-  Maybe WGSL.Exp ->
+  Maybe WGSL.Expression ->
   WGSL.Type
 wgslSharedBufferType (Bool, _, _) = WGSL.Array WGSL.Bool
 wgslSharedBufferType (IntType Int8, True, _) = WGSL.Array $ WGSL.Atomic WGSL.I32
@@ -468,22 +468,22 @@ wgslSharedBufferType (FloatType Float16, True, _) =
   WGSL.Array $ WGSL.Atomic WGSL.I32
 wgslSharedBufferType (t, _, _) = WGSL.Array $ wgslPrimType t
 
-packedElemIndex :: PrimType -> WGSL.Exp -> WGSL.Exp
-packedElemIndex Bool i = WGSL.BinOpExp WGSL.Divide i (WGSL.IntExp 4 WGSL.AbstractInt)
-packedElemIndex (IntType Int8) i = WGSL.BinOpExp WGSL.Divide i (WGSL.IntExp 4 WGSL.AbstractInt)
-packedElemIndex (IntType Int16) i = WGSL.BinOpExp WGSL.Divide i (WGSL.IntExp 2 WGSL.AbstractInt)
+packedElemIndex :: PrimType -> WGSL.Expression -> WGSL.Expression
+packedElemIndex Bool i = WGSL.ExpBinary WGSL.Divide i (WGSL.ExpInt 4 WGSL.AbstractInt)
+packedElemIndex (IntType Int8) i = WGSL.ExpBinary WGSL.Divide i (WGSL.ExpInt 4 WGSL.AbstractInt)
+packedElemIndex (IntType Int16) i = WGSL.ExpBinary WGSL.Divide i (WGSL.ExpInt 2 WGSL.AbstractInt)
 packedElemIndex (IntType Int32) i = i
-packedElemIndex (FloatType Float16) i = WGSL.BinOpExp WGSL.Divide i (WGSL.IntExp 2 WGSL.AbstractInt)
+packedElemIndex (FloatType Float16) i = WGSL.ExpBinary WGSL.Divide i (WGSL.ExpInt 2 WGSL.AbstractInt)
 packedElemIndex (FloatType Float32) i = i
 packedElemIndex _ _ = error "CodeGen.ImpGen.WebGPU:packedElemIndex: Unsupported Type"
 
-packedElemOffset :: PrimType -> WGSL.Exp -> WGSL.Exp
-packedElemOffset Bool i = WGSL.BinOpExp WGSL.Remainder i (WGSL.IntExp 4 WGSL.AbstractInt)
-packedElemOffset (IntType Int8) i = WGSL.BinOpExp WGSL.Remainder i (WGSL.IntExp 4 WGSL.AbstractInt)
-packedElemOffset (IntType Int16) i = WGSL.BinOpExp WGSL.Remainder i (WGSL.IntExp 2 WGSL.AbstractInt)
-packedElemOffset (IntType Int32) _ = WGSL.IntExp 0 WGSL.AbstractInt
-packedElemOffset (FloatType Float16) i = WGSL.BinOpExp WGSL.Remainder i (WGSL.IntExp 2 WGSL.AbstractInt)
-packedElemOffset (FloatType Float32) _ = WGSL.IntExp 0 WGSL.AbstractInt
+packedElemOffset :: PrimType -> WGSL.Expression -> WGSL.Expression
+packedElemOffset Bool i = WGSL.ExpBinary WGSL.Remainder i (WGSL.ExpInt 4 WGSL.AbstractInt)
+packedElemOffset (IntType Int8) i = WGSL.ExpBinary WGSL.Remainder i (WGSL.ExpInt 4 WGSL.AbstractInt)
+packedElemOffset (IntType Int16) i = WGSL.ExpBinary WGSL.Remainder i (WGSL.ExpInt 2 WGSL.AbstractInt)
+packedElemOffset (IntType Int32) _ = WGSL.ExpInt 0 WGSL.AbstractInt
+packedElemOffset (FloatType Float16) i = WGSL.ExpBinary WGSL.Remainder i (WGSL.ExpInt 2 WGSL.AbstractInt)
+packedElemOffset (FloatType Float32) _ = WGSL.ExpInt 0 WGSL.AbstractInt
 packedElemOffset _ _ = error "CodeGen.ImpGen.WebGPU:packedElemOffset: Unsupported Type"
 
 nativeAccessType :: PrimType -> Bool
@@ -502,19 +502,19 @@ genArrayAccess ::
   Bool ->
   PrimType ->
   WGSL.Ident ->
-  WGSL.Exp ->
+  WGSL.Expression ->
   Bool ->
-  [WGSL.Exp]
+  [WGSL.Expression]
 genArrayAccess atomic t mem i packed = do
   if not atomic
-    then [WGSL.UnOpExp WGSL.AddressOf (WGSL.VarExp mem), i]
+    then [WGSL.ExpUnary WGSL.AddressOf (WGSL.ExpIdent mem), i]
     else
       if packed
         then
           let packedIndex = packedElemIndex t i
               packedOffset = packedElemOffset t i
-           in [WGSL.UnOpExp WGSL.AddressOf (WGSL.IndexExp (WGSL.VarExp mem) packedIndex), packedOffset]
-        else [WGSL.UnOpExp WGSL.AddressOf (WGSL.IndexExp (WGSL.VarExp mem) i)]
+           in [WGSL.ExpUnary WGSL.AddressOf (WGSL.ExpIndex (WGSL.ExpIdent mem) packedIndex), packedOffset]
+        else [WGSL.ExpUnary WGSL.AddressOf (WGSL.ExpIndex (WGSL.ExpIdent mem) i)]
 
 genArrayFun :: WGSL.Ident -> PrimType -> Bool -> Bool -> WGSL.Ident
 genArrayFun fun t atomic shared =
@@ -530,7 +530,7 @@ genReadExp ::
   Space ->
   VName ->
   Count Elements (TExp Int64) ->
-  KernelM WGSL.Exp
+  KernelM WGSL.Expression
 genReadExp t s mem i = do
   mem' <- getIdent mem
   shared <- isShared mem'
@@ -538,7 +538,7 @@ genReadExp t s mem i = do
   i' <- indexExp i
 
   if (nativeAccessSpace s || nativeAccessType t || shared) && not atomic
-    then pure $ WGSL.IndexExp (WGSL.VarExp mem') i'
+    then pure $ WGSL.ExpIndex (WGSL.ExpIdent mem') i'
     else
       let access = genArrayAccess atomic t mem' i' (not shared)
           fun = genArrayFun "read" t atomic shared
@@ -550,7 +550,7 @@ genArrayRead ::
   VName ->
   VName ->
   Count Elements (TExp Int64) ->
-  KernelM WGSL.Stmt
+  KernelM WGSL.Statement
 genArrayRead t s tgt mem i = do
   tgt' <- getIdent tgt
   read' <- genReadExp t s mem i
@@ -561,8 +561,8 @@ genArrayWrite ::
   Space ->
   VName ->
   Count Elements (TExp Int64) ->
-  KernelM WGSL.Exp ->
-  KernelM WGSL.Stmt
+  KernelM WGSL.Expression ->
+  KernelM WGSL.Statement
 genArrayWrite t s mem i v = do
   mem' <- getIdent mem
   shared <- isShared mem'
@@ -571,7 +571,7 @@ genArrayWrite t s mem i v = do
   v' <- v
 
   if (nativeAccessSpace s || nativeAccessType t || shared) && not atomic
-    then pure $ WGSL.Assign (WGSL.IndexExp (WGSL.VarExp mem') i') WGSL.SimpleAssign v'
+    then pure $ WGSL.Assign (WGSL.ExpIndex (WGSL.ExpIdent mem') i') WGSL.AssignSimple v'
     else
       let access = genArrayAccess atomic t mem' i' (not shared) ++ [v']
           fun = genArrayFun "write" t atomic shared
@@ -584,7 +584,7 @@ genAtomicOp ::
   VName ->
   Count Elements (TExp Int64) ->
   Exp ->
-  KernelM WGSL.Stmt
+  KernelM WGSL.Statement
 genAtomicOp f t dest mem i e = do
   mem' <- getIdent mem
   shared <- isShared mem'
@@ -606,7 +606,7 @@ genCopy ::
   ( Count Elements (TExp Int64),
     [Count Elements (TExp Int64)]
   ) ->
-  KernelM WGSL.Stmt
+  KernelM WGSL.Statement
 genCopy pt shape (dst, dst_space) (dst_offset, dst_strides) (src, src_space) (src_offset, src_strides) = do
   shape' <- mapM (genWGSLExp . untyped . unCount) shape
   body <- do
@@ -618,43 +618,43 @@ genCopy pt shape (dst, dst_space) (dst_offset, dst_strides) (src, src_space) (sr
 
   pure . WGSL.Compound $ loops (zip iis shape') body
   where
-    (zero, one) = (WGSL.VarExp "zero_i64", WGSL.VarExp "one_i64")
+    (zero, one) = (WGSL.ExpIdent "zero_i64", WGSL.ExpIdent "one_i64")
     is = map (VName "i") [0 .. length shape - 1]
     is' :: [Count Elements (TExp Int64)]
     is' = map (elements . le64) is
     iis = map nameToIdent is
 
-    loops :: [(WGSL.Ident, WGSL.Exp)] -> [WGSL.Stmt] -> [WGSL.Stmt]
+    loops :: [(WGSL.Ident, WGSL.Expression)] -> [WGSL.Statement] -> [WGSL.Statement]
     loops [] body = body
     loops ((i, n) : ins) body =
       [ WGSL.For
           i
           zero
-          (wgslCmpOp (CmpUlt Int64) (WGSL.VarExp i) n)
-          (WGSL.UpdateAssign (WGSL.VarExp i) WGSL.SimpleAssign $ wgslBinOp (Add Int64 OverflowWrap) (WGSL.VarExp i) one)
+          (wgslCmpOp (CmpUlt Int64) (WGSL.ExpIdent i) n)
+          (WGSL.UpdateAssign (WGSL.ExpIdent i) WGSL.AssignSimple $ wgslBinOp (Add Int64 OverflowWrap) (WGSL.ExpIdent i) one)
           (loops ins body)
       ]
 
 -- | Assign to a variable.
-assign :: WGSL.Ident -> WGSL.Exp -> WGSL.Stmt
-assign v = WGSL.Assign (WGSL.VarExp v) WGSL.SimpleAssign
+assign :: WGSL.Ident -> WGSL.Expression -> WGSL.Statement
+assign v = WGSL.Assign (WGSL.ExpIdent v) WGSL.AssignSimple
 
 -- | Call a function with no template arguments.
-call :: WGSL.Ident -> [WGSL.Exp] -> WGSL.Exp
-call f = WGSL.CallExp f []
+call :: WGSL.Ident -> [WGSL.Expression] -> WGSL.Expression
+call f = WGSL.ExpCall f []
 
 -- | Call a function with no template arguments, as a statement.
-callStm :: WGSL.Ident -> [WGSL.Exp] -> WGSL.Stmt
+callStm :: WGSL.Ident -> [WGSL.Expression] -> WGSL.Statement
 callStm f = WGSL.Call f []
 
-unsupported :: Code ImpGPU.KernelOp -> KernelM WGSL.Stmt
+unsupported :: Code ImpGPU.KernelOp -> KernelM WGSL.Statement
 unsupported stmt = pure $ WGSL.Comment $ "Unsupported stmt: " <> prettyText stmt
 
-wgslProduct :: [SubExp] -> WGSL.Exp
-wgslProduct [] = WGSL.IntExp 1 WGSL.AbstractInt
-wgslProduct [Constant (IntValue v)] = WGSL.IntExp (valueIntegral v) WGSL.AbstractInt
+wgslProduct :: [SubExp] -> WGSL.Expression
+wgslProduct [] = WGSL.ExpInt 1 WGSL.AbstractInt
+wgslProduct [Constant (IntValue v)] = WGSL.ExpInt (valueIntegral v) WGSL.AbstractInt
 wgslProduct ((Constant (IntValue v)) : vs) =
-  wgslBinOp (Mul Int32 OverflowWrap) (WGSL.IntExp (valueIntegral v) WGSL.AbstractInt) (wgslProduct vs)
+  wgslBinOp (Mul Int32 OverflowWrap) (WGSL.ExpInt (valueIntegral v) WGSL.AbstractInt) (wgslProduct vs)
 wgslProduct _ = error "wgslProduct: non-constant product"
 
 -- | The statements of a code tree, with sequencing flattened away.
@@ -664,10 +664,10 @@ codeStms (s1 :>>: s2) = codeStms s1 ++ codeStms s2
 codeStms s = [s]
 
 -- | Generate the statements of a code tree.
-genWGSLStms :: Code ImpGPU.KernelOp -> KernelM [WGSL.Stmt]
+genWGSLStms :: Code ImpGPU.KernelOp -> KernelM [WGSL.Statement]
 genWGSLStms = mapM genWGSLStm . codeStms
 
-genWGSLStm :: Code ImpGPU.KernelOp -> KernelM WGSL.Stmt
+genWGSLStm :: Code ImpGPU.KernelOp -> KernelM WGSL.Statement
 -- 'genWGSLStms' flattens these two away; the cases are here for totality.
 genWGSLStm Skip = pure WGSL.Empty
 genWGSLStm c@(_ :>>: _) = WGSL.Compound <$> genWGSLStms c
@@ -678,8 +678,8 @@ genWGSLStm (For iName bound body) = do
     WGSL.For
       i
       zero
-      (lt (WGSL.VarExp i) boundExp)
-      (WGSL.UpdateAssign (WGSL.VarExp i) WGSL.SimpleAssign $ add (WGSL.VarExp i) one)
+      (lt (WGSL.ExpIdent i) boundExp)
+      (WGSL.UpdateAssign (WGSL.ExpIdent i) WGSL.AssignSimple $ add (WGSL.ExpIdent i) one)
       bodyStm
   where
     i = nameToIdent iName
@@ -689,8 +689,8 @@ genWGSLStm (For iName bound body) = do
     add = wgslBinOp $ Add boundIntType OverflowWrap
     lt = wgslCmpOp $ CmpUlt boundIntType
     (zero, one) = case boundIntType of
-      Int64 -> (WGSL.VarExp "zero_i64", WGSL.VarExp "one_i64")
-      _ -> (WGSL.IntExp 0 WGSL.AbstractInt, WGSL.IntExp 1 WGSL.AbstractInt)
+      Int64 -> (WGSL.ExpIdent "zero_i64", WGSL.ExpIdent "one_i64")
+      _ -> (WGSL.ExpInt 0 WGSL.AbstractInt, WGSL.ExpInt 1 WGSL.AbstractInt)
 genWGSLStm (While cond body) =
   liftM2
     WGSL.While
@@ -707,11 +707,11 @@ genWGSLStm (DeclareMem name (Space "shared")) = do
       let bufType =
             wgslSharedBufferType
               elemPrimType
-              (Just $ WGSL.VarExp sizeName)
+              (Just $ WGSL.ExpIdent sizeName)
 
-      addOverride sizeName WGSL.I32 (Just $ WGSL.IntExp 0 WGSL.AbstractInt)
+      addOverride sizeName WGSL.I32 (Just $ WGSL.ExpInt 0 WGSL.AbstractInt)
       addDecl $
-        WGSL.GlobalVar [] WGSL.Workgroup Nothing moduleName (Just bufType) Nothing
+        WGSL.GlobalVariable [] WGSL.Workgroup Nothing moduleName (Just bufType) Nothing
       when atomic $ addAtomicMem moduleName
       addRename name' moduleName
       pure $ WGSL.Comment $ "declare_shared: " <> name'
@@ -719,14 +719,14 @@ genWGSLStm (DeclareMem name (Space "shared")) = do
       pure $ WGSL.Comment $ "discard declare_shared: " <> name'
 genWGSLStm (DeclareMem name (ScalarSpace vs pt)) =
   pure $
-    WGSL.DeclareVar
+    WGSL.Var
       (nameToIdent name)
       (Just $ WGSL.Array (wgslPrimType pt) (Just $ wgslProduct vs))
       Nothing
 genWGSLStm s@(DeclareMem _ _) = unsupported s
 genWGSLStm (DeclareScalar name _ typ) =
   pure $
-    WGSL.DeclareVar (nameToIdent name) (Just $ wgslPrimType typ) Nothing
+    WGSL.Var (nameToIdent name) (Just $ wgslPrimType typ) Nothing
 genWGSLStm s@(DeclareArray {}) = unsupported s
 genWGSLStm s@(Allocate {}) = unsupported s
 genWGSLStm s@(Free _ _) = pure $ WGSL.Comment $ "free: " <> prettyText s
@@ -741,7 +741,7 @@ genWGSLStm (Write mem i t s _ v) = do
   atomic <- isAtomic mem'
   if atomic
     then genArrayWrite t s mem i (genWGSLExp v)
-    else pure $ WGSL.Assign (WGSL.IndexExp (WGSL.VarExp mem') i') WGSL.SimpleAssign v'
+    else pure $ WGSL.Assign (WGSL.ExpIndex (WGSL.ExpIdent mem') i') WGSL.AssignSimple v'
 genWGSLStm (SetScalar name e) =
   liftM2 assign (getIdent name) (genWGSLExp e)
 genWGSLStm (Read tgt mem i Bool s _) = genArrayRead Bool s tgt mem i
@@ -754,7 +754,7 @@ genWGSLStm (Read tgt mem i t s _) = do
   atomic <- isAtomic mem'
   if atomic
     then genArrayRead t s tgt mem i
-    else pure $ assign tgt' (WGSL.IndexExp (WGSL.VarExp mem') i')
+    else pure $ assign tgt' (WGSL.ExpIndex (WGSL.ExpIdent mem') i')
 genWGSLStm stm@(SetMem {}) =
   compilerLimitation . docText $
     "WebGPU backend Cannot handle SetMem statement"
@@ -763,7 +763,7 @@ genWGSLStm stm@(SetMem {}) =
 genWGSLStm (Call [dest] f args) = do
   fun <- call . ("futrts_" <>) <$> getIdent f
   let getArg (ExpArg e) = genWGSLExp e
-      getArg (MemArg n) = WGSL.VarExp <$> getIdent n
+      getArg (MemArg n) = WGSL.ExpIdent <$> getIdent n
   argExps <- mapM getArg args
   assign <$> getIdent dest <*> pure (fun argExps)
 genWGSLStm (Call dests f args) = do
@@ -771,10 +771,10 @@ genWGSLStm (Call dests f args) = do
   outIdents <- mapM getIdent dests
 
   let getArg (ExpArg e) = genWGSLExp e
-      getArg (MemArg n) = WGSL.VarExp <$> getIdent n
+      getArg (MemArg n) = WGSL.ExpIdent <$> getIdent n
 
   argExps <- mapM getArg args
-  outExps <- mapM (pure . WGSL.UnOpExp WGSL.AddressOf . WGSL.VarExp) outIdents
+  outExps <- mapM (pure . WGSL.ExpUnary WGSL.AddressOf . WGSL.ExpIdent) outIdents
 
   pure $ callStm fname (argExps ++ outExps)
 genWGSLStm (If cond cThen cElse) = do
@@ -794,18 +794,18 @@ genWGSLStm (Op (ImpGPU.GetBlockId dest i)) = do
   destId <- getIdent dest
   pure $
     assign destId $
-      WGSL.bitcast WGSL.I32 (WGSL.IndexExp (WGSL.VarExp "workgroup_id") (WGSL.IntExp i WGSL.AbstractInt))
+      WGSL.bitcast WGSL.I32 (WGSL.ExpIndex (WGSL.ExpIdent "workgroup_id") (WGSL.ExpInt i WGSL.AbstractInt))
 genWGSLStm (Op (ImpGPU.GetLocalId dest i)) = do
   destId <- getIdent dest
   pure $
     assign destId $
-      WGSL.bitcast WGSL.I32 (WGSL.IndexExp (WGSL.VarExp "local_id") (WGSL.IntExp i WGSL.AbstractInt))
+      WGSL.bitcast WGSL.I32 (WGSL.ExpIndex (WGSL.ExpIdent "local_id") (WGSL.ExpInt i WGSL.AbstractInt))
 genWGSLStm (Op (ImpGPU.GetLocalSize dest i)) = do
   destId <- getIdent dest
-  assign destId . WGSL.VarExp <$> builtinBlockSize i
+  assign destId . WGSL.ExpIdent <$> builtinBlockSize i
 genWGSLStm (Op (ImpGPU.GetLockstepWidth dest)) = do
   destId <- getIdent dest
-  assign destId . WGSL.VarExp <$> builtinLockstepWidth
+  assign destId . WGSL.ExpIdent <$> builtinLockstepWidth
 genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicAdd t dest mem i e))) =
   genAtomicOp "add" (IntType t) dest mem i e
 genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicSMax t dest mem i e))) =
@@ -825,12 +825,12 @@ genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicXor t dest mem i e))) =
 genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicCmpXchg _ dest mem i cmp val))) = do
   val' <- genWGSLExp val
   cmp' <- genWGSLExp cmp
-  i' <- WGSL.IndexExp . WGSL.VarExp <$> getIdent mem <*> indexExp i
-  liftM2 assign (getIdent dest) (pure $ WGSL.FieldExp (call "atomicCompareExchangeWeak" [WGSL.UnOpExp WGSL.AddressOf i', cmp', val']) "old_value")
+  i' <- WGSL.ExpIndex . WGSL.ExpIdent <$> getIdent mem <*> indexExp i
+  liftM2 assign (getIdent dest) (pure $ WGSL.ExpMember (call "atomicCompareExchangeWeak" [WGSL.ExpUnary WGSL.AddressOf i', cmp', val']) "old_value")
 genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicXchg _ dest mem i e))) = do
-  idx <- WGSL.IndexExp . WGSL.VarExp <$> getIdent mem <*> indexExp i
+  idx <- WGSL.ExpIndex . WGSL.ExpIdent <$> getIdent mem <*> indexExp i
   val <- genWGSLExp e
-  let xchg = call "atomicExchange" [WGSL.UnOpExp WGSL.AddressOf idx, val]
+  let xchg = call "atomicExchange" [WGSL.ExpUnary WGSL.AddressOf idx, val]
   assign <$> getIdent dest <*> pure xchg
 genWGSLStm (Op (ImpGPU.Atomic s (ImpGPU.AtomicWrite t mem i v))) = genArrayWrite t s mem i (genWGSLExp v)
 genWGSLStm (Op (ImpGPU.Atomic _ (ImpGPU.AtomicFAdd t dest mem i e))) = genAtomicOp "fadd" (FloatType t) dest mem i e
@@ -867,46 +867,46 @@ genWGSLStm (Op (ImpGPU.UniformRead tgt mem i _ _)) = do
   i' <- indexExp i
   pure $
     assign tgt' $
-      call "workgroupUniformLoad" [WGSL.UnOpExp WGSL.AddressOf $ WGSL.IndexExp (WGSL.VarExp mem') i']
+      call "workgroupUniformLoad" [WGSL.ExpUnary WGSL.AddressOf $ WGSL.ExpIndex (WGSL.ExpIdent mem') i']
 genWGSLStm (Op (ImpGPU.ErrorSync f)) = genWGSLStm $ Op (ImpGPU.Barrier f)
 genWGSLStm (Op ImpGPU.WarpSync {}) = error "genWGSLStm: WarpSync not handled."
 genWGSLStm GetUserParam {} = error "genWGSLStm: GetUserParam not handled."
 
-call1 :: WGSL.Ident -> WGSL.Exp -> WGSL.Exp
+call1 :: WGSL.Ident -> WGSL.Expression -> WGSL.Expression
 call1 f a = call f [a]
 
-call2 :: WGSL.Ident -> WGSL.Exp -> WGSL.Exp -> WGSL.Exp
+call2 :: WGSL.Ident -> WGSL.Expression -> WGSL.Expression -> WGSL.Expression
 call2 f a b = call f [a, b]
 
-call2Suffix :: WGSL.Ident -> IntType -> WGSL.Exp -> WGSL.Exp -> WGSL.Exp
+call2Suffix :: WGSL.Ident -> IntType -> WGSL.Expression -> WGSL.Expression -> WGSL.Expression
 call2Suffix f t a b = call (f <> "_" <> prettyText t) [a, b]
 
-wgslBinOp :: BinOp -> WGSL.Exp -> WGSL.Exp -> WGSL.Exp
-wgslBinOp (Add Int32 _) = WGSL.BinOpExp WGSL.Add
+wgslBinOp :: BinOp -> WGSL.Expression -> WGSL.Expression -> WGSL.Expression
+wgslBinOp (Add Int32 _) = WGSL.ExpBinary WGSL.Add
 wgslBinOp (Add t _) = call2Suffix "add" t
-wgslBinOp (FAdd _) = WGSL.BinOpExp WGSL.Add
-wgslBinOp (Sub Int32 _) = WGSL.BinOpExp WGSL.Subtract
+wgslBinOp (FAdd _) = WGSL.ExpBinary WGSL.Add
+wgslBinOp (Sub Int32 _) = WGSL.ExpBinary WGSL.Subtract
 wgslBinOp (Sub t _) = call2Suffix "sub" t
-wgslBinOp (FSub _) = WGSL.BinOpExp WGSL.Subtract
-wgslBinOp (Mul Int32 _) = WGSL.BinOpExp WGSL.Multiply
+wgslBinOp (FSub _) = WGSL.ExpBinary WGSL.Subtract
+wgslBinOp (Mul Int32 _) = WGSL.ExpBinary WGSL.Multiply
 wgslBinOp (Mul t _) = call2Suffix "mul" t
-wgslBinOp (FMul _) = WGSL.BinOpExp WGSL.Multiply
+wgslBinOp (FMul _) = WGSL.ExpBinary WGSL.Multiply
 -- Division is always safe in WGSL, so we can ignore the Safety parameter.
 wgslBinOp (UDiv t _) = call2Suffix "udiv" t
 wgslBinOp (UCeilDiv t _) = call2Suffix "uceil_div" t
 wgslBinOp (SDiv t _) = call2Suffix "sdiv" t
 wgslBinOp (SCeilDiv t _) = call2Suffix "sceil_div" t
-wgslBinOp (FDiv _) = WGSL.BinOpExp WGSL.Divide
-wgslBinOp (FMod _) = WGSL.BinOpExp WGSL.Remainder
+wgslBinOp (FDiv _) = WGSL.ExpBinary WGSL.Divide
+wgslBinOp (FMod _) = WGSL.ExpBinary WGSL.Remainder
 wgslBinOp (UMod t _) = call2Suffix "umod" t
 wgslBinOp (SMod t _) = call2Suffix "smod" t
 wgslBinOp (SQuot Int8 _) = call2 "squot_i8"
 wgslBinOp (SQuot Int16 _) = call2 "squot_i16"
-wgslBinOp (SQuot Int32 _) = WGSL.BinOpExp WGSL.Divide
+wgslBinOp (SQuot Int32 _) = WGSL.ExpBinary WGSL.Divide
 wgslBinOp (SQuot Int64 _) = call2 "squot_i64"
-wgslBinOp (SRem Int8 _) = WGSL.BinOpExp WGSL.Remainder
-wgslBinOp (SRem Int16 _) = WGSL.BinOpExp WGSL.Remainder
-wgslBinOp (SRem Int32 _) = WGSL.BinOpExp WGSL.Remainder
+wgslBinOp (SRem Int8 _) = WGSL.ExpBinary WGSL.Remainder
+wgslBinOp (SRem Int16 _) = WGSL.ExpBinary WGSL.Remainder
+wgslBinOp (SRem Int32 _) = WGSL.ExpBinary WGSL.Remainder
 wgslBinOp (SRem Int64 _) = call2 "srem_i64"
 wgslBinOp (SMin Int64) = call2 "smin_i64"
 wgslBinOp (SMin _) = call2 "min"
@@ -919,9 +919,9 @@ wgslBinOp (FMax _) = call2 "max"
 wgslBinOp (Shl t) = call2Suffix "shl" t
 wgslBinOp (LShr t) = call2Suffix "lshr" t
 wgslBinOp (AShr t) = call2Suffix "ashr" t
-wgslBinOp (And _) = WGSL.BinOpExp WGSL.BitwiseAnd
-wgslBinOp (Or _) = WGSL.BinOpExp WGSL.BitwiseOr
-wgslBinOp (Xor _) = WGSL.BinOpExp WGSL.BitwiseExclusiveOr
+wgslBinOp (And _) = WGSL.ExpBinary WGSL.BitwiseAnd
+wgslBinOp (Or _) = WGSL.ExpBinary WGSL.BitwiseOr
+wgslBinOp (Xor _) = WGSL.ExpBinary WGSL.BitwiseExclusiveOr
 wgslBinOp (SPow t) = call2Suffix "pow" t
 wgslBinOp (UPow t) = call2Suffix "pow" t
 wgslBinOp (FPow _) = call2 "pow"
@@ -931,29 +931,29 @@ wgslBinOp LogOr = call2 "log_or"
 -- Because we (in e.g. scalar8.wgsl) make sure to always sign-extend an i8 value
 -- across its whole i32 representation, we can just use the normal comparison
 -- operators for smaller integers. The same applies for i16.
-wgslCmpOp :: CmpOp -> WGSL.Exp -> WGSL.Exp -> WGSL.Exp
+wgslCmpOp :: CmpOp -> WGSL.Expression -> WGSL.Expression -> WGSL.Expression
 wgslCmpOp (CmpEq (IntType Int64)) = call2 "eq_i64"
-wgslCmpOp (CmpEq _) = WGSL.BinOpExp WGSL.Equal
+wgslCmpOp (CmpEq _) = WGSL.ExpBinary WGSL.Equal
 wgslCmpOp (CmpUlt Int64) = call2 "ult_i64"
 wgslCmpOp (CmpUlt _) = call2 "ult_i32"
 wgslCmpOp (CmpUle Int64) = call2 "ule_i64"
 wgslCmpOp (CmpUle _) = call2 "ule_i32"
 wgslCmpOp (CmpSlt Int64) = call2 "slt_i64"
-wgslCmpOp (CmpSlt _) = WGSL.BinOpExp WGSL.Less
+wgslCmpOp (CmpSlt _) = WGSL.ExpBinary WGSL.Less
 wgslCmpOp (CmpSle Int64) = call2 "sle_i64"
-wgslCmpOp (CmpSle _) = WGSL.BinOpExp WGSL.LessEqual
-wgslCmpOp (FCmpLt _) = WGSL.BinOpExp WGSL.Less
-wgslCmpOp (FCmpLe _) = WGSL.BinOpExp WGSL.LessEqual
+wgslCmpOp (CmpSle _) = WGSL.ExpBinary WGSL.LessEqual
+wgslCmpOp (FCmpLt _) = WGSL.ExpBinary WGSL.Less
+wgslCmpOp (FCmpLe _) = WGSL.ExpBinary WGSL.LessEqual
 wgslCmpOp CmpLlt = call2 "llt"
 wgslCmpOp CmpLle = call2 "lle"
 
 -- Similarly to CmpOps above, the defaults work for smaller integers already
 -- given our representation.
-wgslUnOp :: UnOp -> WGSL.Exp -> WGSL.Exp
-wgslUnOp (Neg (FloatType _)) = WGSL.UnOpExp WGSL.Negate
+wgslUnOp :: UnOp -> WGSL.Expression -> WGSL.Expression
+wgslUnOp (Neg (FloatType _)) = WGSL.ExpUnary WGSL.Negate
 wgslUnOp (Neg (IntType t)) = call1 $ "neg_" <> prettyText t
-wgslUnOp (Neg _) = WGSL.UnOpExp WGSL.LogicalNegate
-wgslUnOp (Complement _) = WGSL.UnOpExp WGSL.BitwiseComplement
+wgslUnOp (Neg _) = WGSL.ExpUnary WGSL.LogicalNegate
+wgslUnOp (Complement _) = WGSL.ExpUnary WGSL.BitwiseComplement
 wgslUnOp (Abs Int64) = call1 "abs_i64"
 wgslUnOp (Abs _) = call1 "abs"
 wgslUnOp (FAbs _) = call1 "abs"
@@ -963,7 +963,7 @@ wgslUnOp (USignum Int64) = call1 "usignum_i64"
 wgslUnOp (USignum _) = call1 "usignum_i32"
 wgslUnOp (FSignum _) = call1 "sign"
 
-wgslConvOp :: ConvOp -> WGSL.Exp -> WGSL.Exp
+wgslConvOp :: ConvOp -> WGSL.Expression -> WGSL.Expression
 wgslConvOp op a = call (fun op) [a]
   where
     fun (ZExt Int8 Int16) = "zext_i8_i16"
@@ -1035,18 +1035,18 @@ wgslConvOp op a = call (fun op) [a]
     fun (BToF Float32) = "f32"
     fun o = "not_implemented(" <> prettyText o <> ")"
 
-intLiteral :: IntValue -> WGSL.Exp
+intLiteral :: IntValue -> WGSL.Expression
 intLiteral (Int8Value v) =
-  call "norm_i8" [WGSL.IntExp (fromIntegral v) WGSL.AbstractInt]
+  call "norm_i8" [WGSL.ExpInt (fromIntegral v) WGSL.AbstractInt]
 intLiteral (Int16Value v) =
-  call "norm_i16" [WGSL.IntExp (fromIntegral v) WGSL.AbstractInt]
+  call "norm_i16" [WGSL.ExpInt (fromIntegral v) WGSL.AbstractInt]
 intLiteral (Int64Value v) = call "i64" [low, high]
   where
-    -- Helper function transforming a Int64 -> Int32 -> WGSL.Exp.
-    -- If we just do Int64 -> WGSL.Exp directly, low/high can end
+    -- Helper function transforming a Int64 -> Int32 -> WGSL.Expression.
+    -- If we just do Int64 -> WGSL.Expression directly, low/high can end
     -- up being larger than what fits in an i32.
-    toWGSLInt :: Int64 -> WGSL.Exp
-    toWGSLInt x = WGSL.IntExp (fromIntegral (fromIntegral x :: Int32)) WGSL.AbstractInt
+    toWGSLInt :: Int64 -> WGSL.Expression
+    toWGSLInt x = WGSL.ExpInt (fromIntegral (fromIntegral x :: Int32)) WGSL.AbstractInt
     low = toWGSLInt $ v Bits..&. 0xffffffff
     high = toWGSLInt $ (v `Bits.shift` (-32)) Bits..&. 0xffffffff
 intLiteral v =
@@ -1055,7 +1055,7 @@ intLiteral v =
   where
     msg = "WebGPU backend cannot represent integer literal: " <> prettyText v
 
-handleSpecialFloats :: T.Text -> WGSL.FloatLitType -> Double -> WGSL.Exp
+handleSpecialFloats :: T.Text -> WGSL.FloatLiteralType -> Double -> WGSL.Expression
 handleSpecialFloats s t v
   | isInfinite v, v > 0 = call (s <> "_inf") []
   | isInfinite v, v < 0 = call (s <> "_neg_inf") []
@@ -1064,16 +1064,16 @@ handleSpecialFloats s t v
   where
     msg = "WebGPU backend cannot represent " <> s <> " literal: " <> prettyText v
 
-genFloatExp :: FloatValue -> WGSL.Exp
+genFloatExp :: FloatValue -> WGSL.Expression
 genFloatExp (Float16Value v) = handleSpecialFloats "f16" WGSL.LitF16 (convFloat v)
 genFloatExp (Float32Value v) = handleSpecialFloats "f32" WGSL.LitF32 (convFloat v)
 genFloatExp (Float64Value v) = handleSpecialFloats "f64" WGSL.AbstractFloat v
 
-genWGSLExp :: Exp -> KernelM WGSL.Exp
-genWGSLExp (LeafExp name _) = WGSL.VarExp <$> getIdent name
+genWGSLExp :: Exp -> KernelM WGSL.Expression
+genWGSLExp (LeafExp name _) = WGSL.ExpIdent <$> getIdent name
 genWGSLExp (ValueExp (IntValue v)) = pure $ intLiteral v
 genWGSLExp (ValueExp (FloatValue v)) = pure $ genFloatExp v
-genWGSLExp (ValueExp (BoolValue v)) = pure $ WGSL.BoolExp v
+genWGSLExp (ValueExp (BoolValue v)) = pure $ WGSL.ExpBool v
 genWGSLExp (ValueExp UnitValue) =
   error "should not attempt to generate unit expressions"
 genWGSLExp (BinOpExp op e1 e2) =
@@ -1088,7 +1088,7 @@ genWGSLExp e =
 -- We support 64-bit arithmetic, but since WGSL does not have support for it,
 -- we cannot use a 64-bit value as an index, so we have to truncate it to 32
 -- bits.
-indexExp :: Count Elements (TExp Int64) -> KernelM WGSL.Exp
+indexExp :: Count Elements (TExp Int64) -> KernelM WGSL.Expression
 -- There are many occasions where we would end up extending to 64 bit and
 -- immediately truncating, avoid that.
 indexExp (Count (TPrimExp (ConvOpExp (SExt Int32 Int64) e))) = genWGSLExp e
@@ -1115,10 +1115,10 @@ genScalarDecls = do
             Bool -> call "bool" [e]
             _ -> e
 
-      addScalar $ WGSL.Field [] name fieldPrimTyp
-      addInitStmt $ WGSL.DeclareVar name (Just varPrimTyp) Nothing
+      addScalar $ WGSL.StructMember [] name fieldPrimTyp
+      addInitStmt $ WGSL.Var name (Just varPrimTyp) Nothing
       addInitStmt $
-        assign name (wrapCopy $ WGSL.FieldExp (WGSL.VarExp bufferName) name)
+        assign name (wrapCopy $ WGSL.ExpMember (WGSL.ExpIdent bufferName) name)
 
       pure (name, fieldPrimTyp)
 
@@ -1127,12 +1127,12 @@ genScalarDecls = do
         sclrs -> sclrs
   addDecl $
     WGSL.GlobalStruct $
-      WGSL.StructDecl structName (map (uncurry (WGSL.Field [])) scalarFields)
+      WGSL.StructDecl structName (map (uncurry (WGSL.StructMember [])) scalarFields)
 
   slot <- assignBindSlot
   let bufferAttribs = WGSL.bindingAttribs 0 slot
   addDecl $
-    WGSL.GlobalVar
+    WGSL.GlobalVariable
       bufferAttribs
       WGSL.Uniform
       Nothing
@@ -1242,7 +1242,7 @@ genMemoryDecls = do
       let (_, atomic, _) = typ
       when atomic $ addAtomicMem ident
       addDecl $
-        WGSL.GlobalVar
+        WGSL.GlobalVariable
           (WGSL.bindingAttribs 0 slot)
           WGSL.Storage
           (Just WGSL.ReadWrite)
@@ -1300,17 +1300,17 @@ genConstAndBuiltinDecls = do
             addOverride hi WGSL.I32 zeroInit
             lift $ addMacroDef (nameFromText lo) (mkLo e)
             lift $ addMacroDef (nameFromText hi) (mkHi e)
-            addInitStmt $ WGSL.DeclareVar n (Just wgslInt64) Nothing
-            addInitStmt . assign n $ call "i64" [WGSL.VarExp lo, WGSL.VarExp hi]
+            addInitStmt $ WGSL.Var n (Just wgslInt64) Nothing
+            addInitStmt . assign n $ call "i64" [WGSL.ExpIdent lo, WGSL.ExpIdent hi]
           _ -> do
             addOverride lo WGSL.I32 zeroInit
             lift $ addMacroDef (nameFromText lo) e
-            addInitStmt $ WGSL.DeclareVar n (Just wgslInt64) Nothing
-            addInitStmt . assign n $ call "i64" [WGSL.VarExp lo, WGSL.IntExp 0 WGSL.AbstractInt]
+            addInitStmt $ WGSL.Var n (Just wgslInt64) Nothing
+            addInitStmt . assign n $ call "i64" [WGSL.ExpIdent lo, WGSL.ExpInt 0 WGSL.AbstractInt]
 
   mapM_ mkConst consts
   where
-    zeroInit = Just $ WGSL.IntExp 0 WGSL.AbstractInt
+    zeroInit = Just $ WGSL.ExpInt 0 WGSL.AbstractInt
 
 nameToIdent :: VName -> WGSL.Ident
 nameToIdent = zEncodeText . prettyText
