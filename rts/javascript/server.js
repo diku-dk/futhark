@@ -1,8 +1,8 @@
 // Start of server.js
 
-// The server is implemented directly on top of the C API exported by the
-// WebAssembly module, much like the C server.  The manifest describes the
-// types and entry points, and names the C functions that operate on them.
+// The server is implemented in terms of the C API exported by the WebAssembly
+// module. The manifest describes the types and entry points, and names the C
+// functions that operate on them.
 //
 // A variable is a pair of a type name and a value.  A value of primitive type
 // is a JavaScript number, or a BigInt for 64-bit integers.  Booleans are 0 or
@@ -113,7 +113,8 @@ class Server {
   // Read a NUL-terminated string allocated by C, and free it.
   _c_string(p) {
     var heap = this.wasm.HEAPU8;
-    var str = new TextDecoder().decode(heap.subarray(p, heap.indexOf(0, p)));
+    // Browsers' TextDecoder rejects shared memory.
+    var str = new TextDecoder().decode(heap.slice(p, heap.indexOf(0, p)));
     this.wasm._free(p);
     return str;
   }
@@ -175,11 +176,13 @@ class Server {
   }
 
   async _read_file(fname) {
-    return new Uint8Array(require('fs').readFileSync(fname));
+    const fs = await import('node:fs');
+    return new Uint8Array(fs.readFileSync(fname));
   }
 
   async _write_file(fname, bytes) {
-    require('fs').writeFileSync(fname, bytes);
+    const fs = await import('node:fs');
+    fs.writeFileSync(fname, bytes);
   }
 
   // Types.
@@ -730,7 +733,7 @@ class Server {
 
   async run() {
     console.log('%%% OK'); // TODO figure out if flushing is neccesary for JS
-    const readline = require('readline');
+    const readline = await import('node:readline');
     const rl = readline.createInterface(process.stdin);
     // Commands are asynchronous, so we must finish one before reading the
     // next.
@@ -750,6 +753,7 @@ class Server {
         console.log('%%% OK');
       }
     }
+    this.ctx.free();
     process.exit(0);
   }
 }
@@ -772,6 +776,142 @@ function split_words(line) {
     throw "Unterminated quote";
   }
   return words;
+}
+
+// Run a server as the main program of a Node.js process.
+async function futhark_server_main() {
+  const fs = await import('node:fs');
+  const progname = process.argv[1];
+  const fail = (msg) => {
+    console.error(progname + ": " + msg);
+    process.exit(1);
+  };
+  const parse_int = (what, x) => {
+    if (!/^[0-9]+$/.test(x)) {
+      fail("Invalid " + what + ": " + x);
+    }
+    return Number(x);
+  };
+
+  const options = { tuning_params: {} };
+  var print_params = false;
+  // Long name, short name, argument, description, and action.
+  const table = [
+    ["debugging", "D", null,
+     "Perform possibly expensive internal correctness checks and verbose logging.",
+     () => { options.debugging = true; }],
+    ["log", "L", null,
+     "Print various low-overhead logging information while running.",
+     () => { options.logging = true; }],
+    ["profile", "P", null,
+     "Enable the collection of profiling information.",
+     () => { options.profiling = true; }],
+    ["help", "h", null,
+     "Print help information and exit.",
+     () => {
+       console.log("Usage: " + progname + " [OPTIONS]...\nOptions:\n");
+       for (const [long, short, arg, desc] of table) {
+         console.log("  " + (short ? "-" + short + "/" : "") + "--" + long +
+                     (arg ? " " + arg : "") + "\n    " + desc);
+       }
+       console.log("\nFor more information, consult the Futhark User's Guide or the man pages.");
+       process.exit(0);
+     }],
+    ["print-params", null, null,
+     "Print all tuning parameters that can be set with --param or --tuning.",
+     () => { print_params = true; }],
+    ["param", null, "ASSIGNMENT",
+     "Set a tuning parameter to the given value.",
+     (x) => {
+       const eq = x.indexOf("=");
+       if (eq < 0) {
+         fail("Invalid argument for --param option: " + x);
+       }
+       options.tuning_params[x.slice(0, eq)] = parse_int("tuning parameter value", x.slice(eq + 1));
+     }],
+    ["tuning", null, "FILE",
+     "Read size=value assignments from the given file.",
+     (fname) => {
+       var lines;
+       try {
+         lines = fs.readFileSync(fname, "utf8").split("\n");
+       } catch (e) {
+         fail("When loading tuning file '" + fname + "': Cannot open file: " + e.message);
+       }
+       lines.forEach((line, i) => {
+         if (/^[ \t]*($|--)/.test(line)) {
+           return;
+         }
+         const m = /^([^=]*)=(-?[0-9]+)$/.exec(line);
+         if (m === null) {
+           fail("When loading tuning file '" + fname + "': Invalid line " + (i + 1) +
+                " (must be of form 'name=int').");
+         }
+         options.tuning_params[m[1]] = Number(m[2]);
+       });
+     }],
+    // There is nothing to cache.
+    ["cache-file", null, "FILE",
+     "Store program cache here (has no effect for this backend).",
+     () => {}],
+  ];
+  if (futhark_manifest.backend == "wasm_multicore") {
+    table.push(["num-threads", null, "INT",
+                "Set number of threads used for execution.",
+                (x) => { options.num_threads = parse_int("number of threads", x); }]);
+  }
+
+  const args = process.argv.slice(2);
+  for (var i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a.startsWith("--")) {
+      const eq = a.indexOf("=");
+      const name = eq < 0 ? a.slice(2) : a.slice(2, eq);
+      const opt = table.find((o) => o[0] == name);
+      if (opt === undefined) {
+        fail("unrecognized option '" + a + "'");
+      }
+      var arg;
+      if (opt[2] !== null) {
+        arg = eq < 0 ? args[++i] : a.slice(eq + 1);
+        if (arg === undefined) {
+          fail("option '--" + name + "' requires an argument");
+        }
+      } else if (eq >= 0) {
+        fail("option '--" + name + "' doesn't allow an argument");
+      }
+      opt[4](arg);
+    } else if (a.startsWith("-") && a.length > 1) {
+      for (const c of a.slice(1)) {
+        const opt = table.find((o) => o[1] == c);
+        if (opt === undefined) {
+          fail("invalid option -- '" + c + "'");
+        }
+        opt[4]();
+      }
+    } else {
+      fail("unexpected argument: " + a);
+    }
+  }
+
+  if (print_params) {
+    const m = await loadWASM();
+    const heap = () => m.HEAPU8;
+    const str = (p) => new TextDecoder().decode(heap().slice(p, heap().indexOf(0, p)));
+    for (var j = 0; j < m._futhark_get_tuning_param_count(); j++) {
+      console.log(str(m._futhark_get_tuning_param_name(j)) + " (" +
+                  str(m._futhark_get_tuning_param_class(j)) + ")");
+    }
+    process.exit(0);
+  }
+
+  const context = new FutharkContext();
+  try {
+    await context.init(options);
+  } catch (e) {
+    fail(e.message);
+  }
+  await new Server(context, futhark_manifest).run();
 }
 
 // End of server.js

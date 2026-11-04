@@ -15,10 +15,20 @@ assert.ok(pair instanceof lib.FutharkOpaque);
 assert.equal(await fut.project_opaque_pair_0(pair), 3);
 assert.equal(await fut.project_opaque_pair_1(pair), 5n);
 
+ok("tuple fields can be projected");
+
+const rec0 = await fut.entry.mk_rec(1n);
+
+await assert.rejects(() => fut.project_opaque_rec_n(pair), TypeError);
+await assert.rejects(() => fut.entry.sum_rec(pair), TypeError);
+await assert.rejects(() => fut.project_opaque_pair_0({ ptr: rec0.ptr }), TypeError);
+
+rec0.free();
 pair.free();
 assert.throws(() => pair.free());
+await assert.rejects(() => fut.project_opaque_pair_0(pair), /freed/);
 
-ok("tuple fields can be projected");
+ok("projections and entry points check the type of opaque values");
 
 section("Records with array fields");
 

@@ -33,12 +33,14 @@ where
 import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.State (get)
+import Data.Aeson qualified as JSON
 import Data.Bifunctor
 import Data.ByteString.Lazy.Char8 qualified as BS
 import Data.List (intercalate)
 import Data.Map qualified as M
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
+import Data.Text.Encoding qualified as T
 import Data.Text.IO qualified as T
 import Futhark.Analysis.AccessPattern
 import Futhark.Analysis.Alias
@@ -49,6 +51,8 @@ import Futhark.Analysis.MemAlias qualified as MemAlias
 import Futhark.Analysis.Metrics
 import Futhark.CodeGen.Backends.CCUDA qualified as CCUDA
 import Futhark.CodeGen.Backends.COpenCL qualified as COpenCL
+import Futhark.CodeGen.Backends.GenericC qualified as GC
+import Futhark.CodeGen.Backends.GenericWASM qualified as GenericWASM
 import Futhark.CodeGen.Backends.HIP qualified as HIP
 import Futhark.CodeGen.Backends.MulticoreC qualified as MulticoreC
 import Futhark.CodeGen.Backends.MulticoreISPC qualified as MulticoreISPC
@@ -548,24 +552,19 @@ heapExports =
     "'HEAPF64'"
   ]
 
-wasmFlags :: FilePath -> [String] -> Bool -> [String]
-wasmFlags classpath expfuns lib =
-  ["-lnodefs.js"]
-    ++ ["-s", "--extern-post-js", classpath]
-    ++ ( if lib
-           then ["-s", "EXPORT_NAME=loadWASM"]
-           else []
-       )
-    ++ ["-s", "WASM_BIGINT"]
-    -- The memory may grow up to the default maximum of 2GiB.  Allowing more
-    -- would require the JavaScript code to treat pointers as unsigned.
-    ++ ["-s", "ALLOW_MEMORY_GROWTH"]
-    ++ ["-s", "EXPORTED_RUNTIME_METHODS=[" ++ intercalate "," ("'ccall'" : heapExports) ++ "]"]
-    ++ [ "-s",
-         "EXPORTED_FUNCTIONS=["
-           ++ intercalate "," ("'_malloc'" : "'_free'" : expfuns)
-           ++ "]"
-       ]
+-- | Options passed to @emcc@ by both WASM backends.
+wasmFlags :: FilePath -> [String] -> [String]
+wasmFlags classpath expfuns =
+  [ "--extern-post-js",
+    classpath,
+    -- Called by the generated JavaScript.
+    "-sEXPORT_NAME=loadWASM",
+    "-sWASM_BIGINT",
+    -- Up to 2GiB; more would need unsigned pointers in JavaScript.
+    "-sALLOW_MEMORY_GROWTH",
+    "-sEXPORTED_RUNTIME_METHODS=[" ++ intercalate "," ("'ccall'" : heapExports) ++ "]",
+    "-sEXPORTED_FUNCTIONS=[" ++ intercalate "," ("'_malloc'" : "'_free'" : expfuns) ++ "]"
+  ]
 
 runEMCC :: String -> String -> [String] -> [String] -> [String] -> FutharkM ()
 runEMCC cpath outpath cflags_def ldflags extra_flags = do
@@ -593,93 +592,63 @@ runEMCC cpath outpath cflags_def ldflags extra_flags = do
     Right (ExitSuccess, _, _) ->
       pure ()
 
+-- | Compile to the ES module @outpath.mjs@ with emcc.  Unless compiling a
+-- library, @outpath@ is an executable that runs it as a server.
+compileWASM ::
+  CompilerMode ->
+  FilePath ->
+  [String] ->
+  (GC.CParts, T.Text, [String]) ->
+  FutharkM ()
+compileWASM mode outpath ldflags (cprog, jsprog, exps) = do
+  let (_, impl, _) = GC.asLibrary cprog
+  liftIO $ T.writeFile cpath impl
+  liftIO $ T.writeFile classpath $ jsprog <> extra
+  runEMCC cpath mjspath ["-O3", "-msimd128"] ldflags (wasmFlags classpath exps)
+  when (mode /= ToLibrary) . liftIO $ do
+    T.writeFile outpath $ wasmLauncher $ takeFileName mjspath
+    perms <- getPermissions outpath
+    setPermissions outpath $ setOwnerExecutable True perms
+  where
+    extra = case mode of
+      ToLibrary -> GenericWASM.libraryExports
+      _ -> GenericWASM.runServer
+    cpath = outpath `addExtension` "c"
+    mjspath = outpath `addExtension` "mjs"
+    classpath = outpath `addExtension` "class.js"
+
+-- | A Node.js script that runs the given ES module.  Unlike the module
+-- itself, it works whatever module type @package.json@ specifies.
+wasmLauncher :: FilePath -> T.Text
+wasmLauncher mjsname =
+  T.unlines
+    [ "#!/usr/bin/env node",
+      "import(\"./\" + encodeURIComponent(" <> jsString <> "));"
+    ]
+  where
+    jsString = T.decodeUtf8 $ BS.toStrict $ JSON.encode mjsname
+
 -- | The @futhark wasm@ action.
 compileCtoWASMAction :: FutharkConfig -> CompilerMode -> FilePath -> Action SeqMem
 compileCtoWASMAction fcfg mode outpath =
   Action
-    { actionName = "Compile to sequential C",
-      actionDescription = "Compile to sequential C",
-      actionProcedure = helper
+    { actionName = "Compile to WebAssembly",
+      actionDescription = "Compile to sequential WebAssembly",
+      actionProcedure =
+        compileWASM mode outpath ["-lm"]
+          <=< handleWarnings fcfg . SequentialWASM.compileProg versionString
     }
-  where
-    helper prog = do
-      (cprog, jsprog, exps) <-
-        handleWarnings fcfg $ SequentialWASM.compileProg versionString prog
-      case mode of
-        ToLibrary -> do
-          writeLibs cprog jsprog
-          liftIO $ T.appendFile classpath SequentialWASM.libraryExports
-          runEMCC
-            cpath
-            mjspath
-            ["-O3", "-msimd128"]
-            ["-lm"]
-            (wasmFlags classpath exps True)
-        _ -> do
-          -- Non-server executables are not supported.
-          writeLibs cprog jsprog
-          liftIO $ T.appendFile classpath $ SequentialWASM.runServer $ SequentialWASM.cManifest cprog
-          runEMCC
-            cpath
-            outpath
-            ["-O3", "-msimd128"]
-            ["-lm"]
-            (wasmFlags classpath exps False)
-    writeLibs cprog jsprog = do
-      let (h, imp, _) = SequentialC.asLibrary cprog
-      liftIO $ T.writeFile hpath h
-      liftIO $ T.writeFile cpath imp
-      liftIO $ T.writeFile classpath jsprog
-
-    cpath = outpath `addExtension` "c"
-    hpath = outpath `addExtension` "h"
-    mjspath = outpath `addExtension` "mjs"
-    classpath = outpath `addExtension` ".class.js"
 
 -- | The @futhark wasm-multicore@ action.
 compileMulticoreToWASMAction :: FutharkConfig -> CompilerMode -> FilePath -> Action MCMem
 compileMulticoreToWASMAction fcfg mode outpath =
   Action
-    { actionName = "Compile to sequential C",
-      actionDescription = "Compile to sequential C",
-      actionProcedure = helper
+    { actionName = "Compile to WebAssembly",
+      actionDescription = "Compile to multicore WebAssembly",
+      actionProcedure =
+        compileWASM mode outpath ["-lm", "-pthread"]
+          <=< handleWarnings fcfg . MulticoreWASM.compileProg versionString
     }
-  where
-    helper prog = do
-      (cprog, jsprog, exps) <-
-        handleWarnings fcfg $ MulticoreWASM.compileProg versionString prog
-
-      case mode of
-        ToLibrary -> do
-          writeLibs cprog jsprog
-          liftIO $ T.appendFile classpath MulticoreWASM.libraryExports
-          runEMCC
-            cpath
-            mjspath
-            ["-O3", "-msimd128"]
-            ["-lm", "-pthread"]
-            (wasmFlags classpath exps True)
-        _ -> do
-          -- Non-server executables are not supported.
-          writeLibs cprog jsprog
-          liftIO $ T.appendFile classpath $ MulticoreWASM.runServer $ MulticoreWASM.cManifest cprog
-          runEMCC
-            cpath
-            outpath
-            ["-O3", "-msimd128"]
-            ["-lm", "-pthread"]
-            (wasmFlags classpath exps False)
-
-    writeLibs cprog jsprog = do
-      let (h, imp, _) = MulticoreC.asLibrary cprog
-      liftIO $ T.writeFile hpath h
-      liftIO $ T.writeFile cpath imp
-      liftIO $ T.writeFile classpath jsprog
-
-    cpath = outpath `addExtension` "c"
-    hpath = outpath `addExtension` "h"
-    mjspath = outpath `addExtension` "mjs"
-    classpath = outpath `addExtension` ".class.js"
 
 runWith ::
   Name ->

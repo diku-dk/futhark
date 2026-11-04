@@ -7,7 +7,7 @@
 /**/*.expected
 /**/*.actual
 /**/*.wasm
-/**/*.js
+/**/*.mjs
 /**/*.json
 /**/*.ispc
 /**/*.cache

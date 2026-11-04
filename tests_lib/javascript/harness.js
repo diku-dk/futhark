@@ -19,8 +19,7 @@ const build_dir = process.env.BUILD_DIR ?? path.join("build", backend);
 export const is_wasm = backend === "wasm" || backend === "wasm-multicore";
 
 // Load the library compiled from the program 'name'.fut.  The result has the
-// generated classes (FutharkContext, FutharkArray, FutharkOpaque) as fields, and
-// the backend runtime module as 'default'.
+// generated classes (FutharkContext, FutharkArray, FutharkOpaque) as fields.
 export async function loadLibrary(name) {
   if (is_wasm) {
     return await import(pathToFileURL(path.resolve(build_dir, name + ".mjs")));
@@ -29,9 +28,9 @@ export async function loadLibrary(name) {
 }
 
 // A new initialised FutharkContext for a library returned by 'loadLibrary'.
-export async function newFutharkContext(lib) {
+export async function newFutharkContext(lib, options) {
   const fut = new lib.FutharkContext();
-  await fut.init(await lib.default());
+  await fut.init(options);
   return fut;
 }
 
