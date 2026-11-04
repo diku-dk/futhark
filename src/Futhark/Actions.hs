@@ -532,30 +532,48 @@ compilePyOpenCLAction fcfg mode outpath =
 cmdEMCFLAGS :: [String] -> [String]
 cmdEMCFLAGS def = maybe def words $ lookup "EMCFLAGS" unixEnvironment
 
-runEMCC :: String -> String -> FilePath -> [String] -> [String] -> [String] -> Bool -> FutharkM ()
-runEMCC cpath outpath classpath cflags_def ldflags expfuns lib = do
+-- | The typed views of the WASM heap, which the generated JavaScript
+-- uses to move array data in and out of the module.
+heapExports :: [String]
+heapExports =
+  [ "'HEAP8'",
+    "'HEAP16'",
+    "'HEAP32'",
+    "'HEAP64'",
+    "'HEAPU8'",
+    "'HEAPU16'",
+    "'HEAPU32'",
+    "'HEAPU64'",
+    "'HEAPF32'",
+    "'HEAPF64'"
+  ]
+
+wasmFlags :: FilePath -> [String] -> Bool -> [String]
+wasmFlags classpath expfuns lib =
+  ["-lnodefs.js"]
+    ++ ["-s", "--extern-post-js", classpath]
+    ++ ( if lib
+           then ["-s", "EXPORT_NAME=loadWASM"]
+           else []
+       )
+    ++ ["-s", "WASM_BIGINT"]
+    ++ ["-s", "EXPORTED_RUNTIME_METHODS=[" ++ intercalate "," ("'ccall'" : heapExports) ++ "]"]
+    ++ [ "-s",
+         "EXPORTED_FUNCTIONS=["
+           ++ intercalate "," ("'_malloc'" : "'_free'" : expfuns)
+           ++ "]"
+       ]
+
+runEMCC :: String -> String -> [String] -> [String] -> [String] -> FutharkM ()
+runEMCC cpath outpath cflags_def ldflags extra_flags = do
   ret <-
     liftIO $
       runProgramWithExitCode
         "emcc"
         ( [cpath, "-o", outpath]
-            ++ ["-lnodefs.js"]
-            ++ ["-s", "--extern-post-js", classpath]
-            ++ ( if lib
-                   then ["-s", "EXPORT_NAME=loadWASM"]
-                   else []
-               )
-            ++ ["-s", "WASM_BIGINT"]
-            ++ [ "-s",
-                 "EXPORTED_RUNTIME_METHODS=['HEAP8','HEAP16','HEAP32','HEAP64','HEAPU8','HEAPU16','HEAPU32','HEAPF32','HEAPF64']"
-               ]
+            ++ extra_flags
             ++ cmdCFLAGS cflags_def
             ++ cmdEMCFLAGS [""]
-            ++ [ "-s",
-                 "EXPORTED_FUNCTIONS=["
-                   ++ intercalate "," ("'_malloc'" : "'_free'" : expfuns)
-                   ++ "]"
-               ]
             -- The default LDFLAGS are always added.
             ++ ldflags
         )
@@ -588,12 +606,22 @@ compileCtoWASMAction fcfg mode outpath =
         ToLibrary -> do
           writeLibs cprog jsprog
           liftIO $ T.appendFile classpath SequentialWASM.libraryExports
-          runEMCC cpath mjspath classpath ["-O3", "-msimd128"] ["-lm"] exps True
+          runEMCC
+            cpath
+            mjspath
+            ["-O3", "-msimd128"]
+            ["-lm"]
+            (wasmFlags classpath exps True)
         _ -> do
           -- Non-server executables are not supported.
           writeLibs cprog jsprog
           liftIO $ T.appendFile classpath $ SequentialWASM.runServer $ SequentialWASM.cManifest cprog
-          runEMCC cpath outpath classpath ["-O3", "-msimd128"] ["-lm"] exps False
+          runEMCC
+            cpath
+            outpath
+            ["-O3", "-msimd128"]
+            ["-lm"]
+            (wasmFlags classpath exps False)
     writeLibs cprog jsprog = do
       let (h, imp, _) = SequentialC.asLibrary cprog
       liftIO $ T.writeFile hpath h
@@ -622,12 +650,22 @@ compileMulticoreToWASMAction fcfg mode outpath =
         ToLibrary -> do
           writeLibs cprog jsprog
           liftIO $ T.appendFile classpath MulticoreWASM.libraryExports
-          runEMCC cpath mjspath classpath ["-O3", "-msimd128"] ["-lm", "-pthread"] exps True
+          runEMCC
+            cpath
+            mjspath
+            ["-O3", "-msimd128"]
+            ["-lm", "-pthread"]
+            (wasmFlags classpath exps True)
         _ -> do
           -- Non-server executables are not supported.
           writeLibs cprog jsprog
           liftIO $ T.appendFile classpath $ MulticoreWASM.runServer $ MulticoreWASM.cManifest cprog
-          runEMCC cpath outpath classpath ["-O3", "-msimd128"] ["-lm", "-pthread"] exps False
+          runEMCC
+            cpath
+            outpath
+            ["-O3", "-msimd128"]
+            ["-lm", "-pthread"]
+            (wasmFlags classpath exps False)
 
     writeLibs cprog jsprog = do
       let (h, imp, _) = MulticoreC.asLibrary cprog
