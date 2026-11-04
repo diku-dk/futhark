@@ -760,6 +760,12 @@ genWGSLStm (DeclareMem name (ScalarSpace vs pt)) = do
       (Just $ WGSL.Array (wgslPrimType pt) (Just size))
       Nothing
 genWGSLStm s@(DeclareMem _ _) = unsupported s
+-- Unit values carry no data, so statements that only move them are dropped.
+genWGSLStm (DeclareScalar _ _ Unit) = pure WGSL.Empty
+genWGSLStm (SetScalar _ e) | primExpType e == Unit = pure WGSL.Empty
+genWGSLStm (Write _ _ Unit _ _ _) = pure WGSL.Empty
+genWGSLStm (Read _ _ _ Unit _ _) = pure WGSL.Empty
+genWGSLStm (Copy Unit _ _ _ _ _) = pure WGSL.Empty
 genWGSLStm (DeclareScalar name _ typ) =
   pure $
     WGSL.Var (nameToIdent name) (Just $ wgslPrimType typ) Nothing
@@ -822,6 +828,8 @@ genWGSLStm (Op (ImpGPU.GetLocalSize dest i)) = do
 genWGSLStm (Op (ImpGPU.GetLockstepWidth dest)) = do
   destId <- getIdent dest
   assign destId . WGSL.ExpIdent <$> builtinLockstepWidth
+genWGSLStm (Op (ImpGPU.Atomic _ op))
+  | ImpGPU.atomicOpType op == Unit = pure WGSL.Empty
 -- WGSL has no 64-bit atomics. An atomic write is only a write that must be
 -- visible to other threads, and this is supported (see 'i64Words'), but
 -- read-modify-write operations are not.
@@ -1182,7 +1190,9 @@ findMemoryTypes name = S.elems . find <$> asks (ImpGPU.kernelBody . krKernel)
     find (ImpGPU.Copy t _ (n, _) _ _ _) | n == name = S.singleton (t, False)
     find (ImpGPU.Copy t _ _ _ (n, _) _) | n == name = S.singleton (t, False)
     find (Op (ImpGPU.Atomic _ op))
-      | ImpGPU.atomicOpMem op == name = S.singleton (ImpGPU.atomicOpType op, True)
+      | ImpGPU.atomicOpMem op == name =
+          -- Atomic operations on units are dropped.
+          S.singleton (ImpGPU.atomicOpType op, ImpGPU.atomicOpType op /= Unit)
     find (s1 :>>: s2) = find s1 <> find s2
     find (For _ _ body) = find body
     find (While _ body) = find body
