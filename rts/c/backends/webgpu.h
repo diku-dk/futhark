@@ -229,17 +229,6 @@ WGPUQueueWorkDoneStatus wgpu_block_until_work_done(WGPUInstance instance,
   return status;
 }
 
-void wgpu_on_uncaptured_error(WGPUDevice const *device,
-                              WGPUErrorType error_type,
-                              WGPUStringView message,
-                              void *userdata1, void *userdata2) {
-  (void)device;
-  (void)userdata1;
-  (void)userdata2;
-  futhark_panic(-1, "Uncaptured WebGPU error, type: %d\n%.*s\n",
-                error_type, (int)message.length, message.data);
-}
-
 void wgpu_on_shader_compiled(WGPUCompilationInfoRequestStatus status,
                              struct WGPUCompilationInfo const * compilationInfo,
                              void * userdata1, void * userdata2) {
@@ -322,6 +311,10 @@ struct futhark_context {
   int64_t peak_mem_usage_device;
   int64_t cur_mem_usage_device;
 
+  // Set when WebGPU reports an error, which futhark_context_sync() then
+  // returns.
+  bool webgpu_failed;
+
   WGPUInstance instance;
   WGPUAdapter adapter;
   WGPUDevice device;
@@ -344,6 +337,20 @@ struct futhark_context {
   struct builtin_kernels* kernels;
 };
 
+// WebGPU reports errors such as failed validation asynchronously, so they are
+// returned by the next futhark_context_sync().
+void wgpu_on_uncaptured_error(WGPUDevice const *device,
+                              WGPUErrorType error_type,
+                              WGPUStringView message,
+                              void *userdata1, void *userdata2) {
+  (void)device;
+  (void)userdata2;
+  struct futhark_context *ctx = userdata1;
+  set_error(ctx, msgprintf("WebGPU error, type %d:\n%.*s\n",
+                           error_type, (int)message.length, message.data));
+  ctx->webgpu_failed = true;
+}
+
 int futhark_context_sync(struct futhark_context *ctx) {
   // TODO: All the error handling stuff.
   WGPUQueueWorkDoneStatus status = wgpu_block_until_work_done(ctx->instance,
@@ -351,6 +358,10 @@ int futhark_context_sync(struct futhark_context *ctx) {
   if (status != WGPUQueueWorkDoneStatus_Success) {
     futhark_panic(-1, "Failed to wait for work to be done, status: %d\n",
                   status);
+  }
+  if (ctx->webgpu_failed) {
+    ctx->webgpu_failed = false;
+    return FUTHARK_PROGRAM_ERROR;
   }
   return FUTHARK_SUCCESS;
 }
@@ -441,6 +452,7 @@ void free_builtin_kernels(struct futhark_context* ctx, struct builtin_kernels* k
 
 int backend_context_setup(struct futhark_context *ctx) {
   ctx->failure_is_an_option = 0;
+  ctx->webgpu_failed = false;
   ctx->total_runs = 0;
   ctx->total_runtime = 0;
   ctx->peak_mem_usage_device = 0;
@@ -514,7 +526,7 @@ int backend_context_setup(struct futhark_context *ctx) {
   // Error callback must be set in device descriptor (not after creation).
   WGPUUncapturedErrorCallbackInfo error_cb = {
     .callback = wgpu_on_uncaptured_error,
-    .userdata1 = NULL,
+    .userdata1 = ctx,
     .userdata2 = NULL,
   };
   WGPUDeviceDescriptor device_desc = {
