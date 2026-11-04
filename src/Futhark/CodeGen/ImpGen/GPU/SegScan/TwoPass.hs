@@ -386,7 +386,7 @@ scanStage2 scan_out stage1_num_threads elems_per_group stage1_num_tblocks stage2
               -- reload carry (xParams) from the scan output written by the
               -- previous chunk.  Thread 0 reads the last element of the
               -- previous chunk, unless a segment boundary falls between the
-              -- chunks.
+              -- chunks, or that element is out of bounds.
               when use_global_carry $ do
                 crosses_seg <-
                   dPrimVE "crosses_seg" $
@@ -394,7 +394,11 @@ scanStage2 scan_out stage1_num_threads elems_per_group stage1_num_tblocks stage2
                       Nothing -> false
                       Just f -> f prev_chunk_last (prev_chunk_last + 1)
                 sIf
-                  (chunk_id .>. 0 .&&. kernelLocalThreadId constants .==. 0 .&&. bNot crosses_seg)
+                  ( (chunk_id .>. 0)
+                      .&&. (kernelLocalThreadId constants .==. 0)
+                      .&&. (prev_chunk_last .<. product dims')
+                      .&&. bNot crosses_seg
+                  )
                   ( do
                       let carry_is = unflattenIndex dims' prev_chunk_last
                       forM_ (zip scan_x_params pes) $ \(p, pe) ->
