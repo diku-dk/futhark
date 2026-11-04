@@ -28,7 +28,7 @@ async function bufferToBase64(buffer) {
 
 class BrowserServer extends Server {
   constructor(fut) {
-    super({ wasm: fut.m, ctx: fut.ctx }, fut.manifest);
+    super(fut, fut.manifest);
     this._stored = [];
 
     this.socket = new WebSocket("ws://" + window.location.host + "/ws");
@@ -67,21 +67,18 @@ class BrowserServer extends Server {
   }
 }
 
-async function runServer() {
-  const fut = new FutharkModule();
-  await fut.init(await Module());
-
-  if (typeof window === 'undefined') {
-    await new Server({ wasm: fut.m, ctx: fut.ctx, free: () => fut.free() }, fut.manifest).run();
+// Run the server in Node, or in a browser with commands from a WebSocket.
+async function futhark_webgpu_server_main() {
+  if (globalThis.window === undefined) {
+    await futhark_server_main();
   } else {
-    // Setting these in the global scope makes debugging a bit easier, and this
-    // is not intended to be embedded into anything other than the internal
-    // `futhark test` / `futhark bench` support anyway.
+    const fut = new FutharkContext();
+    await fut.init();
+    // For debugging, as this is only used by `futhark test` and `futhark
+    // bench`.
     window.fut = fut;
     window.server = new BrowserServer(fut);
   }
 }
-
-runServer();
 
 // End of server_ws.js

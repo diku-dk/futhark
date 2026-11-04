@@ -18,7 +18,8 @@ from selenium import webdriver
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
-    "program", help="the program to wrap (without .js or other file extension)"
+    "program",
+    help="the program to wrap (without .mjs or other file extension)",
 )
 parser.add_argument(
     "--no-server-proxy",
@@ -63,7 +64,7 @@ args = parser.parse_args()
 program_name = args.program
 if program_name.startswith("./"):
     program_name = program_name[2:]
-script_name = program_name + ".js"
+script_name = program_name + ".mjs"
 wasm_name = program_name + ".wasm"
 wasm_map_name = program_name + ".wasm.map"
 source_name = program_name + ".c"
@@ -87,7 +88,7 @@ if no_browser_env == "0":
 elif no_browser_env == "1":
     no_browser = True
 elif no_browser is None:
-    no_browser = args.no_browser
+    no_browser = args.no_browser or args.no_server_proxy
 
 headless_env = os.environ.get("HEADLESS")
 headless = None
@@ -110,7 +111,7 @@ index_page = (
     f"<html>\n"
     f"<head>\n"
     f"   <title>futhark test</title>\n"
-    f'   <script src="{script_name}"></script>\n'
+    f'   <script type="module" src="{script_name}"></script>\n'
     f"</head>\n"
     f"<body>\n"
     f"   <h1>futhark test</h1>\n"
@@ -139,7 +140,7 @@ async def handle_file(request):
         file = file.lstrip("/")
 
     content_type = "text/plain"
-    if file.endswith(".js"):
+    if file.endswith(".js") or file.endswith(".mjs"):
         content_type = "text/javascript"
     elif file.endswith(".wasm"):
         content_type = "application/wasm"

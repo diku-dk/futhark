@@ -15,4 +15,4 @@ prog=$1
 shift
 # Node treats a relative path given to --import as a package name.
 here=$(cd "$(dirname "$0")" && pwd)
-exec node --import "$here/node-gpu.mjs" "$prog.js" "$@"
+exec node --import "$here/node-gpu.mjs" "$prog" "$@"

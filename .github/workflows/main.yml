@@ -551,6 +551,11 @@ jobs:
         export VK_DRIVER_FILES=$LAVAPIPE_ICD
         futhark test -c --backend=webgpu --runner=tools/webgpu/node-runner.sh tests
 
+    - name: Run library tests
+      run: |
+        export VK_DRIVER_FILES=$LAVAPIPE_ICD
+        make -C tests_lib/javascript FUTHARK_BACKEND=webgpu
+
   test-cuda:
     runs-on: cuda
     needs: [build-linux-nix]

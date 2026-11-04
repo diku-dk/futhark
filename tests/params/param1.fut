@@ -1,6 +1,5 @@
 -- Using a tuning parameter inside a parallel section.
 -- ==
--- tags { no_webgpu }
 -- compiled input { 1i64 [5i64] }
 -- output { [8i64] }
 

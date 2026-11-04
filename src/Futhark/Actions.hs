@@ -546,71 +546,6 @@ compilePyOpenCLAction fcfg mode outpath =
       actionProcedure = pythonCommon PyOpenCL.compileProg fcfg mode outpath
     }
 
--- | The @futhark webgpu@ action.
-compileWebGPUAction :: FutharkConfig -> CompilerMode -> FilePath -> Action GPUMem
-compileWebGPUAction fcfg mode tgtpath =
-  Action
-    { actionName = "Compile to WebGPU",
-      actionDescription = "Compile to WebGPU",
-      actionProcedure = helper
-    }
-  where
-    helper prog = do
-      (cprog, jslib, exports) <-
-        handleWarnings fcfg $ CWebGPU.compileProg versionString prog
-      let outpath =
-            if takeExtension tgtpath == "js"
-              then tgtpath
-              else tgtpath `addExtension` "js"
-          cpath = tgtpath `addExtension` "c"
-          jslibpath = tgtpath `addExtension` "wrapper.js"
-          jsserverpath = tgtpath `addExtension` "server.js"
-          extra_options =
-            [ "--use-port=emdawnwebgpu",
-              -- The emdawnwebgpu port is written in C++.
-              "-sDEFAULT_TO_CXX",
-              "-sASYNCIFY",
-              "-sMODULARIZE",
-              "-sWASM_BIGINT",
-              "-sASSERTIONS",
-              "-sALLOW_MEMORY_GROWTH",
-              "-sEXPORTED_RUNTIME_METHODS=["
-                ++ intercalate "," ("'ccall'" : "'Asyncify'" : heapExports)
-                ++ "]",
-              "--extern-post-js",
-              jslibpath
-            ]
-          export_option =
-            "-sEXPORTED_FUNCTIONS="
-              ++ intercalate "," ['_' : T.unpack e | e <- exports]
-      case mode of
-        ToLibrary -> do
-          let (_header, impl, _manifest) = CWebGPU.asLibrary cprog
-          liftIO $ T.writeFile cpath $ cPrependHeader impl
-          liftIO $ T.writeFile jslibpath jslib
-          runEMCC
-            cpath
-            outpath
-            ["-O3", "-std=c99"]
-            ["-lm"]
-            (export_option : extra_options)
-        ToExecutable -> do
-          liftIO $ T.writeFile cpath $ cPrependHeader $ CWebGPU.asExecutable cprog
-          liftIO $ T.writeFile jslibpath jslib
-          runEMCC cpath outpath ["-O3", "-std=c99"] ["-lm"] extra_options
-        ToServer -> do
-          let (impl, server) = CWebGPU.asJSServer cprog
-          liftIO $ T.writeFile cpath $ cPrependHeader impl
-          liftIO $ T.writeFile jslibpath jslib
-          liftIO $ T.writeFile jsserverpath server
-          let serverArgs = ["--extern-post-js", jsserverpath]
-          runEMCC
-            cpath
-            outpath
-            ["-O3", "-std=c99"]
-            ["-lm"]
-            (export_option : extra_options ++ serverArgs)
-
 -- | The typed views of the WASM heap, which the generated JavaScript
 -- uses to move array data in and out of the module.
 heapExports :: [String]
@@ -630,9 +565,9 @@ heapExports =
 cmdEMCFLAGS :: [String] -> [String]
 cmdEMCFLAGS def = maybe def words $ lookup "EMCFLAGS" unixEnvironment
 
--- | Options passed to @emcc@ by both WASM backends.
-wasmFlags :: FilePath -> [String] -> [String]
-wasmFlags classpath expfuns =
+-- | Options passed to @emcc@ by all WASM-based backends.
+wasmFlags :: FilePath -> [String] -> [String] -> [String]
+wasmFlags classpath runtime_methods expfuns =
   [ "--extern-post-js",
     classpath,
     -- Called by the generated JavaScript.
@@ -640,7 +575,9 @@ wasmFlags classpath expfuns =
     "-sWASM_BIGINT",
     -- Up to 2GiB; more would need unsigned pointers in JavaScript.
     "-sALLOW_MEMORY_GROWTH",
-    "-sEXPORTED_RUNTIME_METHODS=[" ++ intercalate "," ("'ccall'" : heapExports) ++ "]",
+    "-sEXPORTED_RUNTIME_METHODS=["
+      ++ intercalate "," ("'ccall'" : heapExports ++ runtime_methods)
+      ++ "]",
     "-sEXPORTED_FUNCTIONS=[" ++ intercalate "," ("'_malloc'" : "'_free'" : expfuns) ++ "]"
   ]
 
@@ -670,19 +607,32 @@ runEMCC cpath outpath cflags_def ldflags extra_flags = do
     Right (ExitSuccess, _, _) ->
       pure ()
 
+-- | How a WASM-based backend is compiled with emcc.
+data WASMBackend = WASMBackend
+  { wasmCFlags :: [String],
+    wasmLDFlags :: [String],
+    -- | Additional options for emcc.
+    wasmEMCFlags :: [String],
+    -- | Additional Emscripten runtime methods to export.
+    wasmRuntimeMethods :: [String],
+    -- | JavaScript that runs a server.
+    wasmServer :: T.Text
+  }
+
 -- | Compile to the ES module @outpath.mjs@ with emcc.  Unless compiling a
 -- library, @outpath@ is an executable that runs it as a server.
 compileWASM ::
+  WASMBackend ->
   CompilerMode ->
   FilePath ->
-  [String] ->
   (GC.CParts, T.Text, [String]) ->
   FutharkM ()
-compileWASM mode outpath ldflags (cprog, jsprog, exps) = do
+compileWASM backend mode outpath (cprog, jsprog, exps) = do
   let (_, impl, _) = GC.asLibrary cprog
-  liftIO $ T.writeFile cpath impl
+  liftIO $ T.writeFile cpath $ cPrependHeader impl
   liftIO $ T.writeFile classpath $ jsprog <> extra
-  runEMCC cpath mjspath ["-O3", "-msimd128"] ldflags (wasmFlags classpath exps)
+  runEMCC cpath mjspath (wasmCFlags backend) (wasmLDFlags backend) $
+    wasmFlags classpath (wasmRuntimeMethods backend) exps ++ wasmEMCFlags backend
   when (mode /= ToLibrary) . liftIO $ do
     T.writeFile outpath $ wasmLauncher $ takeFileName mjspath
     perms <- getPermissions outpath
@@ -690,7 +640,7 @@ compileWASM mode outpath ldflags (cprog, jsprog, exps) = do
   where
     extra = case mode of
       ToLibrary -> GenericWASM.libraryExports
-      _ -> GenericWASM.runServer
+      _ -> wasmServer backend
     cpath = outpath `addExtension` "c"
     mjspath = outpath `addExtension` "mjs"
     classpath = outpath `addExtension` "class.js"
@@ -713,7 +663,7 @@ compileCtoWASMAction fcfg mode outpath =
     { actionName = "Compile to WebAssembly",
       actionDescription = "Compile to sequential WebAssembly",
       actionProcedure =
-        compileWASM mode outpath ["-lm"]
+        compileWASM (cpuWASM ["-lm"]) mode outpath
           <=< handleWarnings fcfg . SequentialWASM.compileProg versionString
     }
 
@@ -724,9 +674,44 @@ compileMulticoreToWASMAction fcfg mode outpath =
     { actionName = "Compile to WebAssembly",
       actionDescription = "Compile to multicore WebAssembly",
       actionProcedure =
-        compileWASM mode outpath ["-lm", "-pthread"]
+        compileWASM (cpuWASM ["-lm", "-pthread"]) mode outpath
           <=< handleWarnings fcfg . MulticoreWASM.compileProg versionString
     }
+
+cpuWASM :: [String] -> WASMBackend
+cpuWASM ldflags =
+  WASMBackend
+    { wasmCFlags = ["-O3", "-msimd128"],
+      wasmLDFlags = ldflags,
+      wasmEMCFlags = [],
+      wasmRuntimeMethods = [],
+      wasmServer = GenericWASM.runServer
+    }
+
+-- | The @futhark webgpu@ action.
+compileWebGPUAction :: FutharkConfig -> CompilerMode -> FilePath -> Action GPUMem
+compileWebGPUAction fcfg mode outpath =
+  Action
+    { actionName = "Compile to WebGPU",
+      actionDescription = "Compile to WebAssembly with WebGPU",
+      actionProcedure =
+        compileWASM webgpu mode outpath
+          <=< handleWarnings fcfg . CWebGPU.compileProg versionString
+    }
+  where
+    webgpu =
+      WASMBackend
+        { wasmCFlags = ["-O3", "-std=c99"],
+          wasmLDFlags = ["-lm"],
+          wasmEMCFlags =
+            [ "--use-port=emdawnwebgpu",
+              -- The emdawnwebgpu port is written in C++.
+              "-sDEFAULT_TO_CXX",
+              "-sASYNCIFY"
+            ],
+          wasmRuntimeMethods = ["'Asyncify'"],
+          wasmServer = CWebGPU.runServer
+        }
 
 runWith ::
   Name ->

@@ -4,7 +4,6 @@
 -- in @rts/javascript/wrappers.js@, driven by the manifest.
 module Futhark.CodeGen.Backends.GenericWASM
   ( emccExportNames,
-    manifestFunctions,
     javascriptWrapper,
     runServer,
     libraryExports,

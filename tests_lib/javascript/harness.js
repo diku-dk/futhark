@@ -15,16 +15,10 @@ export const backend = process.env.FUTHARK_BACKEND ?? "wasm";
 
 const build_dir = process.env.BUILD_DIR ?? path.join("build", backend);
 
-// Whether the backend is one of the WASM backends.
-export const is_wasm = backend === "wasm" || backend === "wasm-multicore";
-
 // Load the library compiled from the program 'name'.fut.  The result has the
 // generated classes (FutharkContext, FutharkArray, FutharkOpaque) as fields.
 export async function loadLibrary(name) {
-  if (is_wasm) {
-    return await import(pathToFileURL(path.resolve(build_dir, name + ".mjs")));
-  }
-  throw new Error(`Unsupported backend: ${backend}`);
+  return await import(pathToFileURL(path.resolve(build_dir, name + ".mjs")));
 }
 
 // A new initialised FutharkContext for a library returned by 'loadLibrary'.

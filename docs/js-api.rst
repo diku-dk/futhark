@@ -177,7 +177,8 @@ example, for the type ``[]i32``:
 
 .. js:function:: fut.i32_1d.from_data(data, dim0)
 
-   Creates and returns a one-dimensional ``i32`` ``FutharkArray`` from
+   Asynchronously creates and returns a one-dimensional ``i32``
+   ``FutharkArray`` from
    a JavaScript ``Array`` or typed array in row-major order, with the
    given shape.  The dimensions can be numbers or ``BigInt``\ s, and
    their product must be the length of ``data``.  The elements must be

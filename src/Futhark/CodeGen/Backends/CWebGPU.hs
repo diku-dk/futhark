@@ -3,11 +3,7 @@
 -- | Code generation for WebGPU.
 module Futhark.CodeGen.Backends.CWebGPU
   ( compileProg,
-    GC.CParts (..),
-    GC.asLibrary,
-    GC.asExecutable,
-    GC.asServer,
-    asJSServer,
+    runServer,
   )
 where
 
@@ -17,19 +13,17 @@ import Futhark.CodeGen.Backends.GPU
 import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.GenericC.Pretty (idText)
-import Futhark.CodeGen.Backends.GenericWASM (manifestFunctions)
+import Futhark.CodeGen.Backends.GenericWASM (emccExportNames, javascriptWrapper)
 import Futhark.CodeGen.ImpCode.WebGPU
 import Futhark.CodeGen.ImpGen.WebGPU qualified as ImpGen
 import Futhark.CodeGen.RTS.C (backendsWebGPUH)
-import Futhark.CodeGen.RTS.JavaScript qualified as JS
 import Futhark.CodeGen.RTS.WGSL qualified as RTS
-import Futhark.CodeGen.RTS.WebGPU (serverWsJs, utilJs, wrappersJs)
+import Futhark.CodeGen.RTS.WebGPU (serverWsJs)
 import Futhark.IR.GPUMem (GPUMem, Prog)
-import Futhark.Manifest qualified as Manifest
 import Futhark.MonadFreshNames
-import Futhark.Util (chunk, nubOrd)
+import Futhark.Util (chunk)
 import Language.C.Quote.C qualified as C
-import NeatInterpolation (text, untrimming)
+import NeatInterpolation (untrimming)
 
 mkKernelInfos :: M.Map Name KernelInterface -> GC.CompilerM HostOp () ()
 mkKernelInfos kernels = do
@@ -202,108 +196,13 @@ webgpuMemoryType :: GC.MemoryType HostOp ()
 webgpuMemoryType "device" = pure [C.cty|typename WGPUBuffer|]
 webgpuMemoryType space = error $ "WebGPU backend does not support '" ++ space ++ "' memory space."
 
--- | The JavaScript wrapper, and the names of the C functions that must be
--- exported from the WebAssembly module. We export every function named in the
--- manifest, as the server calls these directly.
-jsBoilerplate :: Manifest.Manifest -> (T.Text, [T.Text])
-jsBoilerplate manifest =
-  let context = mkJsContext $ Manifest.manifestToJSON manifest
-      prelude = T.intercalate "\n" [utilJs, wrappersJs]
-   in (prelude <> "\n" <> context, nubOrd (manifestFunctions manifest) ++ builtinExports)
-  where
-    builtinExports =
-      [ "malloc",
-        "free",
-        "futhark_context_config_new",
-        "futhark_context_new",
-        "futhark_context_config_free",
-        "futhark_context_free",
-        "futhark_context_get_error",
-        "futhark_context_sync",
-        "futhark_context_clear_caches",
-        "futhark_context_report",
-        "futhark_context_pause_profiling",
-        "futhark_context_unpause_profiling"
-      ]
-
--- Argument should be a direct function call to a WASM function that needs to
--- be handled asynchronously. The return value evaluates to a Promise yielding
--- the function result when awaited.
--- Can currently only be used for code generated into the FutharkModule class.
-asyncCall :: T.Text -> Bool -> [T.Text] -> T.Text
-asyncCall func hasReturn args =
-  [text|this.m.ccall('${func}', ${ret}, ${argTypes}, ${argList}, {async: true})|]
-  where
-    ret = if hasReturn then "'number'" else "null"
-    argTypes =
-      "[" <> T.intercalate ", " (replicate (length args) "'number'") <> "]"
-    argList =
-      "[" <> T.intercalate ", " args <> "]"
-
-mkJsContext :: T.Text -> T.Text
-mkJsContext manifest =
-  [text|
-   class FutharkModule {
-     ${constructor}
-     ${free}
-     ${builtins}
-   }|]
-  where
-    constructor =
-      [text|
-      constructor() {
-        this.m = undefined;
-        this.manifest = ${manifest};
-      }
-      async init(module) {
-        this.m = module;
-        fix_asyncify_rewind(this.m);
-        this.cfg = this.m._futhark_context_config_new();
-        this.ctx = await ${newContext};
-        this.entry = {};
-        this.types = {};
-        init_wrappers(this);
-      }|]
-    newContext = asyncCall "futhark_context_new" True ["this.cfg"]
-    free =
-      [text|
-      free() {
-        this.m._futhark_context_free(this.ctx);
-        this.m._futhark_context_config_free(this.cfg);
-      }|]
-    builtins =
-      [text|
-      async context_sync() {
-        return await ${syncCall};
-      }
-      async clear_caches() {
-        return await ${clearCall};
-      }
-      async report() {
-        return await this.m.ccall('futhark_context_report', 'string',
-          ['number'], [this.ctx], {async: true});
-      }
-      async pause_profiling() {
-        return await ${pauseProfilingCall};
-      }
-      async unpause_profiling() {
-        return await ${unpauseProfilingCall};
-      }
-      |]
-    syncCall = asyncCall "futhark_context_sync" True ["this.ctx"]
-    clearCall = asyncCall "futhark_context_clear_caches" True ["this.ctx"]
-    pauseProfilingCall =
-      asyncCall "futhark_context_pause_profiling" False ["this.ctx"]
-    unpauseProfilingCall =
-      asyncCall "futhark_context_unpause_profiling" False ["this.ctx"]
-
 -- | Compile the program to C with calls to WebGPU, along with a JS wrapper
 -- library.
 compileProg ::
   (MonadFreshNames m) =>
   T.Text ->
   Prog GPUMem ->
-  m (ImpGen.Warnings, (GC.CParts, T.Text, [T.Text]))
+  m (ImpGen.Warnings, (GC.CParts, T.Text, [String]))
 compileProg version prog = do
   ( ws,
     Program wgsl_code wgsl_prelude macros kernels failures prog'
@@ -319,8 +218,8 @@ compileProg version prog = do
       (Space "device", [Space "device", DefaultSpace])
       cliOptions
       prog'
-  let (js, exports) = jsBoilerplate (GC.cManifest c)
-  pure (ws, (c, js, exports))
+  let manifest = GC.cManifest c
+  pure (ws, (c, javascriptWrapper manifest, emccExportNames manifest))
   where
     operations :: GC.Operations HostOp ()
     operations =
@@ -337,9 +236,6 @@ compileProg version prog = do
        #endif
       |]
 
--- | As server script. Speaks custom protocol to local Python server
--- wrapper that speaks the actual Futhark server protocol.
-asJSServer :: GC.CParts -> (T.Text, T.Text)
-asJSServer parts =
-  let (_, c, _) = GC.asLibrary parts
-   in (c, T.unlines [JS.valuesJs, JS.serverJs, serverWsJs])
+-- | JavaScript that runs a server, in Node or in a browser.
+runServer :: T.Text
+runServer = serverWsJs <> "\nawait futhark_webgpu_server_main();\n"
