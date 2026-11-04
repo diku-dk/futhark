@@ -557,6 +557,9 @@ wasmFlags classpath expfuns lib =
            else []
        )
     ++ ["-s", "WASM_BIGINT"]
+    -- The memory may grow up to the default maximum of 2GiB.  Allowing more
+    -- would require the JavaScript code to treat pointers as unsigned.
+    ++ ["-s", "ALLOW_MEMORY_GROWTH"]
     ++ ["-s", "EXPORTED_RUNTIME_METHODS=[" ++ intercalate "," ("'ccall'" : heapExports) ++ "]"]
     ++ [ "-s",
          "EXPORTED_FUNCTIONS=["

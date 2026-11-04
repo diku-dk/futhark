@@ -544,7 +544,7 @@ toFutharkArray typ =
     dims = T.pack $ intercalate ", " ["d" ++ show i | i <- [0 .. d - 1]]
     dims_multiplied = T.pack $ intercalate "*" ["Number(d" ++ show i ++ ")" | i <- [0 .. d - 1]]
     bigint_dims = T.pack $ intercalate ", " ["BigInt(d" ++ show i ++ ")" | i <- [0 .. d - 1]]
-    args = T.pack $ intercalate ", " ["'" ++ ftype ++ "'", show d, heap, fshape, fvalues, ffree]
+    args = T.pack $ intercalate ", " ["'" ++ ftype ++ "'", show d, "() => " ++ heap, fshape, fvalues, ffree]
 
 -- | Javascript code that can be appended to the generated module to
 -- run a Futhark server instance on startup.

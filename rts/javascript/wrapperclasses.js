@@ -1,6 +1,9 @@
 // Start of wrapperclasses.js
 
 class FutharkArray {
+  // 'heap' is a function that returns the typed view of the WASM heap for the
+  // element type.  The view must be fetched anew on every use, as it is
+  // invalidated when the WASM memory grows.
   constructor(ctx, ptr, type_name, dim, heap, fshape, fvalues, ffree) {
     this.ctx = ctx;
     this.ptr = ptr;
@@ -35,8 +38,10 @@ class FutharkArray {
   async values() {
     this.validCheck();
     var length = Number(this.shape().reduce((a, b) => a * b, 1n));
-    var v = this.fvalues(this.ctx.ctx, this.ptr) / this.heap.BYTES_PER_ELEMENT;
-    return this.heap.slice(v, v + length);
+    var p = this.fvalues(this.ctx.ctx, this.ptr);
+    var heap = this.heap();
+    var v = p / heap.BYTES_PER_ELEMENT;
+    return heap.slice(v, v + length);
   }
 }
 

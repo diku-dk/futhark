@@ -84,6 +84,17 @@ yss_values.forEach((y) => assertClose(y, 2.5));
 
 ok("the result of values() remains valid after freeing");
 
+section("Memory growth");
+
+// Larger than the initial WASM memory, so it must grow.
+const big = await fut.entry.replicate_f32_1d(50000000n, 3.5);
+
+assert.deepEqual(await zsss.values(), Int32Array.from({ length: 24 }, (_, i) => i));
+assertClose((await big.values())[49999999], 3.5);
+
+ok("arrays created before the memory grows remain usable");
+
+big.free();
 zsss.free();
 fut.free();
 
