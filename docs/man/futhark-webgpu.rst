@@ -52,10 +52,11 @@ The WebGPU backend has various restrictions. Some of these are due to
 fundamental limitations in WebGPU and are unlikely to be resolved. The following
 are the main restrictions that a Futhark programmer will notice.
 
-* ``f64`` is not supported.  Programs that use it fail to compile.
+* ``f64`` is not supported in parallel code. Programs that use it there fail to
+  compile.
 
-* Reductions and histograms on 64-bit integers, including functions such as
-  ``i64.sum``, fail to compile.
+* Histograms (``hist`` and ``reduce_by_index``) on 64-bit integers fail to
+  compile.
 
 * Some programs that produce arrays with ``if`` or ``loop`` inside parallel code
   fail to compile.
@@ -67,7 +68,7 @@ are the main restrictions that a Futhark programmer will notice.
 * Programs only run on devices that support the ``shader-f16`` feature, even if
   they do not use ``f16``.
 
-* Tuning files are unsupported.
+* Tuning files are not supported, and are silently ignored.
 
 SEE ALSO
 ========
