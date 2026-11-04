@@ -178,15 +178,15 @@ fn f16_neg_inf_helper() -> u32 { return 0xfc00u; }
 fn f16_nan_helper() -> u32 { return 0xffffu; }
 
 fn f16_inf() -> f16 {
-  return bitcast<vec2<f16>>(f16_inf_helper())[0];
+  return f16_from_bits(f16_inf_helper());
 }
 
 fn f16_neg_inf() -> f16 {
-  return bitcast<vec2<f16>>(f16_neg_inf_helper())[0];
+  return f16_from_bits(f16_neg_inf_helper());
 }
 
 fn f16_nan() -> f16 {
-  return bitcast<vec2<f16>>(f16_nan_helper())[0];
+  return f16_from_bits(f16_nan_helper());
 }
 
 // End of scalar16.wgsl

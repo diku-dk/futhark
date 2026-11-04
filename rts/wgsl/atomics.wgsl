@@ -115,23 +115,20 @@ fn atomic_read_f16_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32)
 }
 
 fn atomic_write_f16_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32, val: f16) {
-    var x = bitcast<vec2<f16>>(atomicLoad(p));
-    var y = x; y[offset] = val;
-    while (!atomicCompareExchangeWeak(p, bitcast<i32>(x), bitcast<i32>(y)).exchanged) {
-        x = bitcast<vec2<f16>>(atomicLoad(p));
-        y = x;
-        y[offset] = val;
-    }
+    atomic_write_i16_global(p, offset, bitcast<i32>(f16_to_bits(val)));
 }
 
 fn atomic_fadd_f16_global(p: ptr<storage, atomic<i32>, read_write>, offset: i32, x: f16) -> f16 {
-    var val = vec2<f16>(0.0); val[offset] = x;
-    var old = bitcast<vec2<f16>>(atomicLoad(p));
-    while (!atomicCompareExchangeWeak(p, bitcast<i32>(old), bitcast<i32>(old + val)).exchanged) {
-        old = bitcast<vec2<f16>>(atomicLoad(p));
-    }
+    loop {
+        let old = atomicLoad(p);
+        let old_f16 = unpack_f16(old, offset);
+        let val = bitcast<i32>(f16_to_bits(old_f16 + x) << bitcast<u32>(offset * 16));
+        let rest = old & ~(0xffff << bitcast<u32>(offset * 16));
 
-    return old[offset];
+        if (atomicCompareExchangeWeak(p, old, val | rest).exchanged) {
+            return old_f16;
+        }
+    }
 }
 
 //// i32 atomics ////

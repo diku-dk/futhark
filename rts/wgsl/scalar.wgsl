@@ -99,8 +99,17 @@ fn futrts_atan2_16(a: f16, b: f16) -> f16 { if (a == 0 && b == 0) { return 0; } 
 fn futrts_atan2pi_32(a: f32, b: f32) -> f32 { return futrts_atan2_32(a, b) / 3.14159265358979323846; }
 fn futrts_atan2pi_16(a: f16, b: f16) -> f16 { return futrts_atan2_16(a, b) / 3.14159265358979323846; }
 
-fn futrts_to_bits16(a: f16) -> i16 { return norm_i16(bitcast<i32>(vec2<f16>(a, 0.0))); }
-fn futrts_from_bits16(a: i16) -> f16 { return bitcast<vec2<f16>>(a)[0]; }
+// WGSL has no 16-bit integer type, so an f16 bit pattern is carried in the low
+// half of a 32-bit word.  The obvious way to convert is 'bitcast<vec2<f16>>',
+// which is valid WGSL, but is not implemented by every WGSL front end: naga
+// (used by Firefox) mistypes the result, and every shader containing one fails
+// to compile.  The pack/unpack builtins are defined to be exactly the IEEE 754
+// binary16 encoding, and are implemented everywhere.
+fn f16_from_bits(w: u32) -> f16 { return f16(unpack2x16float(w).x); }
+fn f16_to_bits(x: f16) -> u32 { return pack2x16float(vec2<f32>(f32(x), 0.0)); }
+
+fn futrts_to_bits16(a: f16) -> i16 { return norm_i16(bitcast<i32>(f16_to_bits(a))); }
+fn futrts_from_bits16(a: i16) -> f16 { return f16_from_bits(bitcast<u32>(a)); }
 
 fn futrts_to_bits32(a: f32) -> i32 { return bitcast<i32>(a); }
 fn futrts_from_bits32(a: i32) -> f32 { return bitcast<f32>(a); }
@@ -208,7 +217,7 @@ fn unpack_i32(w: i32, offset: i32) -> i32 {
 }
 
 fn unpack_f16(w: i32, offset: i32) -> f16 {
-    return bitcast<vec2<f16>>(w)[offset];
+    return f16_from_bits(bitcast<u32>(w) >> bitcast<u32>(offset * 16));
 }
 
 fn unpack_f32(w: i32, offset: i32) -> f32 {
@@ -238,7 +247,7 @@ fn futrts_isinf32(x: f32) -> bool {
 }
 
 fn futrts_isnan16(x: f16) -> bool {
-    let bits = bitcast<u32>(vec2<f16>(x, 0.0));
+    let bits = f16_to_bits(x);
     let exponent = (bits >> 10) & 0x1F;
     let mantissa = bits & 0x3ff;
 
@@ -247,7 +256,7 @@ fn futrts_isnan16(x: f16) -> bool {
 }
 
 fn futrts_isinf16(x: f16) -> bool {
-    let bits = bitcast<u32>(vec2<f16>(x, 0.0));
+    let bits = f16_to_bits(x);
     let exponent = (bits >> 10) & 0x1F;
     let mantissa = bits & 0x3ff;
 
