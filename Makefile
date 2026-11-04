@@ -52,9 +52,6 @@ clean:
 
 # All testing targets are below.
 
-test-webgpu:
-	cabal run -- futhark test tests -c --backend=webgpu --runner tools/browser_test.py --no-tuning
-
 # Test that all test programs type check. Much faster than compiling them.
 test-t:
 	cabal run -- futhark test tests -t
@@ -123,6 +120,10 @@ test-multicore:
 # Compile and run all programs with the 'python' backend.
 test-python:
 	cabal run -- futhark test tests -c --backend=python --exclude=no_python --exclude=compiled
+
+# Compile and run all programs with the 'webgpu' backend, in a browser.
+test-webgpu:
+	cabal run -- futhark test tests -c --backend=webgpu --runner tools/browser_test.py --no-tuning
 
 # Run all programs through the interpreter. This excludes slow workloads.
 test-interpreter:
