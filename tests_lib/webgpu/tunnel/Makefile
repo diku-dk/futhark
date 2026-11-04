@@ -9,7 +9,6 @@ OUT   := $(BUILD)/$(PROG)
 
 GEN := $(OUT).js \
        $(OUT).wasm \
-       $(OUT).json \
        $(OUT).c \
        $(OUT).wrapper.js
 

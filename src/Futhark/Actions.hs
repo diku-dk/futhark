@@ -561,7 +561,6 @@ compileWebGPUAction fcfg mode tgtpath =
           cpath = tgtpath `addExtension` "c"
           jslibpath = tgtpath `addExtension` "wrapper.js"
           jsserverpath = tgtpath `addExtension` "server.js"
-          jsonpath = tgtpath `addExtension` "json"
           extra_options =
             [ "--use-port=emdawnwebgpu",
               -- The emdawnwebgpu port is written in C++.
@@ -582,10 +581,9 @@ compileWebGPUAction fcfg mode tgtpath =
               ++ intercalate "," ['_' : T.unpack e | e <- exports]
       case mode of
         ToLibrary -> do
-          let (_header, impl, manifest) = CWebGPU.asLibrary cprog
+          let (_header, impl, _manifest) = CWebGPU.asLibrary cprog
           liftIO $ T.writeFile cpath $ cPrependHeader impl
           liftIO $ T.writeFile jslibpath jslib
-          liftIO $ T.writeFile jsonpath manifest
           runEMCC
             cpath
             outpath
