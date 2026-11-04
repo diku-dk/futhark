@@ -32,6 +32,8 @@ data KernelInterface = KernelInterface
     scalarsBindSlot :: Int,
     -- | Bind slot indices for all memory arguments.
     memBindSlots :: [Int],
+    -- | Whether each memory argument is a read-only storage buffer.
+    memBindReadOnly :: [Bool],
     -- | Dynamic block dimensions, with the corresponding override name. These
     -- and the 'sharedMemoryOverrides' are the only overrides, and are set
     -- when the kernel is launched.

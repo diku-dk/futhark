@@ -191,6 +191,27 @@ qs_res.free();
 
 ok("asynchronous operations run one at a time, and synchronous operations cannot run meanwhile");
 
+section("The same array as two arguments");
+
+const as = await fut.i32_1d.from_data([1, 2, 3], 3);
+const as2 = await fut.i32_1d.from_data([10, 20, 30], 3);
+const as_res = await fut.entry.add_i32_1d(as, as2);
+const as_same = await fut.entry.add_i32_1d(as, as);
+
+assert.deepEqual(await as_res.values(), new Int32Array([11, 22, 33]));
+assert.deepEqual(await as_same.values(), new Int32Array([2, 4, 6]));
+
+const bs_arg = await fut.bool_1d.from_data([true, false, true], 3);
+const bs_same = await fut.entry.and_bool_1d(bs_arg, bs_arg);
+
+assert.deepEqual(await bs_same.values(), new Uint8Array([1, 0, 1]));
+
+for (const arr of [as, as2, as_res, as_same, bs_arg, bs_same]) {
+  arr.free();
+}
+
+ok("an array can be passed as two arguments");
+
 section("f16 and bool arrays");
 
 const hs = await fut.f16_1d.from_data([1, 3, 0.1], 3);

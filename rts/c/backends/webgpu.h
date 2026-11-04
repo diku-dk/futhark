@@ -622,6 +622,7 @@ void backend_context_teardown(struct futhark_context *ctx) {
 //
 //   size_t num_bindings; // excluding the scalars binding
 //   uint32_t *binding_indices;
+//   bool *binding_read_only;
 //
 //   size_t num_dynamic_block_dims;
 //   uint32_t *dynamic_block_dim_indices;
@@ -739,7 +740,9 @@ static void gpu_create_kernel(struct futhark_context *ctx,
     entry->binding = kernel_info->binding_indices[i];
     entry->visibility = WGPUShaderStage_Compute;
     WGPUBufferBindingLayout buffer_layout
-      = { .type = WGPUBufferBindingType_Storage };
+      = { .type = kernel_info->binding_read_only[i]
+          ? WGPUBufferBindingType_ReadOnlyStorage
+          : WGPUBufferBindingType_Storage };
     entry->buffer = buffer_layout;
   }
   WGPUBindGroupLayoutDescriptor bgl_desc = {

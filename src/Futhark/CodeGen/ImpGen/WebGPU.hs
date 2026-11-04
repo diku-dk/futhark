@@ -60,10 +60,20 @@ newtype KernelR = KernelR {krKernel :: ImpGPU.Kernel}
 data MemInfo = MemInfo
   { -- | Workgroup (shared) memory, rather than a storage buffer.
     memShared :: Bool,
-    -- | Stored as atomic words (see 'wordStorage'), so all accesses go through
-    -- the @atomic_@ functions of @rts/wgsl/atomics.wgsl@.
-    memAtomic :: Bool
+    memRepr :: MemRepr
   }
+
+-- | How the elements of a memory block are stored.
+data MemRepr
+  = -- | As an array of the element type.
+    MemElems
+  | -- | As atomic words (see 'wordStorage'), so all accesses go through the
+    -- @atomic_@ functions of @rts/wgsl/atomics.wgsl@.
+    MemAtomicWords
+  | -- | As plain words, in a read-only storage buffer, which cannot hold
+    -- atomics.  Elements are extracted with the @unpack_@ functions.
+    MemReadOnlyWords
+  deriving (Eq)
 
 data KernelState = KernelState
   { -- Kernel declarations and body
@@ -83,6 +93,8 @@ data KernelState = KernelState
     ksSharedMemSizes :: [(WGSL.Ident, Exp)],
     ksScalars :: [WGSL.StructMember],
     ksBindSlots :: [Int],
+    -- | The bind slots of read-only storage buffers.
+    ksReadOnlySlots :: S.Set Int,
     -- | Workgroup variables used by 'uniformValue', by type.
     ksUniformSlots :: M.Map PrimType WGSL.Ident
   }
@@ -169,7 +181,7 @@ addMem ident info = modify $ \s -> s {ksMem = M.insert ident info $ ksMem s}
 -- | Memory not declared by 'addMem' (such as 'ScalarSpace' arrays) is neither
 -- shared nor atomic.
 memInfo :: WGSL.Ident -> KernelM MemInfo
-memInfo ident = gets $ M.findWithDefault (MemInfo False False) ident . ksMem
+memInfo ident = gets $ M.findWithDefault (MemInfo False MemElems) ident . ksMem
 
 -- | Add a scalar struct field.
 addScalar :: WGSL.StructMember -> KernelM ()
@@ -210,6 +222,7 @@ genKernel kernel = do
             ksSharedMemSizes = mempty,
             ksScalars = mempty,
             ksBindSlots = mempty,
+            ksReadOnlySlots = mempty,
             ksUniformSlots = mempty
           }
 
@@ -247,6 +260,7 @@ genKernel kernel = do
             scalarsSize = size,
             scalarsBindSlot = head (ksBindSlots s),
             memBindSlots = tail (ksBindSlots s),
+            memBindReadOnly = map (`S.member` ksReadOnlySlots s) $ tail (ksBindSlots s),
             dynamicBlockDims = dynamicBlockDims,
             sharedMemoryOverrides = sharedMemOverrides,
             gpuProgram = T.empty
@@ -445,6 +459,11 @@ packedType t = t `elem` [Bool, IntType Int8, IntType Int16]
 wordStorage :: (PrimType, Bool) -> Bool
 wordStorage (t, atomic) = atomic || packedType t
 
+-- | The representation of writable memory with elements of this type, accessed
+-- atomically or not.
+writableRepr :: (PrimType, Bool) -> MemRepr
+writableRepr typ = if wordStorage typ then MemAtomicWords else MemElems
+
 -- | The type of memory with the given element type and atomicity. An atomic
 -- i64 occupies two words; see 'i64Words'.
 wgslBufferType :: (PrimType, Bool) -> Maybe WGSL.Expression -> WGSL.Type
@@ -468,12 +487,17 @@ elemsPerWord t = error $ "elemsPerWord: unsupported type " <> prettyString t
 wordAccess :: PrimType -> WGSL.Ident -> WGSL.Expression -> (WGSL.Expression, WGSL.Expression)
 wordAccess t mem i = (WGSL.ExpUnary WGSL.AddressOf $ WGSL.ExpIndex (WGSL.ExpIdent mem) word_i, word_offset)
   where
-    (word_i, word_offset) = case elemsPerWord t of
-      1 -> (i, WGSL.ExpInt 0 WGSL.AbstractInt)
-      n ->
-        ( WGSL.ExpBinary WGSL.Divide i (WGSL.ExpInt n WGSL.AbstractInt),
-          WGSL.ExpBinary WGSL.Remainder i (WGSL.ExpInt n WGSL.AbstractInt)
-        )
+    (word_i, word_offset) = wordIndex t i
+
+-- | The index of the word holding an element, and the position of the element
+-- within it.
+wordIndex :: PrimType -> WGSL.Expression -> (WGSL.Expression, WGSL.Expression)
+wordIndex t i = case elemsPerWord t of
+  1 -> (i, WGSL.ExpInt 0 WGSL.AbstractInt)
+  n ->
+    ( WGSL.ExpBinary WGSL.Divide i (WGSL.ExpInt n WGSL.AbstractInt),
+      WGSL.ExpBinary WGSL.Remainder i (WGSL.ExpInt n WGSL.AbstractInt)
+    )
 
 -- | The name of an @atomic_@ function from @rts/wgsl/atomics.wgsl@.
 atomicFun :: WGSL.Ident -> PrimType -> MemInfo -> WGSL.Ident
@@ -488,7 +512,10 @@ genReadExp t mem i = do
   i' <- indexExp i
   pure $
     if
-      | not $ memAtomic info -> WGSL.ExpIndex (WGSL.ExpIdent mem') i'
+      | memRepr info == MemElems -> WGSL.ExpIndex (WGSL.ExpIdent mem') i'
+      | memRepr info == MemReadOnlyWords ->
+          let (word, offset) = wordIndex t i'
+           in call ("unpack_" <> prettyText t) [WGSL.ExpIndex (WGSL.ExpIdent mem') word, offset]
       | t == IntType Int64 ->
           let (lo, hi) = i64Words mem' i'
               load w = call "atomicLoad" [WGSL.ExpUnary WGSL.AddressOf w]
@@ -511,7 +538,8 @@ genArrayWrite t mem i v = do
   v' <- v
   pure $
     if
-      | not $ memAtomic info ->
+      | memRepr info == MemReadOnlyWords -> error "genArrayWrite: read-only memory"
+      | memRepr info == MemElems ->
           WGSL.Assign (WGSL.ExpIndex (WGSL.ExpIdent mem') i') WGSL.AssignSimple v'
       | t == IntType Int64 ->
           let (lo, hi) = i64Words mem' i'
@@ -719,7 +747,7 @@ genWGSLStm (DeclareMem name (Space "shared")) = do
       addOverride sizeName WGSL.I32 (Just $ WGSL.ExpInt 0 WGSL.AbstractInt)
       addDecl $
         WGSL.GlobalVariable [] WGSL.Workgroup Nothing moduleName (Just bufType) Nothing
-      addMem moduleName $ MemInfo {memShared = True, memAtomic = wordStorage typ}
+      addMem moduleName $ MemInfo {memShared = True, memRepr = writableRepr typ}
       addRename name' moduleName
       pure $ WGSL.Comment $ "declare_shared: " <> name'
     Nothing ->
@@ -864,7 +892,7 @@ genWGSLStm (Op (ImpGPU.UniformRead tgt mem i t _)) = do
   info <- memInfo mem'
   i' <- indexExp i
   pure . assign tgt' $
-    if memAtomic info
+    if memRepr info /= MemElems
       then
         -- Load the whole word uniformly, then extract the element.
         let (word, offset) = wordAccess t mem' i'
@@ -1161,6 +1189,20 @@ findMemoryTypes name = S.elems . find <$> asks (ImpGPU.kernelBody . krKernel)
     find (If _ s1 s2) = find s1 <> find s2
     find _ = S.empty
 
+-- | Whether the kernel writes to the buffer.  Atomic operations count as
+-- writes.
+writesMemory :: VName -> KernelM Bool
+writesMemory name = find <$> asks (ImpGPU.kernelBody . krKernel)
+  where
+    find (ImpGPU.Write n _ _ _ _ _) = n == name
+    find (ImpGPU.Copy _ _ (n, _) _ _ _) = n == name
+    find (Op (ImpGPU.Atomic _ op)) = ImpGPU.atomicOpMem op == name
+    find (s1 :>>: s2) = find s1 || find s2
+    find (For _ _ body) = find body
+    find (While _ body) = find body
+    find (If _ s1 s2) = find s1 || find s2
+    find _ = False
+
 -- | The single type at which the kernel accesses the buffer, and whether any
 -- access is atomic.
 findSingleMemoryType :: VName -> KernelM (Maybe (PrimType, Bool))
@@ -1186,20 +1228,29 @@ genMemoryDecls = do
   where
     withType name = do
       typ <- findSingleMemoryType name
-      pure $ (nameToIdent name,) <$> typ
-    moduleDecl (name, typ) = do
+      written <- writesMemory name
+      pure $ (nameToIdent name,,written) <$> typ
+    -- Several read-only bindings may refer to the same buffer, as when an
+    -- entry point is passed the same array twice, but a writable binding must
+    -- not overlap any other.
+    moduleDecl (name, typ, written) = do
       ident <- mkGlobalIdent name
       slot <- assignBindSlot
-      addMem ident $ MemInfo {memShared = False, memAtomic = wordStorage typ}
+      let (access, repr, buf_type)
+            | written = (WGSL.ReadWrite, writableRepr typ, wgslBufferType typ Nothing)
+            | wordStorage typ = (WGSL.Read, MemReadOnlyWords, WGSL.Array WGSL.I32 Nothing)
+            | otherwise = (WGSL.Read, MemElems, wgslBufferType typ Nothing)
+      unless written . modify $ \s -> s {ksReadOnlySlots = S.insert slot $ ksReadOnlySlots s}
+      addMem ident $ MemInfo {memShared = False, memRepr = repr}
       addDecl $
         WGSL.GlobalVariable
           (WGSL.bindingAttribs 0 slot)
           WGSL.Storage
-          (Just WGSL.ReadWrite)
+          (Just access)
           ident
-          (Just $ wgslBufferType typ Nothing)
+          (Just buf_type)
           Nothing
-    rename (name, _) = mkGlobalIdent name >>= addRename name
+    rename (name, _, _) = mkGlobalIdent name >>= addRename name
 
 -- | Generate `override` declarations for kernel 'ConstUse's and
 -- backend-provided values (like block size and lockstep width).
