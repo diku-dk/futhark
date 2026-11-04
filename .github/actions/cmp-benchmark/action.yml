@@ -11,6 +11,10 @@ inputs:
     description: 'Options to pass to srun'
     required: false
     default: ''
+  exclude:
+    description: 'Comma-separated list of nodes that srun must not use'
+    required: false
+    default: 'hendrixgpu04fl'
 runs:
   using: "composite"
   steps:
@@ -21,3 +25,4 @@ runs:
       with:
         script: .github/actions/cmp-benchmark/cmp-benchmark.sh ${{inputs.backend}} ${{inputs.system}}
         slurm-options: ${{inputs.slurm-options}}
+        exclude: ${{inputs.exclude}}

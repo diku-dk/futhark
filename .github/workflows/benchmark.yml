@@ -79,12 +79,14 @@ jobs:
       with:
         backend: opencl
         system: A100
-        slurm-options: -p gpu --mem=48G  --gres=gpu:a100:1 --job-name=fut-opencl-A100 --exclude=hendrixgpu14fl
+        slurm-options: -p gpu --mem=48G  --gres=gpu:a100:1 --job-name=fut-opencl-A100
+        exclude: hendrixgpu04fl,hendrixgpu14fl
     - uses: ./.github/actions/benchmark
       with:
         backend: cuda
         system: A100
-        slurm-options: -p gpu --mem=48G --gres=gpu:a100:1 --job-name=fut-cuda-A100 --exclude=hendrixgpu14fl
+        slurm-options: -p gpu --mem=48G --gres=gpu:a100:1 --job-name=fut-cuda-A100
+        exclude: hendrixgpu04fl,hendrixgpu14fl
 
   benchmark-results:
     runs-on: ubuntu-24.04
