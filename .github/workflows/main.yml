@@ -651,7 +651,8 @@ jobs:
 
     - name: Run tests
       run: |
-        make -C tests_lib/javascript
+        make -C tests_lib/javascript FUTHARK_BACKEND=wasm
+        make -C tests_lib/javascript FUTHARK_BACKEND=wasm-multicore
 
   test-ir-parser:
     runs-on: ubuntu-24.04

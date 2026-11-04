@@ -189,30 +189,22 @@ javascriptWrapper entryPoints opaqueTypes =
       classFutharkContext entryPoints opaqueTypes
     ]
 
--- Make FutharkModule the generated primary class, but keeps FutharkContext around for backwards compatibility.
+-- | The generated FutharkContext class.  Methods whose names start with an
+-- underscore are internal to the generated code.
 classFutharkContext :: [JSEntryPoint] -> [(String, JSOpaqueType)] -> T.Text
 classFutharkContext entryPoints opaqueTypes =
   T.unlines
-    [ "class FutharkModule {",
+    [ "class FutharkContext {",
       moduleConstructor,
       moduleInitFromWasm entryPoints opaqueTypes,
       moduleInit,
       getFreeFun,
-      getEntryPointsFun,
-      getTypesFun,
       getErrorFun,
       getUtilityFuns,
       T.unlines $ map toFutharkArray arrays,
       T.unlines $ concatMap (generateProjectMethods . snd) opaqueTypes,
       T.unlines $ map jsWrapEntryPoint entryPoints,
-      "}",
-      classFutharkContextCompat,
-      [text|
-      async function newFutharkContext(num_threads) {
-        var wasm = await loadWASM();
-        return new FutharkContext(wasm, num_threads);
-      }
-      |]
+      "}"
     ]
   where
     -- Collect array types from entry points AND from record fields so the
@@ -228,7 +220,6 @@ moduleConstructor =
     this.wasm = undefined;
     this.cfg = undefined;
     this.ctx = undefined;
-    this.entry_points = {};
     this.types = {};
     this.entry = {};
   }
@@ -243,9 +234,6 @@ moduleInitFromWasm jses opaqueTypes =
     if (num_threads) this.wasm._futhark_context_config_set_num_threads(this.cfg, num_threads);
     this.ctx = this.wasm._futhark_context_new(this.cfg);
 
-    this.entry_points = {
-      ${entries}
-    };
     this.types = {
       ${type_entries}
     };
@@ -256,7 +244,6 @@ moduleInitFromWasm jses opaqueTypes =
   }
   |]
   where
-    entries = T.intercalate "," $ map dicEntry jses
     type_entries = T.intercalate "," $ map dicTypeEntry opaqueTypes
     entry_aliases = T.unlines $ map entryAlias jses
     array_aliases = T.unlines $ map arrayAlias arrays
@@ -271,24 +258,10 @@ moduleInit =
   [text|
   async init(wasm, num_threads) {
     if (wasm === undefined) {
-      throw new Error("FutharkModule.init() requires the generated backend runtime module");
+      throw new Error("FutharkContext.init() requires the generated backend runtime module");
     }
 
     this._init_from_wasm(wasm, num_threads);
-  }
-  |]
-
-classFutharkContextCompat :: T.Text
-classFutharkContextCompat =
-  [text|
-  class FutharkContext extends FutharkModule {
-    constructor(wasm, num_threads) {
-      super();
-
-      if (wasm !== undefined) {
-        this._init_from_wasm(wasm, num_threads);
-      }
-    }
   }
   |]
 
@@ -308,26 +281,10 @@ getFreeFun =
   }
   |]
 
-getEntryPointsFun :: T.Text
-getEntryPointsFun =
-  [text|
-  get_entry_points() {
-    return this.entry_points;
-  }
-  |]
-
-getTypesFun :: T.Text
-getTypesFun =
-  [text|
-  get_types() {
-    return this.types;
-  }
-  |]
-
 getErrorFun :: T.Text
 getErrorFun =
   [text|
-  get_error() {
+  _get_error() {
     var ptr = this.wasm._futhark_context_get_error(this.ctx);
     var len = this.wasm.HEAP8.subarray(ptr).indexOf(0);
     var str = String.fromCharCode(...this.wasm.HEAP8.subarray(ptr, ptr + len));
@@ -367,7 +324,7 @@ getUtilityFuns =
 
 entryAlias :: JSEntryPoint -> T.Text
 entryAlias jse =
-  [text|this.entry["${ename}"] = this.${fname}.bind(this);|]
+  [text|this.entry["${ename}"] = this._entry_${fname}.bind(this);|]
   where
     fname = GC.escapeName $ T.pack $ name jse
     ename = T.pack $ name jse
@@ -376,8 +333,7 @@ arrayAlias :: String -> T.Text
 arrayAlias typ =
   [text|
   this.${signature} = {
-    from_data: (data, ${dims}) => this.new_${signature}(data, ${dims}),
-    from_jsarray: (data) => this.new_${signature}_from_jsarray(data)
+    from_data: (data, ${dims}) => this._new_${signature}(data, ${dims})
   };
   |]
   where
@@ -394,17 +350,6 @@ arrayTypeAlias typ =
     ftype = baseType typ
     signature = T.pack $ ftype ++ "_" ++ show d ++ "d"
     typ_text = T.pack typ
-
-dicEntry :: JSEntryPoint -> T.Text
-dicEntry jse =
-  [text|
-       "${ename}" : ["${fname}", ${params}, ${rets}]
-  |]
-  where
-    fname = GC.escapeName $ T.pack $ name jse
-    ename = T.pack $ name jse
-    params = showText $ parameters jse
-    rets = showText $ ret jse
 
 -- | Generate the @types@ dictionary entry for a single opaque type.
 dicTypeEntry :: (String, JSOpaqueType) -> T.Text
@@ -448,7 +393,7 @@ generateProjectMethod rf =
     readout = typeHeap ftype ++ "[out >> " ++ show (typeShift ftype) ++ "]"
     readResult
       | isArray ftype =
-          "this.new_" ++ baseType ftype ++ "_" ++ show (dim ftype) ++ "d_from_ptr(" ++ readout ++ ")"
+          "this._new_" ++ baseType ftype ++ "_" ++ show (dim ftype) ++ "d_from_ptr(" ++ readout ++ ")"
       | isOpaque ftype =
           "new FutharkOpaque(this, " ++ readout ++ ", this.wasm._futhark_free_" ++ ftype ++ ")"
       | ftype == "bool" = readout ++ "!==0"
@@ -457,14 +402,12 @@ generateProjectMethod rf =
 jsWrapEntryPoint :: JSEntryPoint -> T.Text
 jsWrapEntryPoint jse =
   [text|
-  ${func_name}(${inparams}) {
+  _entry_${func_name}(${inparams}) {
     var out = [${outparams}].map(n => this.wasm._malloc(n));
-    var to_free = [];
-    var do_free = () => { out.forEach(this.wasm._free); to_free.forEach(f => f.free()); };
-    ${paramsToPtr}
+    var do_free = () => { out.forEach(this.wasm._free); };
     if (this.wasm._futhark_entry_${func_name}(this.ctx, ...out, ${ins}) > 0) {
       do_free();
-      throw this.get_error();
+      throw this._get_error();
     }
     ${results}
     do_free();
@@ -477,7 +420,6 @@ jsWrapEntryPoint jse =
     alp = [0 .. length (parameters jse) - 1]
     inparams = T.pack $ intercalate ", " ["in" ++ show i | i <- alp]
     ins = T.pack $ intercalate ", " [maybeDerefence ("in" ++ show i) $ parameters jse !! i | i <- alp]
-    paramsToPtr = T.pack $ unlines $ filter ("" /=) [arrayPointer ("in" ++ show i) $ parameters jse !! i | i <- alp]
 
     outparams = showText $ typeSize $ ret jse
     results = T.pack $ makeResult 0 $ ret jse
@@ -487,22 +429,13 @@ maybeDerefence :: String -> String -> String
 maybeDerefence arg typ =
   if isScalar typ then arg else arg ++ ".ptr"
 
-arrayPointer :: String -> String -> String
-arrayPointer arg typ =
-  if isArray typ
-    then "  if (" ++ arg ++ " instanceof Array) { " ++ reassign ++ "; to_free.push(" ++ arg ++ "); }"
-    else ""
-  where
-    reassign = arg ++ " = this.new_" ++ signature ++ "_from_jsarray(" ++ arg ++ ")"
-    signature = baseType typ ++ "_" ++ show (dim typ) ++ "d"
-
 makeResult :: Int -> String -> String
 makeResult i typ =
   "  var result"
     ++ show i
     ++ " = "
     ++ if isArray typ
-      then "this.new_" ++ signature ++ "_from_ptr(" ++ readout ++ ");"
+      then "this._new_" ++ signature ++ "_from_ptr(" ++ readout ++ ");"
       else
         if isOpaque typ
           then "new FutharkOpaque(this, " ++ readout ++ ", this.wasm._futhark_free_" ++ typ ++ ");"
@@ -583,9 +516,6 @@ typeHeap typ =
 toFutharkArray :: String -> T.Text
 toFutharkArray typ =
   [text|
-  ${new}_from_jsarray(${arraynd_p}) {
-    return this.${new}(${arraynd_flat_p}, ${arraynd_dims_p});
-  }
   ${new}(array, ${dims}) {
     console.assert(array.length === ${dims_multiplied}, 'len=%s,dims=%s', array.length, [${dims}].toString());
       var copy = this.wasm._malloc(array.length << ${shift});
@@ -604,21 +534,16 @@ toFutharkArray typ =
     ftype = baseType typ
     heap = typeHeap ftype
     signature = ftype ++ "_" ++ show d ++ "d"
-    new = T.pack $ "new_" ++ signature
+    new = T.pack $ "_new_" ++ signature
     fnew = T.pack $ "this.wasm._futhark_new_" ++ signature
     fshape = "this.wasm._futhark_shape_" ++ signature
     fvalues = "this.wasm._futhark_values_raw_" ++ signature
     ffree = "this.wasm._futhark_free_" ++ signature
-    arraynd = "array" ++ show d ++ "d"
     shift = showText (typeShift ftype)
     heapType = T.pack heap
-    arraynd_flat = if d > 1 then arraynd ++ ".flat()" else arraynd
-    arraynd_dims = intercalate ", " [arraynd ++ mult i "[0]" ++ ".length" | i <- [0 .. d - 1]]
     dims = T.pack $ intercalate ", " ["d" ++ show i | i <- [0 .. d - 1]]
     dims_multiplied = T.pack $ intercalate "*" ["Number(d" ++ show i ++ ")" | i <- [0 .. d - 1]]
     bigint_dims = T.pack $ intercalate ", " ["BigInt(d" ++ show i ++ ")" | i <- [0 .. d - 1]]
-    mult i s = concat $ replicate i s
-    (arraynd_p, arraynd_flat_p, arraynd_dims_p) = (T.pack arraynd, T.pack arraynd_flat, T.pack arraynd_dims)
     args = T.pack $ intercalate ", " ["'" ++ ftype ++ "'", show d, heap, fshape, fvalues, ffree]
 
 -- | Javascript code that can be appended to the generated module to
@@ -627,7 +552,8 @@ runServer :: Manifest -> T.Text
 runServer manifest =
   [text|
    Module.onRuntimeInitialized = () => {
-     var context = new FutharkContext(Module);
+     var context = new FutharkContext();
+     context._init_from_wasm(Module);
      var server = new Server(context, ${manifest_json});
      server.run();
    }|]
@@ -636,4 +562,4 @@ runServer manifest =
 
 -- | The names exported by the generated module.
 libraryExports :: T.Text
-libraryExports = "export {newFutharkContext, FutharkContext, FutharkModule, FutharkArray, FutharkOpaque};"
+libraryExports = "export {FutharkContext, FutharkArray, FutharkOpaque};"

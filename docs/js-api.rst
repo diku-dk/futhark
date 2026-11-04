@@ -38,23 +38,23 @@ For the WebGPU backend, a build typically produces:
 
 The exact file set is backend-dependent and may change over time.
 
-The generated JavaScript wrapper exposes a ``FutharkModule`` class,
-which is the preferred top-level interface for using a compiled Futhark
-program from JavaScript.  The module is initialised with the generated
-backend runtime module.
+The generated JavaScript wrapper exposes a ``FutharkContext`` class,
+which is the top-level interface for using a compiled Futhark program
+from JavaScript.  A ``FutharkContext`` is initialised with the
+generated backend runtime module.
 
 The initialisation pattern is the same for the WASM-style backend and
 the WebGPU backend. The only difference is how ``Module`` is made available.
 For the WASM-style backend, the generated ``.mjs`` file exports it as the
-default export, so it is imported together with ``FutharkModule``:
+default export, so it is imported together with ``FutharkContext``:
 
 .. code-block:: javascript
 
-   import Module, { FutharkModule } from './futlib.mjs';
+   import Module, { FutharkContext } from './futlib.mjs';
 
    const module = await Module();
 
-   const fut = new FutharkModule();
+   const fut = new FutharkContext();
    await fut.init(module);
 
 For the WebGPU backend, the generated runtime module is usually loaded
@@ -76,35 +76,34 @@ API, using the appropriate methods.
 Top-level wrapper objects
 -------------------------
 
-The preferred top-level JavaScript interface is ``FutharkModule``.  A
-``FutharkModule`` object represents an instance of a compiled Futhark
-program. It owns the underlying Futhark context and is used to construct
-arrays, call entry points, and free resources.
+The top-level JavaScript interface is ``FutharkContext``.  A
+``FutharkContext`` object represents an instance of a compiled Futhark
+program, and corresponds to a context in the C API.  It is used to
+construct arrays, call entry points, and free resources.
 
-.. js:class:: FutharkModule()
+.. js:class:: FutharkContext()
 
    A bookkeeping class representing an instance of a compiled Futhark
    program.
 
-.. js:function:: FutharkModule.init(module)
+.. js:function:: FutharkContext.init(module)
 
-   Asynchronously initialise the ``FutharkModule`` object.
+   Asynchronously initialise the ``FutharkContext`` object.
 
    The ``module`` argument must be the generated backend runtime module,
    obtained as shown above.
 
-.. js:function:: FutharkModule.free()
+.. js:function:: FutharkContext.free()
 
-   Frees the Futhark context and configuration associated with the
-   module. It is an error to use a ``FutharkArray`` or ``FutharkOpaque``
-   after the ``FutharkModule`` on which it was created has been freed.
+   Frees the underlying Futhark context and configuration. It is an error to use a ``FutharkArray`` or ``FutharkOpaque``
+   after the ``FutharkContext`` on which it was created has been freed.
 
-.. js:attribute:: FutharkModule.entry
+.. js:attribute:: FutharkContext.entry
 
    Object containing the generated entry point functions. For example,
    an entry point named ``main`` is available as ``fut.entry.main``.
 
-.. js:attribute:: FutharkModule.types
+.. js:attribute:: FutharkContext.types
 
    Object containing generated type information and array constructor
    objects for the array types used by the program.
@@ -112,44 +111,25 @@ arrays, call entry points, and free resources.
 The backends also provides utility methods for synchronisation,
 cache management, and profiling.
 
-.. js:function:: FutharkModule.context_sync()
+.. js:function:: FutharkContext.context_sync()
 
    Wait for pending backend work associated with the context to finish.
 
-.. js:function:: FutharkModule.clear_caches()
+.. js:function:: FutharkContext.clear_caches()
 
    Clear backend caches associated with the context.
 
-.. js:function:: FutharkModule.report()
+.. js:function:: FutharkContext.report()
 
    Return a profiling report string.
 
-.. js:function:: FutharkModule.pause_profiling()
+.. js:function:: FutharkContext.pause_profiling()
 
    Pause profiling.
 
-.. js:function:: FutharkModule.unpause_profiling()
+.. js:function:: FutharkContext.unpause_profiling()
 
    Resume profiling.
-
-WASM compatibility interface
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The WASM-style backend also keep the older ``FutharkContext`` interface
-for backwards compatibility.
-
-.. js:function:: newFutharkContext()
-
-   Asynchronously create a new ``FutharkContext`` object.
-
-.. js:class:: FutharkContext()
-
-   Backwards-compatible wrapper class for WASM-style backend.
-   ``FutharkContext`` supports the same main interface as
-   ``FutharkModule``, including ``entry``, ``types``, array constructors,
-   and ``free``.
-
-New code should prefer ``FutharkModule``.
 
 Values
 ------
@@ -180,16 +160,6 @@ shared by the WASM backend and the WebGPU backend.
 
    Frees the memory used by the ``FutharkArray``.
 
-The WASM backend also provides a few older convenience methods.
-
-.. js:function:: FutharkArray.toArray()
-
-   Returns a nested JavaScript array.
-
-.. js:function:: FutharkArray.toTypedArray()
-
-   Returns a flat typed array of the underlying data.
-
 Array construction
 ~~~~~~~~~~~~~~~~~~
 
@@ -202,15 +172,6 @@ example, for the type ``[]i32``:
    Creates and returns a one-dimensional ``i32`` ``FutharkArray`` from
    a JavaScript ``Array`` or the corresponding typed array, with the
    given shape.
-
-For the WASM backend, the generated constructor object also
-provides a convenience method for nested JavaScript arrays.
-
-.. js:function:: fut.i32_1d.from_jsarray(jsarray)
-
-   Creates and returns a one-dimensional ``i32`` ``FutharkArray`` from
-   a JavaScript array.  For higher-dimensional arrays, the JavaScript
-   array is expected to be nested according to the array rank.
 
 FutharkOpaque
 -------------

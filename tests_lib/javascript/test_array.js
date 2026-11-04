@@ -1,129 +1,91 @@
-// Tests for array.fut
+// Tests for array.fut: array construction, passing arrays to entry points, and
+// reading returned arrays.
 
-import assert from 'assert/strict';
+import assert from "assert/strict";
+import { loadLibrary, newFutharkContext, section, ok } from "./harness.js";
 
-// Hack for Running generated ES6 modules from Emscripten with Node
-// https://github.com/emscripten-core/emscripten/issues/11792#issuecomment-877120580
-import {dirname} from "path";
-import { createRequire } from 'module';
-// substring removes file:// from the filepath
-globalThis.__dirname = dirname(import.meta.url).substring(7);
-globalThis.require = createRequire(import.meta.url);
+function assertClose(actual, expected) {
+  assert.ok(Math.abs(actual - expected) < 0.0001, `${actual} is not ${expected}`);
+}
 
-// Imports from the generated ES6 Module
-import { newFutharkContext, FutharkArray } from './array.mjs';
+const lib = await loadLibrary("array");
+const fut = await newFutharkContext(lib);
 
-newFutharkContext().then(fc => {
+section("Array types");
 
-  console.log();
-  console.log("Testing Entry Points...");
-  console.log();
+assert.equal(fut.types["[]i32"], fut.i32_1d);
+assert.equal(fut.types["[][]i64"], fut.i64_2d);
+assert.equal(fut.types["[]f32"], fut.f32_1d);
+assert.equal(fut.types["[][]f32"], fut.f32_2d);
+assert.equal(fut.types["[][][]i32"], fut.i32_3d);
 
-  console.log("Testing Entry Point : sum1d");
+ok("constructor objects are available in types and as e.g. i32_1d");
 
-  var arr_1d = new Int32Array([1, 2, 3, 4, 5, 6]);
-  var fut_arr_1d = fc.new_i32_1d(arr_1d, arr_1d.length);
+section("Array construction");
 
-  var sum1d_res = fc.sum1d(fut_arr_1d);
+const xs = fut.i32_1d.from_data(new Int32Array([1, 2, 3, 4, 5]), 5);
+const xs_plain = fut.i32_1d.from_data([1, 2, 3, 4, 5], 5);
+const xss = fut.i64_2d.from_data(new BigInt64Array([1n, 2n, 3n, 4n, 5n, 6n]), 2, 3);
+const xss_bigint = fut.i64_2d.from_data([1n, 2n, 3n, 4n, 5n, 6n], 2n, 3n);
 
-  assert(sum1d_res === 21);
+assert.ok(xs instanceof lib.FutharkArray);
+assert.deepEqual(xs.shape(), new BigInt64Array([5n]));
+assert.deepEqual(xss.shape(), new BigInt64Array([2n, 3n]));
+assert.deepEqual(xss_bigint.shape(), xss.shape());
 
-  console.log("Testing Entry Point : sum2d");
-    
-  var arr_2d = new BigInt64Array([1n, 2n, 3n, 4n, 5n, 6n]);
-  var fut_arr_2d = fc.new_i64_2d(arr_2d, 2, 3);
+assert.equal(await fut.entry.sum_i32_1d(xs), 15);
+assert.equal(await fut.entry.sum_i32_1d(xs_plain), 15);
+assert.equal(await fut.entry.sum_i64_2d(xss), 21n);
+assert.equal(await fut.entry.sum_i64_2d(xss_bigint), 21n);
 
-  var sum2d_res = fc.sum2d(fut_arr_2d);
-  assert(sum2d_res === 21n);
+ok("from_data() accepts typed arrays, Arrays, and number or BigInt dimensions");
 
-  console.log("Testing Entry Point : replicate1d");
+section("Returned arrays");
 
-  var n = 5n;
-  var fut_res_arr_1d = fc.replicate1d(n, 1.1);
+const ys = await fut.entry.replicate_f32_1d(4n, 1.5);
+const ys_values = await ys.values();
 
-  var replicate1d_res_arr = fut_res_arr_1d.toArray();
+assert.ok(ys_values instanceof Float32Array);
+assert.deepEqual(ys.shape(), new BigInt64Array([4n]));
+assert.equal(ys_values.length, 4);
+ys_values.forEach((y) => assertClose(y, 1.5));
 
-  for (var i = 0; i < Number(n); i++) {
-    // check with consideration for floating point precision
-    assert(Math.abs(replicate1d_res_arr[i] - 1.1) < .0001);
-  }
+// The result of values() is a copy.
+ys_values[0] = 0;
+assertClose((await ys.values())[0], 1.5);
 
-  console.log("Testing Entry Point : replicate2d");
+const yss = await fut.entry.replicate_f32_2d(2n, 3n, 2.5);
+const yss_values = await yss.values();
 
-  var x = 5n;
-  var y = 2n;
-  var fut_res_arr_2d = fc.replicate2d(x, y, 1.1);
+assert.deepEqual(yss.shape(), new BigInt64Array([2n, 3n]));
+assert.equal(yss_values.length, 6);
+yss_values.forEach((y) => assertClose(y, 2.5));
 
-  var replicate1d_res_arr = fut_res_arr_2d.toArray();
+const zsss = await fut.entry.iota_i32_3d(2n, 3n, 4n);
 
-  for (var i = 0; i < Number(x); i++) {
-    for (var j = 0; j < Number(y); j++) {
-      // check with consideration for floating point precision
-      assert(Math.abs(replicate1d_res_arr[i][j] - 1.1) < .0001);
-    }
-  }
+assert.deepEqual(zsss.shape(), new BigInt64Array([2n, 3n, 4n]));
+assert.deepEqual(await zsss.values(), Int32Array.from({ length: 24 }, (_, i) => i));
 
-  console.log();
-  console.log("Array API Tests...");
-  console.log();
+ok("values() and shape() work");
 
-  console.log("Testing array construction with numbers and bigints");
+section("Freeing");
 
-  var test_arr = [1n, 2n, 3n, 4n, 5n, 6n];
+for (const arr of [xs, xs_plain, xss, xss_bigint, ys, yss]) {
+  arr.free();
+}
 
-  var futhark_test_array_shape_ints= fc.new_i64_2d(test_arr, 2, 3);
-  var futhark_test_array_shape_bigints = fc.new_i64_2d(test_arr, 2n, 3n);
+assert.throws(() => xs.shape());
+assert.throws(() => xs.free());
+await assert.rejects(async () => await ys.values());
 
-  var shape_ints = futhark_test_array_shape_ints.shape();
-  var shape_bigints = futhark_test_array_shape_bigints.shape();
+ok("arrays cannot be used after being freed");
 
-  assert(shape_ints[0] === shape_bigints[0]);
-  assert(shape_ints[1] === shape_bigints[1]);
+yss_values.forEach((y) => assertClose(y, 2.5));
 
-  console.log("Testing toArray");
+ok("the result of values() remains valid after freeing");
 
-  var futhark_test_array = fc.new_i64_2d(test_arr, 2, 3);
-  var arr_toArray = futhark_test_array.toArray();
+zsss.free();
+fut.free();
 
-  for (var i = 0; i < 2; i++) {
-    for (var j = 0; j < 3; j++) {
-      assert(arr_toArray[i][j] === test_arr[i * 3 + j]);
-    }
-  }
-
-  console.log("Testing toTypedArray");
-
-  var arr_toTypedArray = futhark_test_array.toTypedArray();
-
-  for (var i = 0; i < 3 * 2; i++) {
-    assert(arr_toTypedArray[i] === test_arr[i]);
-  }
-
-  console.log("Testing shape");
-
-  var expected_shape = [2n, 3n];
-  var actual_shape = futhark_test_array.shape();
-
-  assert(actual_shape[0] === actual_shape[0]);
-  assert(expected_shape[1] === expected_shape[1]);
-
-  console.log("Testing frees");
-
-  fut_arr_1d.free();
-  fut_arr_2d.free();
-  fut_res_arr_2d.free();
-  fut_res_arr_1d.free();
-  futhark_test_array.free();
-
-  console.log("Testing access after free")
-
-  assert.throws(() => fut_test_array.toArray());
-  assert.throws(() => fut_test_array.toTypedArray());
-  assert.throws(() => fut_test_array.shape());
-
-  fc.free();
-
-  console.log();
-  console.log("Tests complete");
-  console.log();
-});
+console.log();
+console.log("array tests complete");

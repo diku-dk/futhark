@@ -19,52 +19,24 @@ class FutharkArray {
     }
   }
 
-  futharkType() {
-    return this.type_name;
-  }
-
   free() {
     this.validCheck();
     this.ffree(this.ctx.ctx, this.ptr);
     this.valid = false;
   }
 
+  // Like values(), this returns a copy, as views of the WASM heap may change.
   shape() {
     this.validCheck();
     var s = this.fshape(this.ctx.ctx, this.ptr) >> 3;
-    return this.ctx.wasm.HEAP64.subarray(s, s + this.dim);
-  }
-
-  // get_shape() {
-  //   return BigInt64Array.from(this.shape());
-  // }
-
-  toTypedArray(dims = this.shape()) {
-    this.validCheck();
-    console.assert(dims.length === this.dim, "dim=%s,dims=%s", this.dim, dims.toString());
-    var length = Number(dims.reduce((a, b) => a * b));
-    var v = this.fvalues(this.ctx.ctx, this.ptr) / this.heap.BYTES_PER_ELEMENT;
-    return this.heap.subarray(v, v + length);
-  }
-
-  toArray() {
-    this.validCheck();
-    var dims = this.shape();
-    var ta = this.toTypedArray(dims);
-    return (function nest(offs, ds) {
-      var d0 = Number(ds[0]);
-      if (ds.length === 1) {
-        return Array.from(ta.subarray(offs, offs + d0));
-      } else {
-        var inner = ds.slice(1);
-        var stride = Number(inner.reduce((a, b) => a * b));
-        return Array.from(Array(d0), (x,i) => nest(offs + i * stride, inner));
-      }
-    })(0, dims);
+    return this.ctx.wasm.HEAP64.slice(s, s + this.dim);
   }
 
   async values() {
-    return this.toTypedArray().slice();
+    this.validCheck();
+    var length = Number(this.shape().reduce((a, b) => a * b, 1n));
+    var v = this.fvalues(this.ctx.ctx, this.ptr) / this.heap.BYTES_PER_ELEMENT;
+    return this.heap.slice(v, v + length);
   }
 }
 
