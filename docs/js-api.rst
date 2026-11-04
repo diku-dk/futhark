@@ -4,9 +4,10 @@ JavaScript API Reference
 ========================
 
 The :ref:`futhark-wasm(1)`, :ref:`futhark-wasm-multicore(1)`, and
-:ref:`futhark-webgpu(1)` compilers can generate JavaScript wrapper code when
-used with ``--library``. This chapter describes the API exposed by those
-wrappers.
+:ref:`futhark-webgpu(1)` compilers produce JavaScript libraries when used with
+``--library``. This chapter describes the API exposed by these libraries. The
+generated libraries work in both Node.js and browsers, but with various caveats
+(particularly as WebGPU is concerned).
 
 First a warning: **the JavaScript API is experimental**. It may change
 incompatibly even in minor versions of the compiler.
@@ -20,7 +21,7 @@ the following files:
 * ``futlib.c`` and ``futlib.class.js``: intermediate files, which are
   not needed at runtime.
 
-The module exports a ``FutharkContext`` class, which is the top-level
+The ES module exports a ``FutharkContext`` class, which is the top-level
 interface for using a compiled Futhark program from JavaScript:
 
 .. code-block:: javascript
@@ -39,25 +40,24 @@ General concerns
 ----------------
 
 Memory management is completely manual, as JavaScript does not support
-finalizers that could let Futhark hook into the garbage collector.
-You are responsible for eventually freeing all objects produced by the
-API, using the appropriate methods.
+finalizers that could let Futhark hook into the garbage collector. You are
+responsible for eventually freeing all objects produced by the API, using the
+appropriate methods. Failure to free objects can result in memory leaks. Using
+an object after is has been freed leads to unspecified behaviour.
 
-Methods that may run Futhark code are asynchronous, and return a
-promise.  The asynchronous operations on a ``FutharkContext`` run one at
-a time, in the order they were started, and while one is running, no
-synchronous method may be called on the ``FutharkContext`` or its
-values.  Errors, including errors that occur while running Futhark
-code, are reported by throwing an ``Error`` (or rejecting the promise
-with one).  The arguments of every method are checked, and an invalid
+Methods that may run Futhark code are asynchronous, and return a promise. The
+asynchronous operations on a ``FutharkContext`` run one at a time, in the order
+they were started, and while one is running, no synchronous method may be called
+on the ``FutharkContext`` or its values. Errors, including errors that occur
+while running Futhark code, are reported by throwing an ``Error`` (or rejecting
+the promise with one). The arguments of every method are checked, and an invalid
 argument is reported with a ``TypeError`` or ``RangeError``.
 
 Top-level wrapper objects
 -------------------------
 
-The top-level JavaScript interface is ``FutharkContext``.  A
-``FutharkContext`` object represents an instance of a compiled Futhark
-program, and corresponds to a context in the C API.  It is used to
+The top-level JavaScript interface is ``FutharkContext``. A ``FutharkContext``
+object represents an instance of a compiled Futhark program. It is used to
 construct arrays, call entry points, and free resources.
 
 .. js:class:: FutharkContext()
@@ -67,29 +67,28 @@ construct arrays, call entry points, and free resources.
 
 .. js:function:: FutharkContext.init(options)
 
-   Asynchronously initialise the ``FutharkContext`` object.  This must
-   be done exactly once, before the object is used for anything else.
-   Each ``FutharkContext`` loads its own instance of the WebAssembly
-   module, so values cannot be passed between different
-   ``FutharkContext`` objects.
+   Asynchronously initialise the ``FutharkContext`` object. This must be done
+   exactly once, before the object is used for anything else. Each
+   ``FutharkContext`` loads its own instance of the WebAssembly module, so
+   values cannot be passed between different ``FutharkContext`` objects.
 
-   The ``options`` argument is optional.  If given, it must be an object
-   with any of the following fields, which correspond to the
-   configuration functions of the C API (see :ref:`c-api`):
+   The ``options`` argument is optional. If given, it must be an object with any
+   of the following fields, which correspond to the configuration functions of
+   the C API (see :ref:`c-api`):
 
-   * ``debugging``, ``logging``, ``profiling``: booleans that enable
-     debugging, logging, or profiling.  Logging information is printed
-     with ``console.error``.
+   * ``debugging``, ``logging``, ``profiling``: booleans that enable debugging,
+     logging, or profiling. Logging information is printed with
+     ``console.error``.
 
-   * ``tuning_params``: an object mapping the names of tuning parameters
-     to their values.
+   * ``tuning_params``: an object mapping the names of tuning parameters to
+     their values.
 
-   * ``num_threads``: the number of threads to use.  Only supported by
-     :ref:`futhark-wasm-multicore(1)`.
+   * ``num_threads``: the number of threads to use. Only supported by
+   :ref:`futhark-wasm-multicore(1)`.
 
    With :ref:`futhark-wasm-multicore(1)`, ``init()`` fails unless
-   ``SharedArrayBuffer`` is available, which in a browser requires the
-   page to be *cross-origin isolated*.
+   ``SharedArrayBuffer`` is available, which in a browser requires the page to
+   be *cross-origin isolated*.
 
 .. js:function:: FutharkContext.free()
 
@@ -107,9 +106,8 @@ construct arrays, call entry points, and free resources.
    Object mapping the name of each array type used by the program, such
    as ``[]i32``, to its constructor object (see `Array construction`_).
 
-The ``FutharkContext`` also provides utility methods for
-synchronisation, cache management, and profiling.  They are all
-asynchronous.
+The ``FutharkContext`` also provides utility methods for synchronisation, cache
+management, and profiling. They are all asynchronous.
 
 .. js:function:: FutharkContext.context_sync()
 
@@ -135,12 +133,12 @@ Values
 ------
 
 Numeric types ``u8``, ``u16``, ``u32``, ``i8``, ``i16``, ``i32``, ``f16``,
-``f32``, and ``f64`` are mapped to JavaScript's standard number type.
-64-bit integers ``u64`` and ``i64`` are mapped to ``BigInt``, although a
-number is also accepted as an argument.  An integer argument must be in
-the range of its type.  ``bool`` is mapped to JavaScript's ``boolean``
-type.  Arrays are represented by ``FutharkArray`` objects.  Complex
-types (records, nested tuples, etc.) are represented by
+``f32``, and ``f64`` are mapped to JavaScript's standard number type. 64-bit
+integers ``u64`` and ``i64`` are mapped to ``BigInt``, although a normal number
+is also accepted where an argument of these types is expected. An integer
+argument must be in the range of its type. Futhark's ``bool`` is mapped to
+JavaScript's ``boolean`` type. Arrays are represented by ``FutharkArray``
+objects. Complex types (records, nested tuples, etc.) are represented by
 ``FutharkOpaque`` objects.
 
 FutharkArray
