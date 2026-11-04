@@ -81,9 +81,11 @@ jobs:
       with:
         backend: opencl
         system: A100
-        slurm-options: -p gpu --mem=48G --gres=gpu:a100:1 --job-name=fut-cmp-opencl-A100 --exclude=hendrixgpu14fl --time=0-04:00:00
+        slurm-options: -p gpu --mem=48G --gres=gpu:a100:1 --job-name=fut-cmp-opencl-A100 --time=0-04:00:00
+        exclude: hendrixgpu04fl,hendrixgpu14fl
     - uses: ./.github/actions/cmp-benchmark
       with:
         backend: cuda
         system: A100
-        slurm-options: -p gpu --mem=48G --gres=gpu:a100:1 --job-name=fut-cmp-cuda-A100 --exclude=hendrixgpu14fl --time=0-04:00:00
+        slurm-options: -p gpu --mem=48G --gres=gpu:a100:1 --job-name=fut-cmp-cuda-A100 --time=0-04:00:00
+        exclude: hendrixgpu04fl,hendrixgpu14fl

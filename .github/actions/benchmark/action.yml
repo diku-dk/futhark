@@ -15,6 +15,10 @@ inputs:
     description: 'Options to pass to srun'
     required: false
     default: ''
+  exclude:
+    description: 'Comma-separated list of nodes that srun must not use'
+    required: false
+    default: 'hendrixgpu04fl'
 runs:
   using: "composite"
   steps:
@@ -39,6 +43,7 @@ runs:
             --json futhark-${{inputs.backend}}-${{inputs.system}}-$GITHUB_SHA.json \
             --ignore-files /lib/ ${{inputs.futhark-options}}
         slurm-options: --time=0-02:00:00 ${{inputs.slurm-options}}
+        exclude: ${{inputs.exclude}}
 
     - uses: actions/upload-artifact@v5
       with:
