@@ -4,7 +4,7 @@
 module Futhark.CodeGen.RTS.JavaScript
   ( serverJs,
     valuesJs,
-    wrapperclassesJs,
+    wrappersJs,
   )
 where
 
@@ -19,6 +19,6 @@ serverJs = $(embedStringFile "rts/javascript/server.js")
 valuesJs :: T.Text
 valuesJs = $(embedStringFile "rts/javascript/values.js")
 
--- | @rts/javascript/wrapperclasses.js@
-wrapperclassesJs :: T.Text
-wrapperclassesJs = $(embedStringFile "rts/javascript/wrapperclasses.js")
+-- | @rts/javascript/wrappers.js@
+wrappersJs :: T.Text
+wrappersJs = $(embedStringFile "rts/javascript/wrappers.js")

@@ -72,7 +72,7 @@ async function runServer() {
   await fut.init(await Module());
 
   if (typeof window === 'undefined') {
-    await new Server({ wasm: fut.m, ctx: fut.ctx }, fut.manifest).run();
+    await new Server({ wasm: fut.m, ctx: fut.ctx, free: () => fut.free() }, fut.manifest).run();
   } else {
     // Setting these in the global scope makes debugging a bit easier, and this
     // is not intended to be embedded into anything other than the internal

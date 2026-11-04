@@ -71,7 +71,7 @@ extra-source-files:
     rts/style.css
     rts/javascript/server.js
     rts/javascript/values.js
-    rts/javascript/wrapperclasses.js
+    rts/javascript/wrappers.js
     rts/opencl/copy.cl
     rts/opencl/prelude.cl
     rts/opencl/transpose.cl

@@ -4,22 +4,14 @@
 -- JavaScript wrapper.
 module Futhark.CodeGen.Backends.MulticoreWASM
   ( compileProg,
-    runServer,
-    libraryExports,
-    GC.CParts (..),
-    GC.asLibrary,
-    GC.asExecutable,
-    GC.asServer,
   )
 where
 
-import Data.Maybe
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.GenericWASM
 import Futhark.CodeGen.Backends.MulticoreC qualified as MC
 import Futhark.CodeGen.Backends.MulticoreC.Boilerplate (generateBoilerplate)
-import Futhark.CodeGen.ImpCode.Multicore qualified as Imp
 import Futhark.CodeGen.ImpGen.Multicore qualified as ImpGen
 import Futhark.IR.MCMem
 import Futhark.MonadFreshNames
@@ -32,10 +24,11 @@ import Futhark.MonadFreshNames
 -- * Generated C code (to be passed to Emscripten).
 --
 -- * JavaScript wrapper code that presents a nicer interface to the
---   Emscripten-produced code (this should be put in a @.class.js@
---   file by itself).
+--   Emscripten-produced code (passed to @emcc@ with
+--   @--extern-post-js@).
 --
--- * Options that should be passed to @emcc@.
+-- * The names of the C functions that must be exported from the
+--   WebAssembly module.
 compileProg ::
   (MonadFreshNames m) =>
   T.Text ->
@@ -58,20 +51,7 @@ compileProg version prog = do
   pure
     ( ws,
       ( prog'',
-        javascriptWrapper (fRepMyRep prog') (opaqueToJS (Imp.defTypes prog')),
+        javascriptWrapper (GC.cManifest prog''),
         "_futhark_context_config_set_num_threads" : emccExportNames (GC.cManifest prog'')
       )
     )
-
-fRepMyRep :: Imp.Definitions Imp.Multicore -> [JSEntryPoint]
-fRepMyRep prog =
-  let Imp.Functions fs = Imp.defFuns prog
-      function fun = do
-        Imp.EntryPoint n res args _ <- Imp.functionEntry fun
-        Just $
-          JSEntryPoint
-            { name = nameToString n,
-              parameters = map (extToString . snd) args,
-              ret = extToString $ snd res
-            }
-   in mapMaybe (function . snd) fs

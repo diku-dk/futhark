@@ -1,7 +1,7 @@
 -- ==
 -- tags { no_webgpu }
 -- entry: foo
--- compiled no_wasm input { 2i64 } output { 3i64 }
+-- compiled input { 2i64 } output { 3i64 }
 
 -- This one should stay.
 entry foo (x: i64) = #[param(foo)] x + 2

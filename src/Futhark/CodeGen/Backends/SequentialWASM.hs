@@ -4,16 +4,9 @@
 -- JavaScript wrapper.
 module Futhark.CodeGen.Backends.SequentialWASM
   ( compileProg,
-    runServer,
-    libraryExports,
-    GC.CParts (..),
-    GC.asLibrary,
-    GC.asExecutable,
-    GC.asServer,
   )
 where
 
-import Data.Maybe
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.GenericWASM
@@ -31,10 +24,11 @@ import Futhark.MonadFreshNames
 -- * Generated C code (to be passed to Emscripten).
 --
 -- * JavaScript wrapper code that presents a nicer interface to the
---   Emscripten-produced code (this should be put in a @.class.js@
---   file by itself).
+--   Emscripten-produced code (passed to @emcc@ with
+--   @--extern-post-js@).
 --
--- * Options that should be passed to @emcc@.
+-- * The names of the C functions that must be exported from the
+--   WebAssembly module.
 compileProg :: (MonadFreshNames m) => T.Text -> Prog SeqMem -> m (ImpGen.Warnings, (GC.CParts, T.Text, [String]))
 compileProg version prog = do
   (ws, prog') <- ImpGen.compileProg prog
@@ -49,23 +43,10 @@ compileProg version prog = do
       (DefaultSpace, [DefaultSpace])
       []
       prog'
-  pure (ws, (prog'', javascriptWrapper (fRepMyRep prog') (opaqueToJS (Imp.defTypes prog')), emccExportNames (GC.cManifest prog'')))
+  pure (ws, (prog'', javascriptWrapper (GC.cManifest prog''), emccExportNames (GC.cManifest prog'')))
   where
     operations :: GC.Operations Imp.Sequential ()
     operations =
       GC.defaultOperations
         { GC.opsCompiler = const $ pure ()
         }
-
-fRepMyRep :: Imp.Program -> [JSEntryPoint]
-fRepMyRep prog =
-  let Imp.Functions fs = Imp.defFuns prog
-      function (Imp.Function entry _ _ _ _) = do
-        Imp.EntryPoint n res args _doc <- entry
-        Just $
-          JSEntryPoint
-            { name = nameToString n,
-              parameters = map (extToString . snd) args,
-              ret = extToString $ snd res
-            }
-   in mapMaybe (function . snd) fs

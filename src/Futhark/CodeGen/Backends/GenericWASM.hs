@@ -1,125 +1,22 @@
 {-# LANGUAGE QuasiQuotes #-}
 
+-- | Code generation shared by the WASM backends.  The JavaScript API is
+-- in @rts/javascript/wrappers.js@, driven by the manifest.
 module Futhark.CodeGen.Backends.GenericWASM
-  ( GC.CParts (..),
-    GC.asLibrary,
-    GC.asExecutable,
-    GC.asServer,
-    EntryPointType,
-    JSEntryPoint (..),
-    JSRecordField (..),
-    JSOpaqueType (..),
-    emccExportNames,
+  ( emccExportNames,
     manifestFunctions,
     javascriptWrapper,
-    extToString,
-    opaqueToJS,
     runServer,
     libraryExports,
   )
 where
 
-import Data.List (intercalate)
 import Data.Map qualified as M
 import Data.Text qualified as T
-import Futhark.CodeGen.Backends.GenericC qualified as GC
-import Futhark.CodeGen.Backends.SimpleRep (isValidCName, opaqueName)
-import Futhark.CodeGen.ImpCode.Sequential qualified as Imp
 import Futhark.CodeGen.RTS.JavaScript
 import Futhark.Manifest
-import Futhark.Util (nubOrd, showText, zEncodeText)
-import Language.Futhark.Core (nameToText)
-import Language.Futhark.Primitive
+import Futhark.Util (nubOrd)
 import NeatInterpolation (text)
-
-extToString :: Imp.ExternalValue -> String
-extToString (Imp.TransparentValue (Imp.ArrayValue vn _ pt s dimSize)) =
-  concat (replicate (length dimSize) "[]") ++ extToString (Imp.TransparentValue (Imp.ScalarValue pt s vn))
-extToString (Imp.TransparentValue (Imp.ScalarValue (FloatType Float16) _ _)) = "f16"
-extToString (Imp.TransparentValue (Imp.ScalarValue (FloatType Float32) _ _)) = "f32"
-extToString (Imp.TransparentValue (Imp.ScalarValue (FloatType Float64) _ _)) = "f64"
-extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int8) Imp.Signed _)) = "i8"
-extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int16) Imp.Signed _)) = "i16"
-extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int32) Imp.Signed _)) = "i32"
-extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int64) Imp.Signed _)) = "i64"
-extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int8) Imp.Unsigned _)) = "u8"
-extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int16) Imp.Unsigned _)) = "u16"
-extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int32) Imp.Unsigned _)) = "u32"
-extToString (Imp.TransparentValue (Imp.ScalarValue (IntType Int64) Imp.Unsigned _)) = "u64"
-extToString (Imp.TransparentValue (Imp.ScalarValue Bool _ _)) = "bool"
-extToString (Imp.TransparentValue (Imp.ScalarValue Unit _ _)) = error "extToString: Unit"
-extToString (Imp.OpaqueValue oname _) = T.unpack $ opaqueName oname
-
-type EntryPointType = String
-
-data JSEntryPoint = JSEntryPoint
-  { name :: String,
-    parameters :: [EntryPointType],
-    ret :: EntryPointType
-  }
-
--- | A field in a JavaScript record opaque type.
-data JSRecordField = JSRecordField
-  { -- | Original field name (used in the server protocol).
-    jsrfName :: String,
-    -- | JavaScript type string (e.g. @"i32"@, @"[]f64"@, @"opaque_foo"@).
-    jsrfType :: EntryPointType,
-    -- | JavaScript method name on @FutharkContext@ (e.g. @"project_opaque_foo_x"@).
-    jsrfProjectFn :: String
-  }
-
--- | How an opaque type is represented for the JavaScript server.
-data JSOpaqueType
-  = -- | A record type with named, projectable fields.
-    JSOpaqueRecord [JSRecordField]
-  | -- | Any other opaque type (no project support).
-    JSOpaqueOther
-
--- | Convert the opaque-type table from an ImpCode program into the
--- JavaScript-oriented representation used by the code generator.
-opaqueToJS :: Imp.OpaqueTypes -> [(String, JSOpaqueType)]
-opaqueToJS (Imp.OpaqueTypes types) = map convertOne types
-  where
-    convertOne (desc, (Imp.OpaqueRecord fields, _)) =
-      (T.unpack (opaqueName desc), JSOpaqueRecord (map (convertField desc) fields))
-    convertOne (desc, _) =
-      (T.unpack (opaqueName desc), JSOpaqueOther)
-
-    convertField desc (fname, etype) =
-      JSRecordField
-        { jsrfName = T.unpack (nameToText fname),
-          jsrfType = entryTypeToJSString etype,
-          jsrfProjectFn =
-            "project_"
-              ++ T.unpack (opaqueName desc)
-              ++ "_"
-              ++ T.unpack f'
-        }
-      where
-        f'
-          | isValidCName (opaqueName desc <> "_" <> nameToText fname) =
-              nameToText fname
-          | otherwise = zEncodeText (nameToText fname)
-
--- | Convert an 'Imp.EntryPointType' to its JavaScript string representation.
-entryTypeToJSString :: Imp.EntryPointType -> String
-entryTypeToJSString (Imp.TypeOpaque desc) = T.unpack $ opaqueName desc
-entryTypeToJSString (Imp.TypeTransparent (Imp.ValueType sign (Imp.Rank rank) pt)) =
-  concat (replicate rank "[]") ++ primToJSString sign pt
-  where
-    primToJSString _ (FloatType Float16) = "f16"
-    primToJSString _ (FloatType Float32) = "f32"
-    primToJSString _ (FloatType Float64) = "f64"
-    primToJSString Imp.Signed (IntType Int8) = "i8"
-    primToJSString Imp.Signed (IntType Int16) = "i16"
-    primToJSString Imp.Signed (IntType Int32) = "i32"
-    primToJSString Imp.Signed (IntType Int64) = "i64"
-    primToJSString Imp.Unsigned (IntType Int8) = "u8"
-    primToJSString Imp.Unsigned (IntType Int16) = "u16"
-    primToJSString Imp.Unsigned (IntType Int32) = "u32"
-    primToJSString Imp.Unsigned (IntType Int64) = "u64"
-    primToJSString _ Bool = "bool"
-    primToJSString _ Unit = error "entryTypeToJSString: Unit"
 
 -- | The names of the C functions that must be exported from the WebAssembly
 -- module. This is every function named in the manifest, as the server calls
@@ -129,6 +26,13 @@ emccExportNames manifest =
   map (\f -> "'_" ++ T.unpack f ++ "'") (nubOrd $ manifestFunctions manifest)
     ++ [ "_futhark_context_config_new",
          "_futhark_context_config_free",
+         "_futhark_context_config_set_debugging",
+         "_futhark_context_config_set_logging",
+         "_futhark_context_config_set_profiling",
+         "_futhark_context_config_set_tuning_param",
+         "_futhark_get_tuning_param_count",
+         "_futhark_get_tuning_param_name",
+         "_futhark_get_tuning_param_class",
          "_futhark_context_new",
          "_futhark_context_free",
          "_futhark_context_get_error",
@@ -180,460 +84,29 @@ manifestFunctions manifest =
 
     variantFunctions v = [sumVariantConstruct v, sumVariantDestruct v]
 
-javascriptWrapper :: [JSEntryPoint] -> [(String, JSOpaqueType)] -> T.Text
-javascriptWrapper entryPoints opaqueTypes =
+-- | The JavaScript code passed to @emcc@ with @--extern-post-js@.
+javascriptWrapper :: Manifest -> T.Text
+javascriptWrapper manifest =
   T.unlines
     [ serverJs,
       valuesJs,
-      wrapperclassesJs,
-      classFutharkContext entryPoints opaqueTypes
+      wrappersJs,
+      "const futhark_manifest = " <> manifestToJSON manifest <> ";"
     ]
-
--- Make FutharkModule the generated primary class, but keeps FutharkContext around for backwards compatibility.
-classFutharkContext :: [JSEntryPoint] -> [(String, JSOpaqueType)] -> T.Text
-classFutharkContext entryPoints opaqueTypes =
-  T.unlines
-    [ "class FutharkModule {",
-      moduleConstructor,
-      moduleInitFromWasm entryPoints opaqueTypes,
-      moduleInit,
-      getFreeFun,
-      getEntryPointsFun,
-      getTypesFun,
-      getErrorFun,
-      getUtilityFuns,
-      T.unlines $ map toFutharkArray arrays,
-      T.unlines $ concatMap (generateProjectMethods . snd) opaqueTypes,
-      T.unlines $ map jsWrapEntryPoint entryPoints,
-      "}",
-      classFutharkContextCompat,
-      [text|
-      async function newFutharkContext(num_threads) {
-        var wasm = await loadWASM();
-        return new FutharkContext(wasm, num_threads);
-      }
-      |]
-    ]
-  where
-    -- Collect array types from entry points AND from record fields so the
-    -- array constructors are always available when returning projected values.
-    arrays = nubOrd $ filter isArray (entryPointTypes ++ recordFieldTypes)
-    entryPointTypes = concatMap (\jse -> parameters jse ++ [ret jse]) entryPoints
-    recordFieldTypes = [jsrfType rf | (_, JSOpaqueRecord fields) <- opaqueTypes, rf <- fields]
-
-moduleConstructor :: T.Text
-moduleConstructor =
-  [text|
-  constructor() {
-    this.wasm = undefined;
-    this.cfg = undefined;
-    this.ctx = undefined;
-    this.entry_points = {};
-    this.types = {};
-    this.entry = {};
-  }
-  |]
-
-moduleInitFromWasm :: [JSEntryPoint] -> [(String, JSOpaqueType)] -> T.Text
-moduleInitFromWasm jses opaqueTypes =
-  [text|
-  _init_from_wasm(wasm, num_threads) {
-    this.wasm = wasm;
-    this.cfg = this.wasm._futhark_context_config_new();
-    if (num_threads) this.wasm._futhark_context_config_set_num_threads(this.cfg, num_threads);
-    this.ctx = this.wasm._futhark_context_new(this.cfg);
-
-    this.entry_points = {
-      ${entries}
-    };
-    this.types = {
-      ${type_entries}
-    };
-    this.entry = {};
-    ${entry_aliases}
-    ${array_aliases}
-    ${array_type_aliases}
-  }
-  |]
-  where
-    entries = T.intercalate "," $ map dicEntry jses
-    type_entries = T.intercalate "," $ map dicTypeEntry opaqueTypes
-    entry_aliases = T.unlines $ map entryAlias jses
-    array_aliases = T.unlines $ map arrayAlias arrays
-    array_type_aliases = T.unlines $ map arrayTypeAlias arrays
-
-    arrays = nubOrd $ filter isArray (entryPointTypes ++ recordFieldTypes)
-    entryPointTypes = concatMap (\jse -> parameters jse ++ [ret jse]) jses
-    recordFieldTypes = [jsrfType rf | (_, JSOpaqueRecord fields) <- opaqueTypes, rf <- fields]
-
-moduleInit :: T.Text
-moduleInit =
-  [text|
-  async init(wasm, num_threads) {
-    if (wasm === undefined) {
-      throw new Error("FutharkModule.init() requires the generated backend runtime module");
-    }
-
-    this._init_from_wasm(wasm, num_threads);
-  }
-  |]
-
-classFutharkContextCompat :: T.Text
-classFutharkContextCompat =
-  [text|
-  class FutharkContext extends FutharkModule {
-    constructor(wasm, num_threads) {
-      super();
-
-      if (wasm !== undefined) {
-        this._init_from_wasm(wasm, num_threads);
-      }
-    }
-  }
-  |]
-
-getFreeFun :: T.Text
-getFreeFun =
-  [text|
-  free() {
-    if (this.ctx !== undefined) {
-      this.wasm._futhark_context_free(this.ctx);
-      this.ctx = undefined;
-    }
-
-    if (this.cfg !== undefined) {
-      this.wasm._futhark_context_config_free(this.cfg);
-      this.cfg = undefined;
-    }
-  }
-  |]
-
-getEntryPointsFun :: T.Text
-getEntryPointsFun =
-  [text|
-  get_entry_points() {
-    return this.entry_points;
-  }
-  |]
-
-getTypesFun :: T.Text
-getTypesFun =
-  [text|
-  get_types() {
-    return this.types;
-  }
-  |]
-
-getErrorFun :: T.Text
-getErrorFun =
-  [text|
-  get_error() {
-    var ptr = this.wasm._futhark_context_get_error(this.ctx);
-    var len = this.wasm.HEAP8.subarray(ptr).indexOf(0);
-    var str = String.fromCharCode(...this.wasm.HEAP8.subarray(ptr, ptr + len));
-    this.wasm._free(ptr);
-    return str;
-  }
-  |]
-
-getUtilityFuns :: T.Text
-getUtilityFuns =
-  [text|
-  async context_sync() {
-    return this.wasm._futhark_context_sync(this.ctx);
-  }
-
-  async clear_caches() {
-    return this.wasm._futhark_context_clear_caches(this.ctx);
-  }
-
-  async report() {
-    var ptr = this.wasm._futhark_context_report(this.ctx);
-    var len = this.wasm.HEAP8.subarray(ptr).indexOf(0);
-    var bytes = this.wasm.HEAPU8.subarray(ptr, ptr + len);
-    var str = new TextDecoder().decode(bytes);
-    this.wasm._free(ptr);
-    return str;
-  }
-
-  async pause_profiling() {
-    return this.wasm._futhark_context_pause_profiling(this.ctx);
-  }
-
-  async unpause_profiling() {
-    return this.wasm._futhark_context_unpause_profiling(this.ctx);
-  }
-  |]
-
-entryAlias :: JSEntryPoint -> T.Text
-entryAlias jse =
-  [text|this.entry["${ename}"] = this.${fname}.bind(this);|]
-  where
-    fname = GC.escapeName $ T.pack $ name jse
-    ename = T.pack $ name jse
-
-arrayAlias :: String -> T.Text
-arrayAlias typ =
-  [text|
-  this.${signature} = {
-    from_data: (data, ${dims}) => this.new_${signature}(data, ${dims}),
-    from_jsarray: (data) => this.new_${signature}_from_jsarray(data)
-  };
-  |]
-  where
-    d = dim typ
-    ftype = baseType typ
-    signature = T.pack $ ftype ++ "_" ++ show d ++ "d"
-    dims = T.pack $ intercalate ", " ["d" ++ show i | i <- [0 .. d - 1]]
-
-arrayTypeAlias :: String -> T.Text
-arrayTypeAlias typ =
-  [text|this.types["${typ_text}"] = this.${signature};|]
-  where
-    d = dim typ
-    ftype = baseType typ
-    signature = T.pack $ ftype ++ "_" ++ show d ++ "d"
-    typ_text = T.pack typ
-
-dicEntry :: JSEntryPoint -> T.Text
-dicEntry jse =
-  [text|
-       "${ename}" : ["${fname}", ${params}, ${rets}]
-  |]
-  where
-    fname = GC.escapeName $ T.pack $ name jse
-    ename = T.pack $ name jse
-    params = showText $ parameters jse
-    rets = showText $ ret jse
-
--- | Generate the @types@ dictionary entry for a single opaque type.
-dicTypeEntry :: (String, JSOpaqueType) -> T.Text
-dicTypeEntry (tname, JSOpaqueRecord fields) =
-  T.pack $
-    show tname
-      ++ ": [\"record\", ["
-      ++ intercalate ", " (map fieldEntry fields)
-      ++ "]]"
-  where
-    fieldEntry rf =
-      "["
-        ++ show (jsrfName rf)
-        ++ ", "
-        ++ show (jsrfType rf)
-        ++ ", \""
-        ++ jsrfProjectFn rf
-        ++ "\"]"
-dicTypeEntry (tname, JSOpaqueOther) =
-  T.pack $ show tname ++ ": [\"opaque\"]"
-
--- | Generate @project_*@ wrapper methods for a record opaque type.
-generateProjectMethods :: JSOpaqueType -> [T.Text]
-generateProjectMethods (JSOpaqueRecord fields) = map generateProjectMethod fields
-generateProjectMethods JSOpaqueOther = []
-
-generateProjectMethod :: JSRecordField -> T.Text
-generateProjectMethod rf =
-  T.pack $
-    unlines
-      [ "  " ++ jsrfProjectFn rf ++ "(obj) {",
-        "    var out = this.wasm._malloc(" ++ show (typeSize ftype) ++ ");",
-        "    this.wasm._futhark_" ++ jsrfProjectFn rf ++ "(this.ctx, out, obj.ptr);",
-        "    var result = " ++ readResult ++ ";",
-        "    this.wasm._free(out);",
-        "    return result;",
-        "  }"
-      ]
-  where
-    ftype = jsrfType rf
-    readout = typeHeap ftype ++ "[out >> " ++ show (typeShift ftype) ++ "]"
-    readResult
-      | isArray ftype =
-          "this.new_" ++ baseType ftype ++ "_" ++ show (dim ftype) ++ "d_from_ptr(" ++ readout ++ ")"
-      | isOpaque ftype =
-          "new FutharkOpaque(this, " ++ readout ++ ", this.wasm._futhark_free_" ++ ftype ++ ")"
-      | ftype == "bool" = readout ++ "!==0"
-      | otherwise = readout
-
-jsWrapEntryPoint :: JSEntryPoint -> T.Text
-jsWrapEntryPoint jse =
-  [text|
-  ${func_name}(${inparams}) {
-    var out = [${outparams}].map(n => this.wasm._malloc(n));
-    var to_free = [];
-    var do_free = () => { out.forEach(this.wasm._free); to_free.forEach(f => f.free()); };
-    ${paramsToPtr}
-    if (this.wasm._futhark_entry_${func_name}(this.ctx, ...out, ${ins}) > 0) {
-      do_free();
-      throw this.get_error();
-    }
-    ${results}
-    do_free();
-    return ${res};
-  }
-  |]
-  where
-    func_name = GC.escapeName $ T.pack $ name jse
-
-    alp = [0 .. length (parameters jse) - 1]
-    inparams = T.pack $ intercalate ", " ["in" ++ show i | i <- alp]
-    ins = T.pack $ intercalate ", " [maybeDerefence ("in" ++ show i) $ parameters jse !! i | i <- alp]
-    paramsToPtr = T.pack $ unlines $ filter ("" /=) [arrayPointer ("in" ++ show i) $ parameters jse !! i | i <- alp]
-
-    outparams = showText $ typeSize $ ret jse
-    results = T.pack $ makeResult 0 $ ret jse
-    res = "result0"
-
-maybeDerefence :: String -> String -> String
-maybeDerefence arg typ =
-  if isScalar typ then arg else arg ++ ".ptr"
-
-arrayPointer :: String -> String -> String
-arrayPointer arg typ =
-  if isArray typ
-    then "  if (" ++ arg ++ " instanceof Array) { " ++ reassign ++ "; to_free.push(" ++ arg ++ "); }"
-    else ""
-  where
-    reassign = arg ++ " = this.new_" ++ signature ++ "_from_jsarray(" ++ arg ++ ")"
-    signature = baseType typ ++ "_" ++ show (dim typ) ++ "d"
-
-makeResult :: Int -> String -> String
-makeResult i typ =
-  "  var result"
-    ++ show i
-    ++ " = "
-    ++ if isArray typ
-      then "this.new_" ++ signature ++ "_from_ptr(" ++ readout ++ ");"
-      else
-        if isOpaque typ
-          then "new FutharkOpaque(this, " ++ readout ++ ", this.wasm._futhark_free_" ++ typ ++ ");"
-          else readout ++ if typ == "bool" then "!==0;" else ";"
-  where
-    res = "out[" ++ show i ++ "]"
-    readout = typeHeap typ ++ "[" ++ res ++ " >> " ++ show (typeShift typ) ++ "]"
-    signature = baseType typ ++ "_" ++ show (dim typ) ++ "d"
-
-baseType :: String -> String
-baseType ('[' : ']' : end) = baseType end
-baseType typ = typ
-
-dim :: String -> Int
-dim ('[' : ']' : end) = dim end + 1
-dim _ = 0
-
-isArray :: String -> Bool
-isArray typ = take 2 typ == "[]"
-
-isOpaque :: String -> Bool
-isOpaque typ = take 6 typ == "opaque"
-
-isScalar :: String -> Bool
-isScalar typ = not (isArray typ || isOpaque typ)
-
-typeSize :: String -> Integer
-typeSize typ =
-  case typ of
-    "i8" -> 1
-    "i16" -> 2
-    "i32" -> 4
-    "i64" -> 8
-    "u8" -> 1
-    "u16" -> 2
-    "u32" -> 4
-    "u64" -> 8
-    "f16" -> 2
-    "f32" -> 4
-    "f64" -> 8
-    "bool" -> 1
-    _ -> 4
-
-typeShift :: String -> Integer
-typeShift typ =
-  case typ of
-    "i8" -> 0
-    "i16" -> 1
-    "i32" -> 2
-    "i64" -> 3
-    "u8" -> 0
-    "u16" -> 1
-    "u32" -> 2
-    "u64" -> 3
-    "f16" -> 1
-    "f32" -> 2
-    "f64" -> 3
-    "bool" -> 0
-    _ -> 2
-
-typeHeap :: String -> String
-typeHeap typ =
-  case typ of
-    "i8" -> "this.wasm.HEAP8"
-    "i16" -> "this.wasm.HEAP16"
-    "i32" -> "this.wasm.HEAP32"
-    "i64" -> "this.wasm.HEAP64"
-    "u8" -> "this.wasm.HEAPU8"
-    "u16" -> "this.wasm.HEAPU16"
-    "u32" -> "this.wasm.HEAPU32"
-    "u64" -> "(new BigUint64Array(this.wasm.HEAP64.buffer))"
-    "f16" -> "this.wasm.HEAPU16"
-    "f32" -> "this.wasm.HEAPF32"
-    "f64" -> "this.wasm.HEAPF64"
-    "bool" -> "this.wasm.HEAP8"
-    _ -> "this.wasm.HEAP32"
-
-toFutharkArray :: String -> T.Text
-toFutharkArray typ =
-  [text|
-  ${new}_from_jsarray(${arraynd_p}) {
-    return this.${new}(${arraynd_flat_p}, ${arraynd_dims_p});
-  }
-  ${new}(array, ${dims}) {
-    console.assert(array.length === ${dims_multiplied}, 'len=%s,dims=%s', array.length, [${dims}].toString());
-      var copy = this.wasm._malloc(array.length << ${shift});
-      ${heapType}.set(array, copy >> ${shift});
-      var ptr = ${fnew}(this.ctx, copy, ${bigint_dims});
-      this.wasm._free(copy);
-      return this.${new}_from_ptr(ptr);
-    }
-
-    ${new}_from_ptr(ptr) {
-      return new FutharkArray(this, ptr, ${args});
-    }
-    |]
-  where
-    d = dim typ
-    ftype = baseType typ
-    heap = typeHeap ftype
-    signature = ftype ++ "_" ++ show d ++ "d"
-    new = T.pack $ "new_" ++ signature
-    fnew = T.pack $ "this.wasm._futhark_new_" ++ signature
-    fshape = "this.wasm._futhark_shape_" ++ signature
-    fvalues = "this.wasm._futhark_values_raw_" ++ signature
-    ffree = "this.wasm._futhark_free_" ++ signature
-    arraynd = "array" ++ show d ++ "d"
-    shift = showText (typeShift ftype)
-    heapType = T.pack heap
-    arraynd_flat = if d > 1 then arraynd ++ ".flat()" else arraynd
-    arraynd_dims = intercalate ", " [arraynd ++ mult i "[0]" ++ ".length" | i <- [0 .. d - 1]]
-    dims = T.pack $ intercalate ", " ["d" ++ show i | i <- [0 .. d - 1]]
-    dims_multiplied = T.pack $ intercalate "*" ["Number(d" ++ show i ++ ")" | i <- [0 .. d - 1]]
-    bigint_dims = T.pack $ intercalate ", " ["BigInt(d" ++ show i ++ ")" | i <- [0 .. d - 1]]
-    mult i s = concat $ replicate i s
-    (arraynd_p, arraynd_flat_p, arraynd_dims_p) = (T.pack arraynd, T.pack arraynd_flat, T.pack arraynd_dims)
-    args = T.pack $ intercalate ", " ["'" ++ ftype ++ "'", show d, heap, fshape, fvalues, ffree]
 
 -- | Javascript code that can be appended to the generated module to
--- run a Futhark server instance on startup.
-runServer :: Manifest -> T.Text
-runServer manifest =
+-- run a Futhark server instance when it is loaded.
+runServer :: T.Text
+runServer =
   [text|
-   Module.onRuntimeInitialized = () => {
-     var context = new FutharkContext(Module);
-     var server = new Server(context, ${manifest_json});
-     server.run();
+   // Worker threads (wasm-multicore) also load this module.
+   const is_main_thread = globalThis.process?.versions?.node
+     ? (await import("node:worker_threads")).isMainThread
+     : globalThis.WorkerGlobalScope === undefined;
+   if (is_main_thread) {
+     await futhark_server_main();
    }|]
-  where
-    manifest_json = manifestToJSON manifest
 
 -- | The names exported by the generated module.
 libraryExports :: T.Text
-libraryExports = "export {newFutharkContext, FutharkContext, FutharkModule, FutharkArray, FutharkOpaque};"
+libraryExports = "export {FutharkContext, FutharkArray, FutharkOpaque};"
