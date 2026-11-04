@@ -53,6 +53,15 @@ parser.add_argument(
     ),
 )
 parser.add_argument(
+    "--connect-timeout",
+    help=(
+        "seconds to wait for the started browser to connect before failing\n"
+        "(default: 120)."
+    ),
+    type=float,
+    default=120,
+)
+parser.add_argument(
     "--log",
     help=(
         "log file for debug output.\n"
@@ -60,6 +69,7 @@ parser.add_argument(
     ),
 )
 args = parser.parse_args()
+connect_timeout = args.connect_timeout
 
 program_name = args.program
 if program_name.startswith("./"):
@@ -138,6 +148,8 @@ async def handle_file(request):
     file = request.rel_url.path
     if not request.path.startswith("/tmp/"):
         file = file.lstrip("/")
+    if not os.path.isfile(file):
+        return web.Response(status=404, headers=default_headers)
 
     content_type = "text/plain"
     if file.endswith(".js") or file.endswith(".mjs"):
@@ -203,6 +215,8 @@ async def handle_ws(request):
 
 def start_browser():
     options = webdriver.ChromeOptions()
+    # Lets us show the console output if the page fails.
+    options.set_capability("goog:loggingPrefs", {"browser": "ALL"})
 
     if headless:
         options.add_argument("--headless=new")
@@ -219,6 +233,11 @@ def start_browser():
         # remote is also Linux.
         options.add_argument("--enable-unsafe-webgpu")
         options.add_argument("--enable-features=Vulkan")
+        options.add_argument("--ignore-gpu-blocklist")
+        # Dawn hides shader-f16 on NVIDIA drivers older than 615.71.
+        options.add_argument(
+            "--enable-dawn-features=vulkan_enable_f16_on_nvidia"
+        )
 
         if headless:
             # https://developer.chrome.com/blog/supercharge-web-ai-testing#enable-webgpu
@@ -251,7 +270,9 @@ async def start_server(app, toWS, toStdIO):
     await site.start()
 
     if not no_browser:
+        global started_driver
         driver, get_task = start_browser()
+        started_driver = driver
 
     await app["stop"].wait()
     if not no_browser:
@@ -281,8 +302,24 @@ async def read_stdin_line():
 
 
 async def handle_stdio(toWS, toStdIO):
-    # Wait for an initial signal that a web browser client has connected.
-    await toStdIO.get()
+    # Wait for an initial signal that a web browser client has connected.  If we
+    # started the browser, the page has presumably failed if it takes too long.
+    try:
+        await asyncio.wait_for(
+            toStdIO.get(), None if no_browser else connect_timeout
+        )
+    except asyncio.TimeoutError:
+        eprint(
+            f"The browser did not connect within {connect_timeout} seconds."
+        )
+        if started_driver is not None:
+            eprint("Browser console:")
+            for entry in started_driver.get_log("browser"):
+                eprint(entry["message"])
+        global failed
+        failed = True
+        app["stop"].set()
+        return
 
     eprint("Browser client detected, starting Futhark server protocol")
     print("%%% OK", flush=True)
@@ -324,4 +361,10 @@ async def main():
         )
 
 
+# The browser started by start_server, and whether it failed to connect.
+started_driver = None
+failed = False
+
 asyncio.run(main())
+if failed:
+    sys.exit(1)

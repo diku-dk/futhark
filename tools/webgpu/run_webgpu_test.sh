@@ -1,27 +1,18 @@
 #!/usr/bin/env bash
+#
+# A smoke test of the WebGPU backend in a real browser on a real GPU: a few
+# small programs are run in headless Chrome by tools/browser_test.py.  Expects
+# the environment set up by setup_webgpu_ci.sh.
 set -euo pipefail
 
-BASE="${HOME}/fut-webgpu-ci"
-WEBGPU_DIR="${BASE}/futhark-webgpu"
-TESTROOT="${WEBGPU_DIR}/examples/hendrix-ci"
+cd "$(dirname "$0")/../.."
 
-cd "${TESTROOT}"
-
-if [ ! -f package.json ]; then
-  npm init -y
-fi
-
-if [ ! -d node_modules/playwright ]; then
-  npm i playwright
-fi
-
-if ! find "${PLAYWRIGHT_BROWSERS_PATH}" -maxdepth 1 -type d -name 'chromium-*' | grep -q .; then
-  npx playwright install chromium
-fi
-
-node check-headless/check_webgpu.mjs
-# The workspace persists between CI runs, and the Makefile only
-# rebuilds when test1.fut changes, so stale outputs from an older
-# compiler must be removed explicitly.
-make -C test1 clean
-make -C test1 run
+# browser_test.py serves on a fixed port, so only one program can run at a
+# time.
+futhark test --backend=webgpu --runner=tools/browser_test.py \
+  --concurrency=1 --no-tuning \
+  tests/soacs/map1.fut \
+  tests/soacs/reduce1.fut \
+  tests/soacs/scan1.fut \
+  tests/primitive/f16_binop.fut \
+  tests/hist/f16.fut

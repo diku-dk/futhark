@@ -2,11 +2,9 @@
 set -euo pipefail
 
 BASE="${HOME}/fut-webgpu-ci"
-WEBGPU_DIR="${BASE}/futhark-webgpu"
 
 export PATH="${HOME}/.local/bin:${PATH}"
 export XDG_CACHE_HOME="${HOME}/.cache"
-export PLAYWRIGHT_BROWSERS_PATH="${HOME}/pw-browsers"
 
 mkdir -p "${BASE}" "${HOME}/opt" "${HOME}/.local/lib" "${XDG_CACHE_HOME}"
 
@@ -47,31 +45,15 @@ fi
 export LIBRARY_PATH="${HOME}/.local/lib:${LIBRARY_PATH:-}"
 export LD_LIBRARY_PATH="${HOME}/.local/lib:${LD_LIBRARY_PATH:-}"
 
-# local Node.js + npm
-NODE_VERSION="22.16.0"
-NODE_DIR="${HOME}/opt/node-v${NODE_VERSION}-linux-x64"
-NODE_BIN="${NODE_DIR}/bin"
-
-if [ ! -x "${NODE_BIN}/node" ]; then
-  TARBALL="node-v${NODE_VERSION}-linux-x64.tar.xz"
-  URL="https://nodejs.org/dist/v${NODE_VERSION}/${TARBALL}"
-  rm -rf "${NODE_DIR}"
-  curl -fsSL -o "${HOME}/opt/${TARBALL}" "${URL}"
-  tar -xf "${HOME}/opt/${TARBALL}" -C "${HOME}/opt"
+# Python packages for tools/browser_test.py.  Selenium downloads Chrome and
+# its driver itself.
+if [ ! -x "${BASE}/venv/bin/python3" ]; then
+  python3 -m venv "${BASE}/venv"
 fi
-
-export PATH="${NODE_BIN}:${PATH}"
-
-# Clone the WebGPU examples repo for smoke testing.
-if [ ! -d "${WEBGPU_DIR}/.git" ]; then
-  git clone https://github.com/diku-dk/futhark-webgpu.git "${WEBGPU_DIR}"
-else
-  git -C "${WEBGPU_DIR}" fetch --all --prune
-  git -C "${WEBGPU_DIR}" pull --ff-only || true
-fi
+source "${BASE}/venv/bin/activate"
+pip install --quiet --upgrade aiohttp numpy selenium
 
 echo "OK: workspace ready at ${BASE}"
 echo "OK: futhark is $(command -v futhark)"
 echo "OK: emcc is $(command -v emcc)"
-echo "OK: node is $(command -v node)"
-echo "OK: npm is $(command -v npm)"
+echo "OK: python3 is $(command -v python3)"
