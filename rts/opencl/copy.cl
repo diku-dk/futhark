@@ -2,9 +2,7 @@
 
 #define GEN_COPY_KERNEL(NAME, ELEM_TYPE) \
 FUTHARK_KERNEL void lmad_copy_##NAME(SHARED_MEM_PARAM                   \
-                               __global ELEM_TYPE *dst_mem,             \
                                int64_t dst_offset,                      \
-                               __global ELEM_TYPE *src_mem,             \
                                int64_t src_offset,                      \
                                int64_t n,                               \
                                int r,                                   \
@@ -15,7 +13,9 @@ FUTHARK_KERNEL void lmad_copy_##NAME(SHARED_MEM_PARAM                   \
                                int64_t shape4, int64_t dst_stride4, int64_t src_stride4, \
                                int64_t shape5, int64_t dst_stride5, int64_t src_stride5, \
                                int64_t shape6, int64_t dst_stride6, int64_t src_stride6, \
-                               int64_t shape7, int64_t dst_stride7, int64_t src_stride7) { \
+                               int64_t shape7, int64_t dst_stride7, int64_t src_stride7, \
+                               __global ELEM_TYPE *dst_mem,             \
+                               __global ELEM_TYPE *src_mem) { \
   int64_t gtid = get_global_id(0);                                      \
   int64_t remainder = gtid;                                             \
                                                                         \
