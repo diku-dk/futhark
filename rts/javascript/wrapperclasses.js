@@ -56,14 +56,15 @@ class FutharkArray {
       if (ds.length === 1) {
         return Array.from(ta.subarray(offs, offs + d0));
       } else {
-        var d1 = Number(ds[1]);
-        return Array.from(Array(d0), (x,i) => nest(offs + i * d1, ds.slice(1)));
+        var inner = ds.slice(1);
+        var stride = Number(inner.reduce((a, b) => a * b));
+        return Array.from(Array(d0), (x,i) => nest(offs + i * stride, inner));
       }
     })(0, dims);
   }
 
   async values() {
-    return this.toTypedArray();
+    return this.toTypedArray().slice();
   }
 }
 

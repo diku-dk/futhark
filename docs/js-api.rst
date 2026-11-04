@@ -90,11 +90,8 @@ arrays, call entry points, and free resources.
 
    Asynchronously initialise the ``FutharkModule`` object.
 
-   For the WASM-style backend, the ``module`` argument is optional. If
-   omitted, the generated wrapper loads the WebAssembly module itself.
-
-   For the WebGPU backend, ``module`` must be the generated backend
-   runtime module.
+   The ``module`` argument must be the generated backend runtime module,
+   obtained as shown above.
 
 .. js:function:: FutharkModule.free()
 
@@ -176,7 +173,8 @@ shared by the WASM backend and the WebGPU backend.
 
 .. js:function:: FutharkArray.values()
 
-   Asynchronously returns a flat typed array containing the array data.
+   Asynchronously returns a flat typed array containing a copy of the
+   array data.  It remains valid after the ``FutharkArray`` is freed.
 
 .. js:function:: FutharkArray.free()
 
