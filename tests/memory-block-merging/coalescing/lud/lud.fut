@@ -71,17 +71,16 @@ def lud_perimeter_lower [b] [m] (diag: [b][b]f32) (mat: [m][b][b]f32) : *[m][b][
 
 def lud_internal [m] [b] (top_per: [m][b][b]f32) (lft_per: [m][b][b]f32) (mat_slice: [m][m][b][b]f32) : *[m][m][b][b]f32 =
   let top_slice = map transpose top_per
-  in #[flattening(only_inner)]
+  in #[flattening(only_full)]
      map2 (\mat_arr lft ->
-             #[flattening(only_inner)]
+             #[flattening(only_full)]
              map2 (\mat_blk top ->
-                     #[flattening(only_inner)]
+                     #[flattening(only_full)]
                      map2 (\mat_row lft_row ->
-                             #[sequential_inner]
-                             map2 (\mat_el top_row ->
+                             map2 (\mat_el top_row -> #[sequential] (
                                      let prods = map2 (*) lft_row top_row
                                      let sum = f32.sum prods
-                                     in mat_el - sum)
+                                     in mat_el - sum))
                                   mat_row
                                   top)
                           mat_blk

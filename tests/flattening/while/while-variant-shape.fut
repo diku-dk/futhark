@@ -4,7 +4,7 @@
 -- structure gpu { /Loop 1 }
 
 def main (ns: []i32) : []i32 =
-  #[flattening(only_inner)]
+  #[flattening(only_full)]
   map (\n ->
          let res =
            loop arr = [1]

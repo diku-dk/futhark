@@ -3,7 +3,7 @@
 -- auto output
 -- structure gpu { /Loop 1 Loop 1 }
 def main (xs) =
-  #[flattening(only_inner)]
+  #[flattening(only_full)]
   map (\x ->
          let zs = iota x
          let some_res =

@@ -4,7 +4,7 @@
 -- structure gpu { /SegMap 1 /SegRed 1 }
 
 entry main (xs: []i64) (ys: []i64) =
-  #[flattening(only_inner)]
+  #[flattening(only_full)]
   map (\x ->
          let d = reduce (+) x ys
          in d + x)

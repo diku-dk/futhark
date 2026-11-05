@@ -187,17 +187,29 @@ onlyExploitIntra :: Attrs -> Bool
 onlyExploitIntra attrs =
   "only_intra" `inAttrs` flatteningAttrs attrs
 
+onlyExploitOuter :: Attrs -> Bool
+onlyExploitOuter attrs =
+  "only_outer" `inAttrs` flatteningAttrs attrs
+
 mayExploitOuter :: Attrs -> Bool
 mayExploitOuter attrs =
-  not $ "no_outer" `inAttrs` attrs' || "only_inner" `inAttrs` attrs'
+  not $ "no_outer" `inAttrs` attrs' || "only_full" `inAttrs` attrs'
   where
     attrs' = flatteningAttrs attrs
 
 mayExploitIntra :: Attrs -> Bool
 mayExploitIntra attrs =
-  not $ "no_intra" `inAttrs` attrs' || "only_inner" `inAttrs` attrs'
+  not $ "no_intra" `inAttrs` attrs' || "only_full" `inAttrs` attrs'
   where
     attrs' = flatteningAttrs attrs
+
+-- | Is this one of the flattening attributes that select which versions are
+-- generated? These are the ones an enclosing @only_full@ overrides.
+isVersioningAttr :: Attr -> Bool
+isVersioningAttr (AttrComp f [x]) =
+  f `elem` ["flattening", "incremental_flattening"]
+    && x `elem` ["no_outer", "no_intra", "only_intra", "only_outer", "only_full"]
+isVersioningAttr _ = False
 
 intraBlockAlternative ::
   Intrablock.IntrablockResult ->
@@ -259,7 +271,7 @@ mapAlternatives desc result_ts attrs parallel_fun_inside worth_seq ws mkFullBody
     _
       | parallel_fun_inside ->
           full []
-      | "sequential_inner" `inAttrs` attrs -> do
+      | onlyExploitOuter attrs -> do
           outer_body <- mkOuterBody
           kernelAlternatives desc result_ts outer_body []
     Nothing
@@ -313,7 +325,7 @@ scanRedAlternatives ::
 scanRedAlternatives desc result_ts attrs parallel_fun_inside allow_versioning ws mkFullBody mkOuterBody
   | parallel_fun_inside =
       fullAlternative
-  | "sequential_inner" `inAttrs` attrs =
+  | onlyExploitOuter attrs =
       outerAlternative
   | mayExploitOuter attrs && allow_versioning =
       fullWithOuterAlternative
@@ -371,16 +383,14 @@ worthIntrablock lam =
           0
       where
         attrs = stmAuxAttrs $ stmAux stm
-        sequential_inner = "sequential_inner" `inAttrs` attrs
 
         zeroIfTooSmall (Constant (IntValue x))
           | intToInt64 x < 32 = 0
         zeroIfTooSmall _ = 1
 
-        mapLike w lam' =
-          if sequential_inner
-            then 0
-            else max (zeroIfTooSmall w) (bodyInterest (lambdaBody lam'))
+        mapLike w lam'
+          | onlyExploitOuter attrs = 0
+          | otherwise = max (zeroIfTooSmall w) (bodyInterest (lambdaBody lam'))
 
 -- | A lambda is worth sequentialising if it contains enough nested parallelism
 -- of an interesting kind, or if distributing it would fragment sequential
@@ -400,7 +410,7 @@ worthSequentialising lam =
           0 :: Int
       | Op (Screma _ _ form@(ScremaForm lam' _ _ _)) <- stmExp stm,
         isJust $ isMapSOAC form =
-          if sequential_inner
+          if onlyExploitOuter attrs
             then 0
             else bodyInterest (depth + 1) (lambdaBody lam')
       | Loop _ _ body <- stmExp stm =
@@ -428,7 +438,6 @@ worthSequentialising lam =
           0
       where
         attrs = stmAuxAttrs $ stmAux stm
-        sequential_inner = "sequential_inner" `inAttrs` attrs
 
 bodyHasParallelism :: FunHasParallelism -> Body SOACS -> Bool
 bodyHasParallelism funHasParallelism =
@@ -517,15 +526,17 @@ factorScremaForParallelism funHasParallelism scope aux pat w arrs form
           <$> preprocessStms scope stms
       pure $ mkBody stms' $ varsRes $ patNames pat
 
--- | Add the flattening attributes of the enclosing context to a statement. A
--- statement that carries flattening attributes of its own is left alone, as
--- those are more specific.
+-- | Add the flattening attributes of the enclosing context to a statement, and
+-- to the statements nested in its sequential control flow (see Note [Flattening
+-- attribute propagation]).
 propagateAttrs :: Attrs -> Stm SOACS -> Stm SOACS
 propagateAttrs attrs stm
   | attrs' == mempty = stm
-  | flatteningAttrs (stmAuxAttrs (stmAux stm)) == mempty =
-      stm {stmAux = (stmAux stm) {stmAuxAttrs = attrs' <> stmAuxAttrs (stmAux stm)}}
-  | otherwise = stm
+  | otherwise =
+      stm
+        { stmAux = (stmAux stm) {stmAuxAttrs = stm_attrs},
+          stmExp = propagateInExp stm_attrs $ stmExp stm
+        }
   where
     -- 'flatteningAttrs' strips the enclosing 'flattening', which has to be put
     -- back for the attributes to be recognised on the statement.
@@ -533,17 +544,44 @@ propagateAttrs attrs stm
       mconcat . mapAttrs (oneAttr . AttrComp "flattening" . pure) $
         flatteningAttrs attrs
 
+    own = stmAuxAttrs $ stmAux stm
+
+    stm_attrs
+      | "only_full" `inAttrs` flatteningAttrs attrs =
+          attrs' <> mconcat (mapAttrs keepNonVersioning own)
+      | flatteningAttrs own == mempty =
+          attrs' <> own
+      | otherwise =
+          own
+
+    keepNonVersioning attr
+      | isVersioningAttr attr = mempty
+      | otherwise = oneAttr attr
+
+-- | Propagate attributes into the bodies of sequential control flow, but not
+-- into SOAC lambdas.
+propagateInExp :: Attrs -> Exp SOACS -> Exp SOACS
+propagateInExp attrs (Loop merge form body) =
+  Loop merge form $ propagateInBody attrs body
+propagateInExp attrs (Match ses cases defbody dec) =
+  Match ses (map (fmap $ propagateInBody attrs) cases) (propagateInBody attrs defbody) dec
+propagateInExp attrs (WithAcc inputs lam) =
+  WithAcc inputs lam {lambdaBody = propagateInBody attrs $ lambdaBody lam}
+propagateInExp _ e = e
+
+propagateInBody :: Attrs -> Body SOACS -> Body SOACS
+propagateInBody attrs body =
+  body {bodyStms = fmap (propagateAttrs attrs) (bodyStms body)}
+
 -- | Impose outside flattening attributes on a statement. Only SOACs are
--- affected, and only those that carry no flattening attributes of their own, as
--- those are more specific.
+-- affected, following the rules of 'propagateAttrs'.
 imposeAttrs :: Attrs -> Stm SOACS -> Stm SOACS
 imposeAttrs attrs stm
   | Op {} <- stmExp stm = propagateAttrs attrs stm
   | otherwise = stm
 
--- | Propagate incremental flattening attributes to the statements of
--- a map lambda body. Statements that carry their own incremental
--- flattening attributes are left alone.
+-- | Propagate flattening attributes to the statements of a map lambda body,
+-- following the rules of 'propagateAttrs'.
 propagateVersioningAttrs :: Attrs -> Lambda SOACS -> Lambda SOACS
 propagateVersioningAttrs attrs lam
   | flatteningAttrs attrs == mempty = lam
@@ -554,3 +592,15 @@ propagateVersioningAttrs attrs lam
               { bodyStms = fmap (propagateAttrs attrs) (bodyStms (lambdaBody lam))
               }
         }
+
+-- Note [Flattening attribute propagation]
+--
+-- A flattening attribute on a SOAC applies to every SOAC nested inside it,
+-- including inside loops, branches and with_acc. A nested statement keeps its
+-- own flattening attributes, except that an enclosing @only_full@ replaces its
+-- versioning attributes ('isVersioningAttr').
+--
+-- Attributes are copied onto a SOAC's body only once it has been preprocessed
+-- ('propagateVersioningAttrs', 'factorScremaForParallelism'), as preprocessing
+-- may rewrite statements and lose them. Nested SOAC lambdas are reached when
+-- their own SOAC is flattened.

@@ -5,6 +5,6 @@
 -- structure gpu { SegRed 1 }
 
 def main (xss: [][]i32) =
-  #[flattening(only_inner)]
+  #[flattening(only_full)]
   #[flattening(sequentialise_nonuniform)]
   map (\xs -> i32.sum (map (* 2) xs)) xss

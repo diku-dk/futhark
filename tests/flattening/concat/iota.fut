@@ -7,5 +7,5 @@
 -- structure gpu { Concat 0 }
 
 entry validate_flattening (ns: []i64) : []i64 =
-  #[flattening(only_inner)]
+  #[flattening(only_full)]
   map (\n -> i64.sum (opaque (iota n `concat` iota n))) ns

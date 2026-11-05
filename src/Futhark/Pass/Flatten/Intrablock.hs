@@ -22,7 +22,6 @@ import Futhark.Pass.Flatten.Distribute
 import Futhark.Pass.Flatten.General
 import Futhark.Pass.Flatten.PreProcess (preprocessLambda)
 import Futhark.Tools
-import Futhark.Transform.FirstOrderTransform qualified as FOT
 import Futhark.Transform.Rename
 import Futhark.Transform.ToGPU
 import Prelude hiding (log)
@@ -285,10 +284,6 @@ intrablockStm map_in_block stm@(Let pat aux e) = do
       inputs' <- mapM (intrablockWithAccInput map_in_block) inputs
       lam' <- intrablockLambda map_in_block lam
       certifying (stmAuxCerts aux) . letBind pat $ WithAcc inputs' lam'
-    Op soac
-      | "sequential_outer" `inAttrs` stmAuxAttrs aux ->
-          intrablockStms map_in_block . fmap (certify (stmAuxCerts aux))
-            =<< runBuilder_ (FOT.transformSOAC pat soac)
     Op (Screma w arrs form)
       | Just lam <- isMapSOAC form ->
           map_in_block lvl pat w arrs lam

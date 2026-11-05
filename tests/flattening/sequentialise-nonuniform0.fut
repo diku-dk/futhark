@@ -6,6 +6,6 @@
 -- structure gpu { SegMap 1 SegScan 0 SegRed 0 }
 
 def main (ns: []i32) =
-  #[flattening(only_inner)]
+  #[flattening(only_full)]
   #[flattening(sequentialise_nonuniform)]
   map (\n -> i64.sum (map (* 2) (iota (i64.i32 n & 7)))) ns
