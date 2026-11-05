@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * The ISPC backend would handle `f16` incorrectly in some cases.
 
+* Fixed a very rare out-of-bounds access in scans with array operands on GPU
+  backends.
+
 ## [0.28.2]
 
 ### Added
