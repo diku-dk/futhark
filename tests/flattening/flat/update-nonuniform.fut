@@ -5,7 +5,7 @@
 -- structure gpu { /WithAcc 1 /Apply/repiota 2 /Apply/segiota 1 FlatUpdate 0 }
 
 entry main (n: i64) (xs: [10]i64) : [n][10]i64 =
-  #[flattening(only_inner)]
+  #[flattening(only_full)]
   map (\i ->
          let v = replicate 2 (replicate (i + 1) (i * 10))
          in intrinsics.flat_update_2d (copy xs) 1 2 2 v)

@@ -570,11 +570,6 @@ transformLambda attrs funHasParallelism funSizeParams (Lambda params ret body) =
   pure $ Lambda params ret body'
 
 transformStm :: Attrs -> FunHasParallelism -> FunSizeParams -> Stm SOACS -> FlattenM ()
-transformStm attrs funHasParallelism funSizeParams (Let pat aux (Op soac))
-  | "sequential_outer" `inAttrs` stmAuxAttrs aux = do
-      scope <- askScope
-      stms <- runBuilderT_ (FOT.transformSOAC pat soac) (castScope scope)
-      transformStms attrs funHasParallelism funSizeParams $ fmap (certify (stmAuxCerts aux)) stms
 transformStm _ _ _ stm
   | "sequential" `inAttrs` stmAuxAttrs (stmAux stm) = addStm $ soacsStmToGPU stm
 transformStm _ _ _ (Let pat aux (Op (Hist w arrs ops bucket_fun))) =

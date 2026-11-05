@@ -1117,7 +1117,7 @@ transformMap ::
 transformMap ops attrs [] _env _inps pat w arrs map_lam = do
   -- Top-level map (no enclosing segments). Preprocess the body and then
   -- propagate the attributes onto it, so they influence how the body is
-  -- versioned (e.g. only_inner reaching a Screma produced by interchanging a
+  -- versioned (e.g. only_full reaching a Screma produced by interchanging a
   -- 'sequential_outer' loop). Order matters: preprocessing may rewrite a body
   -- statement, so propagating first would lose the attributes on the rewritten
   -- form. XXX: this is arguably a bug in preprocessing.

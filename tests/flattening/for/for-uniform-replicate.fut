@@ -4,7 +4,7 @@
 -- structure gpu { /Loop/SegMap 2 }
 
 def main [n] [m] (xss: [n][m]i64) =
-  #[flattening(only_inner)]
+  #[flattening(only_full)]
   map (\xs ->
          loop acc = xs
          for i < 3 do

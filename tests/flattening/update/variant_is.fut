@@ -5,5 +5,5 @@
 -- structure gpu { /WithAcc 1 Update 0 }
 
 entry main [n] (is: [n]i64) (js: [n]i64) =
-  #[flattening(only_inner)]
+  #[flattening(only_full)]
   map2 (\i j -> reduce (+) 0 (iota 8 with [i:j] = iota 5)) is js

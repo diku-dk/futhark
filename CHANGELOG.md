@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Changed
 
+* The flattening attributes have changed somewhat. `#[sequential_inner]`
+  replaced by `#[flattening(only_outer)]`, and `#[flattening(only_inner)]` has
+  been renamed to `#[flattening(only_full)]`, which now also affects any nested
+  parallelism.
+
 ### Fixed
 
 * Invalid memory expansion in some rare cases.

@@ -9,7 +9,7 @@ def seqmap [n] 'a 'b (f: a -> b) (xs: [n]a) (dummy: b) : [n]b =
     out with [i] = f xs[i]
 
 def main [n] (xs: [n]f32) is =
-  #[sequential_inner]
+  #[flattening(only_outer)]
   map (\i ->
          let arr = seqmap (+ i) (map f32.i64 (iota n)) 0
          in f32.sum (map2 (+) xs arr))

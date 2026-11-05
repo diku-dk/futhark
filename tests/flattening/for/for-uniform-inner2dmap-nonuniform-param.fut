@@ -4,7 +4,7 @@
 -- structure gpu { /Loop/ForLoop 1 /Loop/SegScan 1 /Loop/SegMap 2 }
 
 def main [n] [m] [k] (xss: [n][m]i64) (ys: [k]i64) =
-  #[flattening(only_inner)]
+  #[flattening(only_full)]
   map (\xs ->
          map (\x ->
                 let zs = iota x

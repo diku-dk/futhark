@@ -4,7 +4,7 @@
 -- structure gpu { SegScan 1 SegRed 0 /Apply/segiota 1 }
 
 def main xss ys =
-  #[flattening(only_inner)]
+  #[flattening(only_full)]
   map (\xs ->
          let res =
            map (\x ->

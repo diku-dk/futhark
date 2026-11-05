@@ -26,5 +26,5 @@ def find_nearest_point [k] (pts: [k]point) (pt: point) : i32 =
 def main [n] (xs: [n]f32) (ys: [n]f32) =
   let points = zip xs ys
   let cluster_centres = take 10 points
-  in #[sequential_inner]
+  in #[flattening(only_outer)]
      map (find_nearest_point cluster_centres) points

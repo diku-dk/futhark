@@ -4,7 +4,7 @@
 -- structure gpu { /Loop/WhileLoop 1 }
 
 def main [n] (xs: [n]i64) (is: [n]i64) =
-  #[flattening(only_inner)]
+  #[flattening(only_full)]
   map2 (\x it ->
           let ys = iota x
           let (acc_res, _) =
