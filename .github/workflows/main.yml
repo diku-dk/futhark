@@ -502,7 +502,7 @@ jobs:
              --tuning=tuning_gpu
         slurm-options: -p gpu --time=0-02:00:00 --gres=gpu:a100:1 --job-name=fut-pyopencl-test
 
-  test-webgpu:
+  test-webgpu-browser:
     runs-on: hendrix
     needs: [build-linux-nix]
     if: github.repository == 'diku-dk/futhark'
