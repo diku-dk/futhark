@@ -518,7 +518,7 @@ jobs:
           tools/webgpu/run_webgpu_test.sh
         slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:a100:1 --job-name=fut-webgpu-test
         # These nodes have no Vulkan driver.
-        exclude: hendrixgpu04fl,hendrixfut01fl,hendrixfut03fl
+        exclude: hendrixgpu02fl,hendrixgpu04fl,hendrixgpu14fl,hendrixgpu15fl,hendrixgpu21fl,hendrixfut01fl,hendrixfut03fl
 
   # Runs the WebGPU backend in Node, with WebGPU provided by Dawn and Vulkan
   # by lavapipe, which runs on the CPU.
