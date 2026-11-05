@@ -1,7 +1,7 @@
 -- ==
 -- input { [2i64,2i64,3i64, 7i64, 8i64] }
 -- auto output
--- structure gpu { SegMap/ArrayLit 0 }
+-- structure gpu { Replicate 6 SegMap/ArrayLit 0 }
 
 def main (xs: []i64) =
   #[flattening(only_full)]

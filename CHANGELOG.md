@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Fixed a very rare out-of-bounds access in scans with array operands on GPU
   backends.
 
+* Invalid handling of aliasing in flattening. (#2595)
+
 ## [0.28.2]
 
 ### Added

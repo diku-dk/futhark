@@ -4,7 +4,7 @@
 -- ==
 -- input { [1i64,4i64,0i64,3i64] }
 -- auto output
--- structure gpu { Opaque 1 }
+-- structure gpu { Replicate 0 Opaque 1 }
 
 def main (ns: []i64) =
   #[flattening(only_full)]

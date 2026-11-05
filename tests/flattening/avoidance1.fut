@@ -3,7 +3,7 @@
 -- ==
 -- input { [3i64, 7i64, 10i64, 1i64, 20i64] }
 -- auto output
--- structure gpu { /SegMap 4 /SegScan 1 /Apply/segiota 1 }
+-- structure gpu { Replicate 0 /SegMap 4 /SegScan 1 /Apply/segiota 1 }
 def main (xs: []i64) =
   #[flattening(only_full)]
   map (\x ->

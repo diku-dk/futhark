@@ -1,7 +1,7 @@
 -- ==
 -- input { [10i64,7i64,3i64] [10i64,7i64,3i64]}
 -- auto output
--- structure gpu { /Loop/WhileLoop 1 }
+-- structure gpu { Replicate 9 /Loop/WhileLoop 1 }
 
 def main [n] (xs: [n]i64) (is: [n]i64) =
   #[flattening(only_full)]

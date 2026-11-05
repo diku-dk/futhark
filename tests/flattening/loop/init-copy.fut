@@ -6,7 +6,7 @@
 -- ==
 -- input { [[1i64, 2i64], [3i64, 4i64]] }
 -- output { [[4i64, 5i64], [6i64, 7i64]] }
--- structure gpu { /Replicate 0 /If/False/Replicate 2 }
+-- structure gpu { Replicate 5 /Replicate 0 /If/False/Replicate 2 }
 
 def main [n] [m] (xss: [n][m]i64) : [n][m]i64 =
   map (\xs ->
