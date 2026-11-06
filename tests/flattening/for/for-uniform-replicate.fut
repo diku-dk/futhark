@@ -1,7 +1,7 @@
 -- ==
 -- input { [[1i64, 2i64, 3i64], [4i64, 5i64, 6i64]] }
 -- auto output
--- structure gpu { /Loop/SegMap 2 }
+-- structure gpu { Replicate 1 /Loop/SegMap 2 }
 
 def main [n] [m] (xss: [n][m]i64) =
   #[flattening(only_full)]

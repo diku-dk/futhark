@@ -3,7 +3,7 @@
 -- The basic problem here was that a certificate was used inside the hist
 -- operator that was variant to the enclosing map nest.
 -- ==
--- structure gpu { SegHist 1 }
+-- structure gpu { Replicate 17 SegHist 1 }
 
 def f [n] (keys0: [n]i64) : i64 =
   let (acc, _) =

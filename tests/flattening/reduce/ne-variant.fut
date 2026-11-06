@@ -4,7 +4,7 @@
 -- auto output
 -- input { empty([0]i64) 4i64 }
 -- auto output
--- structure gpu { /SegRed 1 /Apply 0 }
+-- structure gpu { Replicate 0 /SegRed 1 /Apply 0 }
 
 def main (ns: []i64) (k: i64) =
   #[flattening(only_full)]

@@ -170,7 +170,9 @@ transformTopLevelScrema attrs funHasParallelism funSizeParams pat aux w arrs for
           (\i pe -> DistResult (ResTag i) (DistType [] (Rank 0) (patElemType pe)) (patElemName pe))
           [0 ..]
           (patElems nested_pat)
-  env <- flattenScrema ops [] (DistEnv mempty) inps res (nested_pat, aux) (w, arrs, form)
+  env <-
+    freshenSOAC res $
+      flattenScrema ops [] (DistEnv mempty) inps res (nested_pat, aux) (w, arrs, form)
   forM_ (zip (patNames pat) res) $ \(pat_v, r) ->
     case resVar (distResTag r) env of
       Regular v ->
@@ -321,7 +323,8 @@ transformDistStm funSizeParams outer_ops segments env (DistStm inps res (Paralle
           ~[pe] = patElems pat
       flattenBasicOp ops segments env (inps, res', pe, aux, op)
     Op (Screma w arrs form) ->
-      flattenScrema ops segments env inps res (pat, aux) (w, arrs, form)
+      freshenSOAC res $
+        flattenScrema ops segments env inps res (pat, aux) (w, arrs, form)
     Match scrutinees cases defaultCase rt ->
       flattenMatch ops segments env inps res aux scrutinees cases defaultCase rt
     Apply name args rettype s ->
@@ -333,9 +336,11 @@ transformDistStm funSizeParams outer_ops segments env (DistStm inps res (Paralle
     WithAcc inputs lam ->
       flattenWithAcc ops segments env inps res pat aux inputs lam
     Op (Hist w hist_inputs hist_ops bucket_fun) ->
-      flattenHist ops segments env inps res (pat, aux) (w, hist_inputs, hist_ops, bucket_fun)
+      freshenSOAC res $
+        flattenHist ops segments env inps res (pat, aux) (w, hist_inputs, hist_ops, bucket_fun)
     Op (FlatMap w arrs lam) ->
-      flattenFlatMapNested ops segments env inps res aux w arrs lam
+      freshenSOAC res $
+        flattenFlatMapNested ops segments env inps res aux w arrs lam
     Op (Stream {}) -> error "transformDistStm: Stream should have been removed"
     Op (JVP {}) -> error "Unhandled JVP"
     Op (VJP {}) -> error "Unhandled VJP"
@@ -377,6 +382,39 @@ liftUniformFunBody attrs funHasParallelism funSizeParams lvl w inputs env dstms 
       ops = flattenOpsFor attrs funHasParallelism funSizeParams DistributeIrregular lvl
   env' <- foldM (flattenDistStm ops segments) env dstms
   concat <$> zipWithM (liftRegResult lvl segments w inputs env') rettype result
+
+-- | Flatten a SOAC, copying those of its results that would otherwise alias
+-- something. This is because a SOAC result is fresh, and so must be the results
+-- of applying flattening to the SOAC, which is not the case if the body is e.g.
+-- a slice or a transpose.
+freshenSOAC :: [DistResult] -> FlattenM DistEnv -> FlattenM DistEnv
+freshenSOAC res m = do
+  (env, stms) <- collectStms m
+  addStms stms
+  let vs = map (repArray . (`resVar` env) . distResTag) res
+      -- Transitive aliases of each result, including names bound in 'stms'.
+      als = bodyAliases $ analyseBody mempty $ Body () stms (varsRes vs)
+      bound = boundByStms stms
+  snd <$> foldM (freshen bound) (mempty, env) (zip3 res vs als)
+  where
+    -- Only the data array of an irregular representation can be consumed.
+    repArray (Regular v) = v
+    repArray (Irregular irreg) = irregularD irreg
+
+    freshen bound (taken, env) (r, v, v_als) = do
+      v_t <- lookupType v
+      let v_all = oneName v <> v_als
+          aliases_outside = v_all `namesSubtract` bound /= mempty
+      case v_t of
+        Array {}
+          | aliases_outside || v_all `namesIntersect` taken -> do
+              v' <- letExp (baseName v <> "_fresh") $ BasicOp $ Replicate mempty $ Var v
+              env' <- insertRepM (distResTag r) (replaceArray v' $ resVar (distResTag r) env) env
+              pure (taken, env')
+        _ -> pure (taken <> v_all, env)
+
+    replaceArray v' (Regular _) = Regular v'
+    replaceArray v' (Irregular irreg) = Irregular irreg {irregularD = v'}
 
 -- | A lifted function must return fresh, non-aliasing arrays (as it
 -- corresponds to 'map f'; see 'liftRetType').  This is not

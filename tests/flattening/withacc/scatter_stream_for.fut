@@ -3,7 +3,7 @@
 -- auto output
 -- input { [true,true,true,true,true] [1i64,-1,2,3,4] [1i64,2,3,4,5] }
 -- auto output
--- structure gpu { /WithAcc/If 1 }
+-- structure gpu { Replicate 3 /WithAcc/If 1 }
 
 import "../../accs/intrinsics"
 

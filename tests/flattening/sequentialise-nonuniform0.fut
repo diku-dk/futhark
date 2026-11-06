@@ -3,7 +3,7 @@
 -- generated for it.
 -- ==
 -- random input { [100]i32 } auto output
--- structure gpu { SegMap 1 SegScan 0 SegRed 0 }
+-- structure gpu { Replicate 0 SegMap 1 SegScan 0 SegRed 0 }
 
 def main (ns: []i32) =
   #[flattening(only_full)]

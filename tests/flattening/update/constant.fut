@@ -2,7 +2,7 @@
 -- ==
 -- input { [1i64,2i64,3i64] }
 -- output { [12i64,11i64,10i64] }
--- structure gpu { /SegRed 1 /SegMap/Update 1 }
+-- structure gpu { Replicate 0 /SegRed 1 /SegMap/Update 1 }
 
 entry main [n] (xs: [n]i64) =
   #[flattening(only_full)]

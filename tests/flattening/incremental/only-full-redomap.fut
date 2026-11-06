@@ -4,7 +4,7 @@
 -- ==
 -- input { [[1i64, 2i64], [3i64, 4i64]] [5i64, 6i64] }
 -- auto output
--- structure gpu { If 0 }
+-- structure gpu { Replicate 0 If 0 }
 
 def main [n] [m] (xss: [n][m]i64) (ys: [m]i64) =
   #[flattening(only_full)]

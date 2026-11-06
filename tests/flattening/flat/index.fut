@@ -3,7 +3,7 @@
 --         [0i64, 1i64, 2i64, 3i64, 4i64, 5i64, 6i64, 7i64, 8i64, 9i64] }
 -- auto output
 -- structure { FlatIndex 1 }
--- structure gpu { FlatIndex 0 }
+-- structure gpu { Replicate 3 FlatIndex 0 }
 
 entry main (ns: []i64) (xs: []i64) : []i64 =
   #[flattening(only_full)]

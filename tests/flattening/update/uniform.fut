@@ -2,7 +2,7 @@
 -- ==
 -- input { [4i64,5i64,6i64] }
 -- auto output
--- structure gpu { WithAcc 0 Update 1 }
+-- structure gpu { Replicate 2 WithAcc 0 Update 1 }
 
 entry main [n] (xs: [n]i64) =
   #[flattening(only_full)]

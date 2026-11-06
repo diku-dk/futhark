@@ -9,7 +9,7 @@
 -- ==
 -- input { [1i64,4i64,0i64,3i64] }
 -- auto output
--- structure gpu { /SegScan 4 /Apply/segiota 4 /Apply/repiota 4 /Apply/partition 1 }
+-- structure gpu { Replicate 6 /SegScan 4 /Apply/segiota 4 /Apply/repiota 4 /Apply/partition 1 }
 
 def main (ns: []i64) =
   #[flattening(only_full)]

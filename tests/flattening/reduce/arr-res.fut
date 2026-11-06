@@ -2,7 +2,7 @@
 -- ==
 -- input { 3i64 4i64 }
 -- auto output
--- structure gpu { /SegMap 1 /SegRed 1 }
+-- structure gpu { Replicate 2 /SegMap 1 /SegRed 1 }
 
 def main (m: i64) (n: i64) : [n][n]f32 =
   #[flattening(only_full)]

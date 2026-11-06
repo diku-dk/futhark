@@ -2,7 +2,7 @@
 -- ==
 -- input { [3i64,3i64,3i64] }
 -- output { [7i64,7i64,7i64] }
--- structure gpu { /WithAcc 1 /Apply/segiota 1 /Apply/repiota 1 Update 0 }
+-- structure gpu { Replicate 1 /WithAcc 1 /Apply/segiota 1 /Apply/repiota 1 Update 0 }
 
 entry main (vs: []i64) =
   #[flattening(only_full)]
