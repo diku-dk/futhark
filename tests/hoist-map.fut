@@ -1,6 +1,7 @@
 -- If we don't hoist very aggressively here, this will not run
 -- correctly with the GPU backends.
 -- ==
+-- tags { no_webgpu }
 -- compiled random input { [100][64]i32 } auto output
 
 local

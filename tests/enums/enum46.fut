@@ -1,5 +1,6 @@
 -- The scrutinee of a 'match' expression is fully evaluated before the branches.
 -- ==
+-- tags { no_webgpu }
 
 def main (xs: *[]i32) =
   match xs[0]

@@ -1,5 +1,6 @@
 -- Tiling a redomap when not all of the arrays are invariant.
 -- ==
+-- tags { no_webgpu }
 -- compiled random input { [256][256]f32 [256]f32 } auto output
 -- compiled random input { [256][10]f32 [256]f32 } auto output
 -- structure gpu { SegMap/Loop/SegMap 2 }

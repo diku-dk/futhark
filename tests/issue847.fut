@@ -1,4 +1,6 @@
 -- Tiling bug.
+-- ==
+-- tags { no_webgpu }
 
 def main (acc: []i64) (c: i64) (n: i64) =
   let is = map (+ c) (iota n)

@@ -1,6 +1,7 @@
 -- Map returning an array predicated on the index variable.
 --
 -- ==
+-- tags { no_webgpu }
 -- input { 2i64 }
 -- output { [[0], [1]] }
 

@@ -60,6 +60,7 @@ def merge_sort_by_key [n] 't 'k (key: t -> k) ((<=): k -> k -> bool) (xs: [n]t) 
   |> map (\(_, i) -> xs[i])
 
 -- ==
+-- tags { no_webgpu }
 -- entry: sort_i32
 -- input { empty([0]i32) }
 -- output { empty([0]i32) }

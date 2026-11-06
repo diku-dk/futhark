@@ -489,6 +489,13 @@ man_pages: List[Tuple[str, str, str, List[Any], int]] = [
         [],
         1,
     ),
+    (
+        "man/futhark-webgpu",
+        "futhark-webgpu",
+        "compile Futhark to WebAssembly and WebGPU",
+        [],
+        1,
+    ),
     ("man/futhark-run", "futhark-run", "interpret Futhark program", [], 1),
     (
         "man/futhark-repl",

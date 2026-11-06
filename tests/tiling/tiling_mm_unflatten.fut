@@ -3,6 +3,7 @@
 -- is followed by an elementwise activation.  The multiplication must
 -- still be tiled.
 -- ==
+-- tags { no_webgpu }
 -- compiled random input { [64][100]f32 [100][8][16]f32 } auto output
 -- structure gpu { SegMap/Loop/SegMap 1 SegMap/SegMap 2 }
 

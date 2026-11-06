@@ -1,6 +1,7 @@
 -- SGEMM  performs the matrix-matrix operation:
 --    C := alpha * A * B + beta * C
 -- ==
+-- tags { no_webgpu }
 -- entry: main1 main2
 -- no_python compiled random input { [1024][1024]f32 [1024][1024]f32 [1024][1024]f32 0.5f32 0.75f32} auto output
 

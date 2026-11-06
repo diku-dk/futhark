@@ -1,7 +1,7 @@
 -- Scan with linear function composition.
 -- MatrixMul case
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_webgpu }
 -- entry: fwd_J rev_J fwd_vec_J rev_vec_J
 -- input { [[1f32, 2f32], [4f32, 3f32], [3f32, 4f32], [4f32, 2f32]] }
 -- output {

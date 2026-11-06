@@ -68,4 +68,5 @@ the `development blog <https://futhark-lang.org/blog.html>`_.
    man/futhark-test.rst
    man/futhark-wasm-multicore.rst
    man/futhark-wasm.rst
+   man/futhark-webgpu.rst
    man/futhark.rst

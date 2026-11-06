@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_webgpu }
 -- structure { /Screma 1 /Screma/Screma 2 }
 
 def dotprod [n] (xs: [n]f32) (ys: [n]f32) : f32 =

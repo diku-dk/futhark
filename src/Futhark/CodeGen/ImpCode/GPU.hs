@@ -8,8 +8,11 @@ module Futhark.CodeGen.ImpCode.GPU
     KernelConstExp,
     HostOp (..),
     KernelOp (..),
+    isBarrier,
     Fence (..),
     AtomicOp (..),
+    atomicOpMem,
+    atomicOpType,
     BlockDim,
     Kernel (..),
     KernelUse (..),
@@ -181,6 +184,7 @@ data KernelOp
     -- warp. Only supported for CUDA and HIP.
     WarpSync
   | SharedAlloc VName (Count Bytes (TExp Int64))
+  | UniformRead VName VName (Count Elements (TExp Int64)) PrimType Space
   | -- | Perform a barrier and also check whether any
     -- threads have failed an assertion.  Make sure all
     -- threads would reach all 'ErrorSync's if any of them
@@ -189,6 +193,13 @@ data KernelOp
     -- control flow or similar.
     ErrorSync Fence
   deriving (Show)
+
+-- | Whether this is a barrier, which must be reached by all threads of the
+-- block.
+isBarrier :: KernelOp -> Bool
+isBarrier Barrier {} = True
+isBarrier ErrorSync {} = True
+isBarrier _ = False
 
 -- | Atomic operations return the value stored before the update. This
 -- old value is stored in the first 'VName' (except for
@@ -210,6 +221,36 @@ data AtomicOp
     -- value is not read.
     AtomicWrite PrimType VName (Count Elements (TExp Int64)) Exp
   deriving (Show)
+
+-- | The memory block updated by an atomic operation.
+atomicOpMem :: AtomicOp -> VName
+atomicOpMem (AtomicAdd _ _ mem _ _) = mem
+atomicOpMem (AtomicFAdd _ _ mem _ _) = mem
+atomicOpMem (AtomicSMax _ _ mem _ _) = mem
+atomicOpMem (AtomicSMin _ _ mem _ _) = mem
+atomicOpMem (AtomicUMax _ _ mem _ _) = mem
+atomicOpMem (AtomicUMin _ _ mem _ _) = mem
+atomicOpMem (AtomicAnd _ _ mem _ _) = mem
+atomicOpMem (AtomicOr _ _ mem _ _) = mem
+atomicOpMem (AtomicXor _ _ mem _ _) = mem
+atomicOpMem (AtomicCmpXchg _ _ mem _ _ _) = mem
+atomicOpMem (AtomicXchg _ _ mem _ _) = mem
+atomicOpMem (AtomicWrite _ mem _ _) = mem
+
+-- | The type of the element updated by an atomic operation.
+atomicOpType :: AtomicOp -> PrimType
+atomicOpType (AtomicAdd t _ _ _ _) = IntType t
+atomicOpType (AtomicFAdd t _ _ _ _) = FloatType t
+atomicOpType (AtomicSMax t _ _ _ _) = IntType t
+atomicOpType (AtomicSMin t _ _ _ _) = IntType t
+atomicOpType (AtomicUMax t _ _ _ _) = IntType t
+atomicOpType (AtomicUMin t _ _ _ _) = IntType t
+atomicOpType (AtomicAnd t _ _ _ _) = IntType t
+atomicOpType (AtomicOr t _ _ _ _) = IntType t
+atomicOpType (AtomicXor t _ _ _ _) = IntType t
+atomicOpType (AtomicCmpXchg t _ _ _ _ _) = t
+atomicOpType (AtomicXchg t _ _ _ _) = t
+atomicOpType (AtomicWrite t _ _ _) = t
 
 instance FreeIn AtomicOp where
   freeIn' (AtomicAdd _ _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
@@ -261,6 +302,16 @@ instance Pretty KernelOp where
     "error_sync_local()"
   pretty (ErrorSync FenceGlobal) =
     "error_sync_global()"
+  pretty (UniformRead name v is bt space') =
+    pretty name
+      <+> "<-"
+      <+> "read_uniform"
+      <> parens
+        ( commasep
+            [ pretty v <> langle <> pretty bt <> pretty space' <> rangle,
+              pretty is
+            ]
+        )
   pretty (Atomic _ (AtomicAdd t old arr ind x)) =
     pretty old
       <+> "<-"

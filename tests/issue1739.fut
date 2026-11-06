@@ -1,3 +1,5 @@
+-- ==
+-- tags { no_webgpu }
 entry main [n] [m] (xs: [3][3]f32) (as: *[n][m]f32) =
   let f i =
     let v = filter (> 0) as[i] ++ as[i]

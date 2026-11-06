@@ -1,5 +1,6 @@
 -- Simple 1D tiling
 -- ==
+-- tags { no_webgpu }
 -- compiled random input { [100]i32 } auto output
 -- structure gpu { SegMap/Loop/SegMap 2 }
 

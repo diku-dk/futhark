@@ -1,5 +1,6 @@
 -- 2D tiling when not all of the arrays are invariant.
 -- ==
+-- tags { no_webgpu }
 -- compiled random input {
 --   [256][256]i32
 --   [256][256]i32

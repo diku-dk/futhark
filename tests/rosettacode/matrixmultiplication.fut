@@ -3,6 +3,7 @@
 -- Matrix multiplication written in a functional style.
 --
 -- ==
+-- tags { no_webgpu }
 -- input {
 --   [ [1,2], [3,4] ]
 --   [ [5,6], [7,8] ]

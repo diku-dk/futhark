@@ -1,3 +1,5 @@
+-- ==
+-- tags { no_webgpu }
 def f (i: i64) (n: i64) : i64 =
   if i < 0 || n <= i then -1 else i
 

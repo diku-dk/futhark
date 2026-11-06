@@ -1,4 +1,6 @@
 -- | file: error.fut
+-- ==
+-- tags { no_webgpu }
 
 module type map = {
   type~ map [n]

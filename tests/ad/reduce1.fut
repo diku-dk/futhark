@@ -1,6 +1,6 @@
 -- Reduce with 2x2 matrix multiplication.
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_webgpu }
 -- entry: fwd_map rev_map fwd_vec rev_vec
 -- input { [[1f32,2f32,3f32,4f32], [4f32,3f32,2f32,1f32], [1f32,2f32,3f32,4f32], [4f32,3f32,2f32,1f32]] }
 -- output {
