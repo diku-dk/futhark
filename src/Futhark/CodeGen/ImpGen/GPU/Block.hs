@@ -125,6 +125,9 @@ crossesSegment :: Imp.TExp Int64 -> Imp.TExp Int32 -> Imp.TExp Int32 -> Imp.TExp
 crossesSegment segment_size from to =
   (to - from) .>. (to `rem` sExt32 segment_size)
 
+-- | Scan the @w@ first elements of the given arrays in-place. The scan is done
+-- one block-sized chunk at a time, but @seg_flag@ is passed indexes relative to
+-- the whole array.
 virtualisedBlockScan ::
   Maybe (Imp.TExp Int32 -> Imp.TExp Int32 -> Imp.TExp Bool) ->
   Imp.TExp Int32 ->
@@ -136,10 +139,13 @@ virtualisedBlockScan seg_flag w lam arrs = do
     constants <- kernelConstants <$> askEnv
     let ltid = kernelLocalThreadId constants
         crosses_segment =
-          case seg_flag of
-            Nothing -> false
-            Just flag_true ->
-              flag_true (sExt32 (chunk_start - 1)) (sExt32 chunk_start)
+          maybe
+            false
+            (\flag_true -> flag_true (chunk_start - 1) chunk_start)
+            seg_flag
+        -- Shift indexes from chunk-local to global.
+        shifted flag_true from to =
+          flag_true (chunk_start + from) (chunk_start + to)
     sComment "possibly incorporate carry" . localOps threadOperations $
       sWhen (chunk_start .>. 0 .&&. ltid .==. 0 .&&. bNot crosses_segment) $ do
         carry_idx <- dPrimVE "carry_idx" $ sExt64 chunk_start - 1
@@ -154,7 +160,7 @@ virtualisedBlockScan seg_flag w lam arrs = do
 
     sOp $ Imp.ErrorSync Imp.FenceLocal
 
-    blockScan seg_flag (sExt64 w) (tvExp chunk_size) lam arrs_chunks
+    blockScan (shifted <$> seg_flag) (sExt64 w) (tvExp chunk_size) lam arrs_chunks
 
 -- | Semantically, a block-level statement finishes before the next one. This
 -- means that any statement that writes memory must be enclosed in barriers, as
