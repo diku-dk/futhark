@@ -9,4 +9,4 @@
 
 def main xsss =
   #[flattening(only_intra)]
-  map (\xss -> #[intrablock_virtualise] map (scan (+) 0i32) xss) xsss
+  map (\xss -> map (scan (+) 0i32) xss) xsss

@@ -263,11 +263,7 @@ bindPatToRes pat res = forM_ (zip (patNames pat) res) $ \(pe_v, v) ->
 intrablockStm :: InBlockMapTransformer -> Stm SOACS -> FlattenM ()
 intrablockStm map_in_block stm@(Let pat aux e) = do
   scope <- askScope
-  let lvl
-        | "intrablock_virtualise" `inAttrs` stmAuxAttrs aux =
-            SegThreadInBlock SegVirt
-        | otherwise =
-            SegThreadInBlock SegNoVirt
+  let lvl = SegThreadInBlock SegVirt
 
   case e of
     Loop merge form loopbody ->

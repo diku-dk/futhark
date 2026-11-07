@@ -9,4 +9,4 @@
 
 def main xsss =
   #[flattening(only_intra)]
-  map (\xss -> #[intrablock_virtualise] map i32.sum xss) xsss
+  map (\xss -> map i32.sum xss) xsss
