@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Invalid handling of aliasing in flattening. (#2595)
 
+* Invalid short-circuiting could cause a compiler crash. (#2597)
+
 ## [0.28.2]
 
 ### Added
