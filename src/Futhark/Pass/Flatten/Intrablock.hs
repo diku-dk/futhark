@@ -11,6 +11,7 @@ where
 import Control.Monad
 import Control.Monad.RWS
 import Control.Monad.State
+import Data.Bitraversable
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Set qualified as S
@@ -70,36 +71,35 @@ findParallelism = S.toList . flip execState mempty . onKernelBody
       onKernelBody $ segBody op
     onOp _ = pure ()
 
-onlyNonVirt :: [([SubExp], SegVirt)] -> [[SubExp]]
+onlyNonVirt :: [(a, SegVirt)] -> [a]
 onlyNonVirt = mapMaybe f
   where
     f (_, SegVirt) = Nothing
     f (ws, _) = Just ws
 
-computeThreadBlockSize :: [[SubExp]] -> FlattenM (SubExp, SubExp)
-computeThreadBlockSize [] = do
-  tblock_size <- getSize "tblock_size" SizeThreadBlock
-  pure (tblock_size, tblock_size)
+computeThreadBlockSize ::
+  [([SubExp], SegVirt)] ->
+  FlattenM (SubExp, Count BlockSize SubExp)
 computeThreadBlockSize wss = do
-  ws <-
-    mapM (letSubExp "one_intra_par" <=< foldBinOp' (Mul Int64 OverflowUndef)) $
-      filter (not . null) wss
+  let prod = letSubExp "one_intra_par" <=< foldBinOp' (Mul Int64 OverflowUndef)
+  ws <- mapM (bitraverse prod pure) $ filter (not . null . fst) wss
 
   -- The amount of parallelism available *in the worst case* is equal to the
   -- smallest parallel loop.
   intra_avail_par <-
-    letSubExp "intra_avail_par" =<< foldBinOp' (SMin Int64) ws
+    letSubExp "intra_avail_par" =<< foldBinOp' (SMin Int64) (map fst ws)
 
-  tblock_size <- newVName "computed_tblock_size"
-
-  -- The group size is either the maximum of the minimum parallelism exploited,
-  -- or the desired parallelism (bounded by the max group size) in case there is
-  -- no minimum, but in all cases at least one.
-  letBindNames [tblock_size]
-    =<< if null ws
-      then eSubExp =<< letSubExp "max_tblock_size" (Op $ SizeOp $ GetSizeMax SizeThreadBlock)
-      else foldBinOp' (SMax Int64) (intConst Int64 1 : ws)
-  pure (intra_avail_par, Var tblock_size)
+  -- If we have purely virtualised SegOps, then the thread block size can be set
+  -- freely, but otherwise it must fit all the non-virtualised SegOps. Note that
+  -- in the virtualised case, we do not cap the block size by the actual
+  -- exploitable parallelism. This is to ensure that the block size is
+  -- statically known when the kernel is compiled, which can result in much
+  -- better code generation.
+  tblock_size <-
+    case onlyNonVirt ws of
+      [] -> getSize "tblock_size" SizeThreadBlock
+      ws' -> letSubExp "tblock_size" =<< foldBinOp' (SMax Int64) (intConst Int64 1 : ws')
+  pure (intra_avail_par, Count tblock_size)
 
 -- | Check whether this result is actually something that is acceptable to use:
 -- the parallel dimensions must all be bound outside the kernel, as nonuniform
@@ -167,7 +167,7 @@ intrablockParallelise map_in_block segments env inps dist_res _pat aux w arrs la
           letSubExp "intra_num_tblocks"
             =<< foldBinOp' (Mul Int64 OverflowUndef) new_segments
         (intra_avail_par, tblock_size) <-
-          computeThreadBlockSize $ onlyNonVirt wss
+          computeThreadBlockSize wss
         gtids <- mapM (const $ newVName "gtid") new_segments
         kspace <- mkSegSpace $ zip gtids new_segments
         pure (intra_avail_par, tblock_size, kspace, num_tblocks)
@@ -182,7 +182,7 @@ intrablockParallelise map_in_block segments env inps dist_res _pat aux w arrs la
 
     let kbody' = kbody {bodyStms = read_input_stms <> bodyStms kbody}
         rts = map (length new_segments `stripArray`) result_ts
-        grid = KernelGrid (Count num_tblocks) (Count tblock_size)
+        grid = KernelGrid (Count num_tblocks) tblock_size
         lvl = SegBlock SegNoVirt (Just grid)
         kstm = Let nested_pat aux $ Op $ SegOp $ SegMap lvl kspace rts kbody'
 
@@ -190,7 +190,7 @@ intrablockParallelise map_in_block segments env inps dist_res _pat aux w arrs la
       IntrablockResult
         { intraMinPar = intra_avail_par,
           intraAvailPar = intra_avail_par,
-          intraThreadBlockSize = tblock_size,
+          intraThreadBlockSize = unCount tblock_size,
           intraPreludeStms = input_prelude_stms <> prelude_stms,
           intraKernelStms = oneStm kstm,
           intraResultNames = patNames nested_pat
