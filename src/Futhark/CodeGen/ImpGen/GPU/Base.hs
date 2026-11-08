@@ -450,7 +450,9 @@ inChunkScan constants seg_flag arrs_full_size lockstep_width block_size active a
 blockScanChunkSize :: (Num a) => a
 blockScanChunkSize = 32
 
--- | Scan the @w@ first elements of the given arrays, in place.
+-- | Scan the @w@ first elements of the given arrays, in place. @w@ must be at
+-- most the thread block size; you'll need to wrap this function in a loop if
+-- you want to scan larger arrays.
 --
 -- An array-typed element is kept twice: at index @i@, where the result is
 -- expected, and again at index @i + arrs_full_size@. It is the latter copy that

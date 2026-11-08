@@ -611,7 +611,7 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
         blockScan
           crossesSegment
           tblock_size_e
-          num_virt_threads
+          tblock_size_e
           scan_op1
           prefixArrays
 
