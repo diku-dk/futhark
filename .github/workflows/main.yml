@@ -545,12 +545,16 @@ jobs:
         script: |
           set -e
           hostname
-          futhark test tests --no-terminal \
+          # The bind policy exempts the processes from automatic NUMA
+          # balancing, whose page migration races with the GPU's DMA to
+          # pageable host memory on this node, causing intermittent GPU page
+          # faults in host-device copies.
+          numactl --membind=0,1 futhark test tests --no-terminal \
             --backend=hip \
             --tuning=tuning_gpu \
             --concurrency=8
           source virtualenv/bin/activate
-          FUTHARK_BACKEND=hip make -C tests_lib/c -j
+          FUTHARK_BACKEND=hip numactl --membind=0,1 make -C tests_lib/c -j
 
   test-wasm:
     runs-on: ubuntu-24.04

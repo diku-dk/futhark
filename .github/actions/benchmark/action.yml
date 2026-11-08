@@ -15,6 +15,10 @@ inputs:
     description: 'Options to pass to srun'
     required: false
     default: ''
+  wrapper:
+    description: 'Command prefix for running the benchmarks (e.g. numactl)'
+    required: false
+    default: ''
   exclude:
     description: 'Comma-separated list of nodes that srun must not use'
     required: false
@@ -37,7 +41,7 @@ runs:
           hostname
           module unload cuda
           module load cuda/12.2
-          futhark bench futhark-benchmarks \
+          ${{inputs.wrapper}} futhark bench futhark-benchmarks \
             --backend ${{inputs.backend}} \
             --exclude no_${{inputs.system}} \
             --json futhark-${{inputs.backend}}-${{inputs.system}}-$GITHUB_SHA.json \
