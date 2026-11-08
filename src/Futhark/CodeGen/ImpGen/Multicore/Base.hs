@@ -38,6 +38,7 @@ import Futhark.CodeGen.ImpGen
 import Futhark.Error
 import Futhark.IR.MCMem
 import Futhark.Transform.Rename
+import Futhark.Util (nubOrd)
 import Prelude hiding (quot, rem)
 
 -- | Is there an atomic t'BinOp' corresponding to this t'BinOp'?
@@ -107,13 +108,15 @@ getIterationDomain _ space = do
     _ -> pure $ product $ init ns_64
 
 -- When the SegRed's return value is a scalar
--- we perform a call by value-result in the segop function
+-- we perform a call by value-result in the segop function.  Several
+-- array results may reside in the same memory block (e.g. after
+-- short-circuiting), so the parameters are deduplicated.
 getReturnParams :: Pat LetDecMem -> SegOp () MCMem -> MulticoreGen [Imp.Param]
 getReturnParams pat SegRed {} =
   -- It's a good idea to make sure any prim values are initialised, as
   -- we will load them (redundantly) in the task code, and
   -- uninitialised values are UB.
-  fmap concat . forM (patElems pat) $ \pe -> do
+  fmap (nubOrd . concat) . forM (patElems pat) $ \pe -> do
     case patElemType pe of
       Prim pt -> patElemName pe <~~ ValueExp (blankPrimValue pt)
       _ -> pure ()
