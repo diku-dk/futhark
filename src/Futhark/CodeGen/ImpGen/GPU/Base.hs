@@ -17,7 +17,6 @@ module Futhark.CodeGen.ImpGen.GPU.Base
     blockReduce,
     warpLocal,
     blockScan,
-    blockScanChunkSize,
     blockLoop,
     peeledKernelLoop,
     isActive,
@@ -444,10 +443,10 @@ inChunkScan constants seg_flag arrs_full_size lockstep_width block_size active a
       copyDWIM (paramName y) [] (Var $ paramName x) []
 
 -- | 'blockScan' splits the block into chunks of this size, which are scanned
--- separately.  The only requirement is that it should not be less than the
--- square root of the block size.  With 32, we will work on blocks of size 1024
--- or smaller, which fits every device Troels has seen.  Still, it would be
--- nicer if it were a runtime parameter.  Some day.
+-- separately. The only requirement is that it should not be less than the
+-- square root of the block size. With 32, we will work on blocks of size 1024
+-- or smaller, which fits every device Troels has seen. Still, it would be nicer
+-- if it were a runtime parameter. Some day.
 blockScanChunkSize :: (Num a) => a
 blockScanChunkSize = 32
 
@@ -456,11 +455,12 @@ blockScanChunkSize = 32
 -- An array-typed element is kept twice: at index @i@, where the result is
 -- expected, and again at index @i + arrs_full_size@. It is the latter copy that
 -- a thread reads as its x operand, because the operator writes its result
--- through its x parameter, which may well be the former. The elements from
--- index @arrs_full_size + 'blockScanChunkSize'@ on are then used to save the
--- elements of the first chunk, which are overwritten with the per-chunk
--- carry-ins. Only the @w@ first elements need be within the /shape/ of the
--- arrays, but all of the above must be backed by memory; see
+-- through its x parameter, which may well be the former. With @k@ chunks, the
+-- first @k@ elements are overwritten while computing the per-chunk carry-ins,
+-- so they are saved at indexes @arrs_full_size + k@ to @arrs_full_size + 2k@,
+-- whose copies are not needed by then. Only the @w@ first elements need be
+-- within the /shape/ of the arrays, but the indexes from @arrs_full_size@ to
+-- @arrs_full_size + w@ must also be backed by memory; see
 -- 'Futhark.CodeGen.ImpGen.GPU.Block.blockScanElems'.
 --
 -- The callers in "Futhark.CodeGen.ImpGen.GPU.SegScan.TwoPass" and
@@ -528,19 +528,24 @@ blockScan seg_flag arrs_full_size w lam arrs = localOps threadOperations $ do
   doInChunkScan seg_flag ltid_in_bounds lam
   barrier
 
+  -- With more than one chunk, the first 'num_chunks' elements are overwritten
+  -- by the chunk results, which are then scanned to produce the carry-ins.
+  num_chunks <- dPrimVE "num_chunks" $ sExt32 $ w `ceilDiv` blockScanChunkSize
   let is_first_block = chunk_id .==. 0
+      several_chunks = num_chunks .>. 1
+      scans_carries = several_chunks .&&. ltid32 .<. num_chunks
   when array_scan $ do
     sComment "save correct values for first block" $
-      sWhen is_first_block $
+      sWhen scans_carries $
         forM_ (zip x_params arrs) $ \(x, arr) ->
           unless (isPrimParam x) $
-            copyDWIMFix arr [arrs_full_size + sExt64 chunk_size + ltid] (Var $ paramName x) []
+            copyDWIMFix arr [arrs_full_size + sExt64 num_chunks + ltid] (Var $ paramName x) []
 
     barrier
 
   let last_in_block = in_chunk_id .==. chunk_size - 1
   sComment "last thread of block 'i' writes its result to offset 'i'" $
-    sWhen (last_in_block .&&. ltid_in_bounds) $
+    sWhen (several_chunks .&&. last_in_block .&&. ltid_in_bounds) $
       everythingVolatile $
         zipWithM_ writeBlockResult x_params arrs
 
@@ -552,20 +557,20 @@ blockScan seg_flag arrs_full_size w lam arrs = localOps threadOperations $ do
           flag_true (from * chunk_size + chunk_size - 1) (to * chunk_size + chunk_size - 1)
   sComment
     "scan the first block, after which offset 'i' contains carry-in for block 'i+1'"
-    $ doInChunkScan first_block_seg_flag (is_first_block .&&. ltid_in_bounds) renamed_lam
+    $ doInChunkScan first_block_seg_flag scans_carries renamed_lam
 
   errorsync
 
   when array_scan $ do
     sComment "move correct values for first block back a block" $
-      sWhen is_first_block $
+      sWhen scans_carries $
         forM_ (zip x_params arrs) $ \(x, arr) ->
           unless (isPrimParam x) $
             copyDWIMFix
               arr
               [arrs_full_size + ltid]
               (Var arr)
-              [arrs_full_size + sExt64 chunk_size + ltid]
+              [arrs_full_size + sExt64 num_chunks + ltid]
 
     barrier
 
@@ -602,7 +607,7 @@ blockScan seg_flag arrs_full_size w lam arrs = localOps threadOperations $ do
   barrier
 
   sComment "restore correct values for first block" $
-    sWhen (is_first_block .&&. ltid_in_bounds) $
+    sWhen scans_carries $
       forM_ (zip3 x_params y_params arrs) $ \(_x, y, arr) ->
         if isPrimParam y
           then copyDWIMFix arr [ltid] (Var $ paramName y) []

@@ -31,6 +31,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Invalid short-circuiting could cause a compiler crash. (#2597)
 
+* Execution errors with array-operator scans with nonstandard tuning settings.
+
 ## [0.28.2]
 
 ### Added

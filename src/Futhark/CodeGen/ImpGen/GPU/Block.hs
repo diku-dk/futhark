@@ -396,12 +396,11 @@ blockAlloc dest _ _ =
 
 -- | How many elements an operand array for 'blockScan' must be backed by, given
 -- the number of elements actually scanned and the return types of the operator.
--- Array-typed elements are kept twice over, with some scratch space past that;
--- see 'blockScan'.
+-- Array-typed elements are kept twice over; see 'blockScan'.
 blockScanElems :: Imp.TExp Int64 -> [Type] -> Imp.TExp Int64
 blockScanElems n ts
   | all primType ts = n
-  | otherwise = 2 * n + 2 * blockScanChunkSize
+  | otherwise = 2 * n
 
 -- | A shared memory array of @elems@ values of type @elem_t@, staging the
 -- operands of a 'blockScan' or 'blockReduce'. Note that 'blockScan' needs
