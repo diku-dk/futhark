@@ -640,12 +640,15 @@ compileSegScan pat lvl space ts scans kbody post_op = do
 
   -- The stage-2 block size is a tunable/user-settable parameter.  It
   -- is independent of stage1_num_tblocks so the autotuner can treat
-  -- it as a fixed knob.
+  -- it as a fixed knob.  It may not exceed the number of stage-1
+  -- threads, because the memory of array-typed operator parameters
+  -- is allocated for that many threads.
   stage2_tblock_size_param <- getSize "segscan_stage2_tblock_size" SizeThreadBlock
   stage2_tblock_size <-
     fmap (Imp.Count . tvSize) $
       dPrimV "stage2_tblock_size" $
-        tvExp stage2_tblock_size_param
+        sMin64 (tvExp stage2_tblock_size_param) $
+          pe64 (unCount (kAttrNumBlocks attrs)) * pe64 (unCount (kAttrBlockSize attrs))
 
   let shpT op = (segBinOpShape op,) <$> lambdaReturnType (segBinOpLambda op)
       scan_ts = concatMap shpT scans
