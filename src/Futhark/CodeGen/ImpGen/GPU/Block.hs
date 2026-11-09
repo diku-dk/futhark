@@ -125,6 +125,24 @@ crossesSegment :: Imp.TExp Int64 -> Imp.TExp Int32 -> Imp.TExp Int32 -> Imp.TExp
 crossesSegment segment_size from to =
   (to - from) .>. (to `rem` sExt32 segment_size)
 
+-- | Given a chunk offset, adjust a segment predicate ('crossesSegment') defined
+-- in terms of whole-array indexes to instead be defined in terms of chunk-local
+-- indexes. Also returns whether the chunk begins a new segment. This is used to
+-- process segmented reductions and scans that are chunked.
+chunkSegFlags ::
+  Maybe (Imp.TExp Int32 -> Imp.TExp Int32 -> Imp.TExp Bool) ->
+  Imp.TExp Int32 ->
+  ( Imp.TExp Bool,
+    Maybe (Imp.TExp Int32 -> Imp.TExp Int32 -> Imp.TExp Bool)
+  )
+chunkSegFlags seg_flag chunk_start =
+  ( maybe false (\flag_true -> flag_true (chunk_start - 1) chunk_start) seg_flag,
+    fmap shifted seg_flag
+  )
+  where
+    shifted flag_true from to =
+      flag_true (chunk_start + from) (chunk_start + to)
+
 -- | Scan the @w@ first elements of the given arrays in-place. The scan is done
 -- one block-sized chunk at a time, but @seg_flag@ is passed indexes relative to
 -- the whole array.
@@ -136,16 +154,8 @@ virtualisedBlockScan ::
   InKernelGen ()
 virtualisedBlockScan seg_flag w lam arrs = do
   blockChunkLoop w $ \chunk_start chunk_size -> do
-    constants <- kernelConstants <$> askEnv
-    let ltid = kernelLocalThreadId constants
-        crosses_segment =
-          maybe
-            false
-            (\flag_true -> flag_true (chunk_start - 1) chunk_start)
-            seg_flag
-        -- Shift indexes from chunk-local to global.
-        shifted flag_true from to =
-          flag_true (chunk_start + from) (chunk_start + to)
+    ltid <- kernelLocalThreadId . kernelConstants <$> askEnv
+    let (crosses_segment, shifted) = chunkSegFlags seg_flag chunk_start
     sComment "possibly incorporate carry" . localOps threadOperations $
       sWhen (chunk_start .>. 0 .&&. ltid .==. 0 .&&. bNot crosses_segment) $ do
         carry_idx <- dPrimVE "carry_idx" $ sExt64 chunk_start - 1
@@ -160,7 +170,10 @@ virtualisedBlockScan seg_flag w lam arrs = do
 
     sOp $ Imp.ErrorSync Imp.FenceLocal
 
-    blockScan (shifted <$> seg_flag) (sExt64 w) (tvExp chunk_size) lam arrs_chunks
+    -- The chunks past this one are still live, so the second copy that
+    -- 'blockScan' keeps of an array-typed element must go beyond the whole
+    -- space, not merely beyond the chunk.
+    blockScan shifted (sExt64 w) (tvExp chunk_size) lam arrs_chunks
 
 -- | Semantically, a block-level statement finishes before the next one. This
 -- means that any statement that writes memory must be enclosed in barriers, as
@@ -578,8 +591,9 @@ isEmptySpace = (.==. 0) . product . map pe64 . segSpaceDims
 -- | Compile a block-level 'SegRed'. Unless the index space is virtualised, the
 -- kernel body is first run for the entire index space, with the results stashed
 -- in shared memory, which is then reduced. A virtualised index space is instead
--- handled one block-sized chunk at a time, so that we need no more shared
--- memory than there are threads in the block.
+-- handled one block-sized chunk at a time - chunks of the /flattened/ space,
+-- when there are several segments - so that we need no more shared memory than
+-- there are threads in the block.
 compileBlockRed ::
   Pat LetDecMem ->
   SegLevel ->
@@ -594,8 +608,9 @@ compileBlockRed pat lvl space body ops = do
     virt <- blockCoverVirt (segVirt lvl) space
     case (virt, dims') of
       (SegVirt, [dim']) -> chunkedCase dim'
+      (SegVirt, _) -> segmentedChunkedCase
       (_, [dim']) -> stageWholeSpace (product dims') $ singleSegmentCase dim'
-      _ -> stageWholeSpace (blockScanElems (product dims') red_ts) $ segmentedCase virt
+      _ -> stageWholeSpace (blockScanElems (product dims') red_ts) segmentedCase
   where
     (ltids, dims) = unzip $ unSegSpace space
     dims' = map pe64 dims
@@ -603,6 +618,7 @@ compileBlockRed pat lvl space body ops = do
     (body_red_res, body_map_res) =
       splitAt (segBinOpResults ops) $ bodyResult body
     red_ts = concatMap (lambdaReturnType . segBinOpLambda) ops
+    forOps :: [a] -> [[a]]
     forOps = chunks $ map (length . segBinOpNeutral) ops
 
     -- Shared memory for @elems@ values per reduction operand, declared with
@@ -611,10 +627,38 @@ compileBlockRed pat lvl space body ops = do
       forM red_ts $ \t ->
         sharedStagingArray "red_arr" t elems (shape <> arrayShape t)
 
-    saveResults tmps_for_ops is =
+    -- Write the reduction results, read at @src@ in the staging arrays, to
+    -- @dest@ in the destinations.
+    saveResults dest tmps_for_ops src =
       sComment "Save result of reduction." $
         forM_ (zip red_pes $ concat tmps_for_ops) $ \(pe, arr) ->
-          copyDWIM (patElemName pe) [] (Var arr) is
+          copyDWIM (patElemName pe) dest (Var arr) src
+
+    -- The result of the chunks so far accumulates at @dest_is@ in the
+    -- destination, so the carry is incorporated by folding the destination into
+    -- the chunk's first element; the reduction or scan that follows propagates
+    -- it through the rest of the chunk.
+    incorporateCarry due dest_is tmps_for_ops = do
+      ltid <- kernelLocalThreadId . kernelConstants <$> askEnv
+      sComment "possibly incorporate carry" . localOps threadOperations $
+        sWhen (due .&&. ltid .==. 0) $
+          forM_ (zip3 ops tmps_for_ops (forOps red_pes)) $ \(op, tmps, pes) ->
+            applyRenamedLambda
+              (segBinOpLambda op)
+              (map (,[DimFix 0]) tmps)
+              ( map ((,dest_is) . Var . patElemName) pes
+                  ++ map ((,[DimFix 0]) . Var) tmps
+              )
+
+    -- Run the segop body for the point of the index space that the thread's
+    -- index variables are currently bound to, saving the reduction inputs at
+    -- @is@ in the given @tmp_arrs@. Map results go straight to their
+    -- destinations.
+    runBody tmp_arrs is =
+      compileStms mempty (bodyStms body) $ do
+        forM_ (zip tmp_arrs body_red_res) $ \(dest, res) ->
+          copyDWIMFix dest is (kernelResultSubExp res) []
+        zipWithM_ (compileThreadResult space) map_pes body_map_res
 
     emptyCase = do
       -- This is the result if there are no chunks at all.
@@ -628,10 +672,7 @@ compileBlockRed pat lvl space body ops = do
     stageWholeSpace elems k = do
       tmp_arrs <- sharedArrays elems $ Shape dims
       blockCoverSegSpace (segVirt lvl) space $
-        compileStms mempty (bodyStms body) $ do
-          forM_ (zip tmp_arrs body_red_res) $ \(dest, res) ->
-            copyDWIMFix dest (map Imp.le64 ltids) (kernelResultSubExp res) []
-          zipWithM_ (compileThreadResult space) map_pes body_map_res
+        runBody tmp_arrs (map Imp.le64 ltids)
       sOp $ Imp.ErrorSync Imp.FenceLocal
       k $ forOps tmp_arrs
 
@@ -653,24 +694,11 @@ compileBlockRed pat lvl space body ops = do
         sComment "run the kernel body for this chunk" . localOps threadOperations $ do
           dPrimV_ ltid_name $ sExt64 chunk_start + sExt64 ltid
           sWhen (Imp.le64 ltid_name .<. dim') $
-            compileStms mempty (bodyStms body) $ do
-              forM_ (zip tmp_arrs body_red_res) $ \(dest, res) ->
-                copyDWIMFix dest [sExt64 ltid] (kernelResultSubExp res) []
-              zipWithM_ (compileThreadResult space) map_pes body_map_res
+            runBody tmp_arrs [sExt64 ltid]
 
         sOp $ Imp.ErrorSync Imp.FenceLocal
 
-        -- As in 'virtualisedBlockScan', the operator runs in a single thread
-        -- and so must be compiled as thread-level code.
-        sComment "possibly incorporate carry" . localOps threadOperations $
-          sWhen (chunk_start .>. 0 .&&. ltid .==. 0) $
-            forM_ (zip ops tmps_for_ops) $ \(op, tmps) ->
-              applyRenamedLambda
-                (segBinOpLambda op)
-                (map (,[DimFix 0]) tmps)
-                ( map ((,[]) . Var . patElemName) red_pes
-                    ++ map ((,[DimFix 0]) . Var) tmps
-                )
+        incorporateCarry (chunk_start .>. 0) [] tmps_for_ops
 
         sOp $ Imp.ErrorSync Imp.FenceLocal
 
@@ -679,11 +707,84 @@ compileBlockRed pat lvl space body ops = do
 
         sOp $ Imp.ErrorSync Imp.FenceLocal
 
-        saveResults tmps_for_ops [DimFix 0]
+        saveResults [] tmps_for_ops [DimFix 0]
 
         -- Everyone must be done reading the result before the next chunk
         -- overwrites it.
         sOp $ Imp.Barrier Imp.FenceLocal
+
+    -- Multiple segments, virtualised. We go through the flattened index space
+    -- one block-sized chunk at a time: run the segop body for the chunk, scan
+    -- the chunk with the segment flags, then let every thread whose element is
+    -- the last of its segment write that segment's result. The running value of
+    -- a segment that continues past the end of the chunk is carried into the
+    -- next chunk.
+    --
+    -- Chunking the flattened space rather than taking whole segments at a time
+    -- keeps every thread busy no matter how the segment size relates to the
+    -- block size, and needs no separate strategy for segments larger than the
+    -- block.
+    segmentedChunkedCase = do
+      tblock_size <- kernelBlockSizeCount . kernelConstants <$> askEnv
+      ltid <- kernelLocalThreadId . kernelConstants <$> askEnv
+      let w = product dims'
+          -- A chunk is never larger than the block, nor than the index space
+          -- itself, so that is all the shared memory we need.
+          chunk_elems = sMin64 w $ pe64 $ unCount tblock_size
+          seg_flag = crossesSegment $ last dims'
+      tmp_arrs <-
+        sharedArrays (blockScanElems chunk_elems red_ts) $
+          Shape [unCount tblock_size]
+      let tmps_for_ops = forOps tmp_arrs
+
+      blockChunkLoop (sExt32 w) $ \chunk_start chunk_size -> do
+        flat_idx <- dPrimVE "flat_idx" $ sExt64 chunk_start + sExt64 ltid
+        in_bounds <- dPrimVE "in_bounds" $ flat_idx .<. w
+        dIndexSpace (zip ltids dims') flat_idx
+
+        sComment "run segred body for this chunk" . localOps threadOperations $
+          sWhen in_bounds $
+            runBody tmp_arrs [sExt64 ltid]
+
+        sOp $ Imp.ErrorSync Imp.FenceLocal
+
+        let (crosses_segment, shifted) =
+              chunkSegFlags (Just seg_flag) chunk_start
+
+        -- Thread zero is at @chunk_start@, so its segment index is that of the
+        -- segment the carry belongs to - the one the preceding chunk ended in.
+        incorporateCarry
+          (chunk_start .>. 0 .&&. bNot crosses_segment)
+          (map (DimFix . Imp.le64) (init ltids))
+          tmps_for_ops
+
+        sOp $ Imp.ErrorSync Imp.FenceLocal
+
+        -- Scan the currente chunk.
+        forM_ (zip ops tmps_for_ops) $ \(op, tmps) ->
+          blockScan shifted chunk_elems (tvExp chunk_size) (segBinOpLambda op) tmps
+
+        sOp $ Imp.ErrorSync Imp.FenceLocal
+
+        -- A thread whose element is the last of its segment holds that
+        -- segment's final result. The thread holding the last element of the
+        -- chunk holds the running result of a segment that continues into the
+        -- next chunk, which that chunk then reads back as its carry.
+        ends_segment <-
+          dPrimVE "ends_segment" $ Imp.le64 (last ltids) .==. last dims' - 1
+        ends_chunk <-
+          dPrimVE "ends_chunk" $ sExt64 ltid .==. tvExp chunk_size - 1
+        localOps threadOperations $
+          sWhen (in_bounds .&&. (ends_segment .||. ends_chunk)) $
+            saveResults
+              (map (DimFix . Imp.le64) (init ltids))
+              tmps_for_ops
+              [DimFix $ sExt64 ltid]
+
+        -- Everyone must be done reading the chunk before the next one
+        -- overwrites it, and the carry must be visible to the next chunk.
+        fence <- fenceForArrays $ map patElemName red_pes
+        sOp $ Imp.Barrier fence
 
     -- A single segment - this we can handle directly with a block-level
     -- reduction.
@@ -691,38 +792,30 @@ compileBlockRed pat lvl space body ops = do
       forM_ (zip ops tmps_for_ops) $ \(op, tmps) ->
         blockReduce (sExt32 dim') (segBinOpLambda op) tmps
       sOp $ Imp.ErrorSync Imp.FenceLocal
-      saveResults tmps_for_ops [DimFix 0]
+      saveResults [] tmps_for_ops [DimFix 0]
       sOp $ Imp.ErrorSync Imp.FenceLocal
 
-    -- Multiple segments. These are turned into (regular) segmented scans, of
-    -- which we then pick the last element of each segment. It is possible that
-    -- this can be done better, but at least this approach is simple.
-    segmentedCase virt tmps_for_ops = do
+    -- Multiple segments, with the whole index space staged in shared memory.
+    -- These are turned into (regular) segmented scans, of which we then pick
+    -- the last element of each segment. It is possible that this can be done
+    -- better, but at least this approach is simple.
+    segmentedCase tmps_for_ops = do
       -- The scans operate on flattened arrays. This does not involve copying
       -- anything; merely playing with the index function.
       dims_flat <- dPrimV "dims_flat" $ product dims'
 
       forM_ (zip ops tmps_for_ops) $ \(op, tmps) -> do
         tmps_flat <- mapM (flattenArray (length dims') dims_flat) tmps
-        let seg_flag = Just $ crossesSegment $ last dims'
-        case virt of
-          SegVirt ->
-            virtualisedBlockScan
-              seg_flag
-              (sExt32 $ tvExp dims_flat)
-              (segBinOpLambda op)
-              tmps_flat
-          _ ->
-            blockScan
-              seg_flag
-              (product dims')
-              (product dims')
-              (segBinOpLambda op)
-              tmps_flat
+        blockScan
+          (Just $ crossesSegment $ last dims')
+          (product dims')
+          (product dims')
+          (segBinOpLambda op)
+          tmps_flat
 
       sOp $ Imp.ErrorSync Imp.FenceLocal
 
-      saveResults tmps_for_ops lastInSegment
+      saveResults [] tmps_for_ops lastInSegment
 
       sOp $ Imp.Barrier Imp.FenceLocal
 
