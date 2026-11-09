@@ -2,7 +2,7 @@
 -- ==
 -- input { [1i64, 2i64, 3i64] }
 -- auto output
--- structure gpu { /SegMap/Loop 1 }
+-- structure gpu { Replicate 0 /SegMap/Loop 1 }
 
 def main [n] (xs: [n]i64) =
   map (\x ->

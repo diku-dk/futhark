@@ -8,5 +8,5 @@
 -- }
 
 def main xsss =
-  #[flattening(only_inner)]
+  #[flattening(only_full)]
   map (\xss -> #[sequential_outer] map i32.sum xss) xsss

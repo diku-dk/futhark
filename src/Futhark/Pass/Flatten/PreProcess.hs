@@ -52,7 +52,8 @@ rewriteSoacStm ::
 rewriteSoacStm scope (Let pat aux (Op soac))
   | "sequential_outer" `inAttrs` stmAuxAttrs aux =
       Just $
-        preprocessStms scope =<< runSimplifiedBuilder scope (FOT.transformSOAC pat soac)
+        preprocessStms scope
+          =<< runSimplifiedBuilder scope (certifying (stmAuxCerts aux) $ FOT.transformSOAC pat soac)
 rewriteSoacStm scope (Let pat aux (Op (Stream w arrs nes lam))) = Just $ do
   stms <- runSimplifiedBuilder scope (auxing aux $ sequentialStreamWholeArray pat w nes lam arrs)
   preprocessStms scope stms

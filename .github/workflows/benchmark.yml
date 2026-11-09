@@ -49,6 +49,8 @@ jobs:
       with:
         backend: opencl
         system: MI100
+        # See the test-hip job in main.yml.
+        wrapper: numactl --membind=0,1
 
   benchmark-MI100-hip:
     runs-on: MI100
@@ -65,6 +67,8 @@ jobs:
       with:
         backend: hip
         system: MI100
+        # See the test-hip job in main.yml.
+        wrapper: numactl --membind=0,1
 
   benchmark-A100:
     runs-on: hendrix

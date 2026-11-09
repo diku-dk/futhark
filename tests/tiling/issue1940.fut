@@ -18,5 +18,5 @@ def newton_equality [n] [m] (_: [m][n]f32) hessian_val =
        in y
 
 entry main A hessian_vals =
-  #[sequential_inner]
+  #[flattening(only_outer)]
   map (newton_equality A) hessian_vals

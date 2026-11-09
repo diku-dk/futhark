@@ -1326,8 +1326,12 @@ filterSafetyCond2and5 act_coal inhb_coal scals_env td_env pes =
                in -- It is not safe to short circuit if some other pattern
                   -- element is aliased to this one, as this indicates the
                   -- two pattern elements reference the same physical
-                  -- value somehow.
+                  -- value somehow.  Nor is it safe if the destination is
+                  -- itself bound by the pattern (e.g. the existential memory
+                  -- of a 'Match' or 'Loop'), as then it is not in scope where
+                  -- @b@ is created, although it is in @scope td_env@.
                   if any ((`nameIn` aliasesOf patel) . patElemName) pes
+                    || x_mem `elem` map patElemName pes
                     then failed
                     else case M.lookup b vtab of
                       Nothing ->

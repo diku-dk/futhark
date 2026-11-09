@@ -11,6 +11,10 @@ inputs:
     description: 'Options to pass to srun'
     required: false
     default: ''
+  wrapper:
+    description: 'Command prefix for running the benchmarks (e.g. numactl)'
+    required: false
+    default: ''
   exclude:
     description: 'Comma-separated list of nodes that srun must not use'
     required: false
@@ -23,6 +27,6 @@ runs:
       shell: bash
     - uses: ./.github/actions/futhark-slurm
       with:
-        script: .github/actions/cmp-benchmark/cmp-benchmark.sh ${{inputs.backend}} ${{inputs.system}}
+        script: ${{inputs.wrapper}} .github/actions/cmp-benchmark/cmp-benchmark.sh ${{inputs.backend}} ${{inputs.system}}
         slurm-options: ${{inputs.slurm-options}}
         exclude: ${{inputs.exclude}}

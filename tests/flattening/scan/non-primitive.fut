@@ -8,10 +8,10 @@
 -- ==
 -- input { [1i64,4i64,0i64,3i64] }
 -- auto output
--- structure gpu { /Loop 1 }
+-- structure gpu { Replicate 13 /Loop 1 }
 
 def main (ns: []i64) =
-  #[flattening(only_inner)]
+  #[flattening(only_full)]
   map (\n ->
          i64.sum (map (\r -> i64.sum r)
                       (scan (map2 (+))

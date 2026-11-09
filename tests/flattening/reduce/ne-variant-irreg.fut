@@ -4,10 +4,10 @@
 -- auto output
 -- input { empty([0]i64) }
 -- auto output
--- structure gpu { /SegScan 1 /Apply 1 }
+-- structure gpu { Replicate 0 /SegScan 1 /Apply 1 }
 
 def main (ns: []i64) =
-  #[flattening(only_inner)]
+  #[flattening(only_full)]
   map (\n ->
          let ne = opaque (if n < 0 then 1i64 else 0)
          in reduce (+) ne (map (2 *) (iota n)))

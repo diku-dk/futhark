@@ -5,7 +5,7 @@
 -- ==
 -- input { [1i64,2i64,3i64] }
 -- auto output
--- structure gpu { SegScan 0 SegMap 4 SegMap/ArrayLit 0 }
+-- structure gpu { Replicate 4 SegScan 0 SegMap 4 SegMap/ArrayLit 0 }
 
 entry main (xs: []i64) =
   map (\x ->

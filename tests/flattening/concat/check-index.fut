@@ -12,9 +12,9 @@
 --         0i64,1i64,2i64,3i64,4i64,0i64,1i64,4i64,9i64,16i64
 --]}
 -- output {[true, true, true, true, true, true]}
--- structure gpu { Concat 0 /If/False/SegMap 0 }
+-- structure gpu { Replicate 6 Concat 0 /If/False/SegMap 0 }
 entry validate_flattening_2 (ns: []i64) (shp: []i64) (offsets: []i64) (expected: []i64) : []bool =
-  #[flattening(only_inner)]
+  #[flattening(only_full)]
   map2 (\n i ->
           let irreg = opaque (iota n `concat` (iota n |> map (** 2)))
           in if shp[i] == 0i64 && length irreg == 0i64

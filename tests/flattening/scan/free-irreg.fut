@@ -4,7 +4,7 @@
 -- ==
 -- input { [1i64,4i64,0i64,3i64] }
 -- auto output
--- structure gpu { /If/True/SegMap 1 /If/False/SegScan 2 }
+-- structure gpu { Replicate 0 /If/True/SegMap 1 /If/False/SegScan 2 }
 
 def main (ns: []i64) =
   map (\n ->

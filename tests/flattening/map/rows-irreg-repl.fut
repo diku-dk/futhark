@@ -4,12 +4,12 @@
 -- ==
 -- input { [1i64,4i64,0i64,3i64] }
 -- auto output
--- structure gpu { /SegScan 3 /Apply/repiota 7 /Apply/segiota 2 }
+-- structure gpu { Replicate 3 /SegScan 3 /Apply/repiota 7 /Apply/segiota 2 }
 def main (ns: []i64) =
-  #[flattening(only_inner)]
+  #[flattening(only_full)]
   map (\n ->
          let yss = opaque (map (\i -> map (+ i) (iota n)) (iota (n + 1)))
-         in i64.sum (#[flattening(only_inner)]
+         in i64.sum (#[flattening(only_full)]
                      map (\m -> i64.sum (map (\row -> i64.sum row + m) yss))
                          (iota n)))
       ns

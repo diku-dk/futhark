@@ -1,10 +1,10 @@
 -- ==
 -- input { [[4i64, 5i64, 6i64], [7i64, 8i64, 9i64]] [1i64, 2i64, 3i64]  }
 -- auto output
--- structure gpu { SegScan 1 SegRed 0 /Apply/segiota 1 }
+-- structure gpu { Replicate 0 SegScan 1 SegRed 0 /Apply/segiota 1 }
 
 def main xss ys =
-  #[flattening(only_inner)]
+  #[flattening(only_full)]
   map (\xs ->
          let res =
            map (\x ->

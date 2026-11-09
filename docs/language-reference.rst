@@ -1767,12 +1767,13 @@ An expression, declaration, pattern, or module type spec can be prefixed with an
 attribute, written as ``#[attr]``. This may affect how it is treated by the
 compiler or other tools. In no case will attributes affect or change the
 *semantics* of a program, but it may affect how well it compiles and runs (or in
-some cases, whether it compiles or runs at all). Unknown attributes are silently
-ignored. Most have no effect in the interpreter. An attribute can be either an
-*atom*, written as an identifier or number, or *compound*, consisting of an
-identifier and a comma-separated sequence of attributes. The latter is used for
-grouping and encoding of more complex information. An identifier prefixed with a
-``$`` must be the name of a term variable in scope.
+some cases, whether it compiles or runs at all). Unknown attributes are usually
+ignored silently, but may in some cases cause a warning. Most have no effect in
+the interpreter. An attribute can be either an *atom*, written as an identifier
+or number, or *compound*, consisting of an identifier and a comma-separated
+sequence of attributes. The latter is used for grouping and encoding of more
+complex information. An identifier prefixed with a ``$`` must be the name of a
+term variable in scope.
 
 Expression attributes
 ~~~~~~~~~~~~~~~~~~~~~
@@ -1838,29 +1839,35 @@ supporting irregular flattening.
 ``flattening(no_outer)``
 ........................
 
-When using incremental flattening, do not generate the "only outer
-parallelism" version for the attributed SOACs.
+During incremental flattening, do not generate the version that exploits only
+outermost parallelism.
 
 ``flattening(no_intra)``
 ........................
 
-When using incremental flattening, do not generate the "intra-block
-parallelism" version for the attributed SOACs.
+During incremental flattening, do not generate the version that maps outermost
+parallelism onto GPU thread blocks.
+
+``flattening(only_outer)``
+..........................
+
+During incremental flattening, only generate the version that exploits outermost
+parallelism and sequentialises inner parallelism.
 
 ``flattening(only_intra)``
 ..........................
 
-When using incremental flattening, *only* generate the "intra-block
-parallelism" version of the attributed SOACs.  **Beware**: the
-resulting program will fail to run if the inner parallelism does not
-fit on the device.
+During incremental flattening, *only* generate the version that maps outermost
+parallelism onto GPU thread blocks.
 
-``flattening(only_inner)``
+**Beware**: the resulting program will fail to run if the inner parallelism does
+not fit on the device.
+
+``flattening(only_full)``
 ..........................
 
-When using incremental flattening, do not generate multiple versions
-for this SOAC, but do exploit inner parallelism (which may give rise
-to multiple versions at deeper levels).
+During incremental flattening, generate only the fully flattened version. Any
+versioning attributes inside the SOAC are ignored.
 
 ``noinline``
 ............
@@ -1886,11 +1893,6 @@ completely undefined until they are updated with a ``scatter`` or similar.
 
 Turn the outer parallelism in the attributed SOAC sequential, but
 preserve any inner parallelism.
-
-``sequential_inner``
-....................
-
-Exploit only outer parallelism in the attributed SOAC.
 
 ``unroll``
 ..........

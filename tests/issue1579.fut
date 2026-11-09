@@ -45,7 +45,7 @@ module loess_m = {
       #[unsafe]
       tabulate q (\j -> if j >= n_nn then zero else add arr[l_idx_i + j] v)
     -- [n_m]
-    in #[sequential_inner]
+    in #[flattening(only_outer)]
        map2 (\l_idx_i lambda_i ->
                -----------------------------------
                -- REDOMAP 1

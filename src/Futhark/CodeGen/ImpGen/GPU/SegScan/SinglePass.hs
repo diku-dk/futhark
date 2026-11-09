@@ -136,14 +136,17 @@ statusX = 0
 statusA = 1
 statusP = 2
 
+-- | Scan the look-back window held in the given flag and value arrays, using
+-- the first 32 threads, which form a single warp. Basically a kind of segmented
+-- scan, optimised for only the cases handled by single pass scan (in
+-- particular, no array operands).
 inBlockScanLookback ::
   KernelConstants ->
-  Imp.TExp Int64 ->
   VName ->
   [VName] ->
   Lambda GPUMem ->
   InKernelGen ()
-inBlockScanLookback constants arrs_full_size flag_arr arrs scan_lam = do
+inBlockScanLookback constants flag_arr arrs scan_lam = do
   flg_x :: TV Int8 <- dPrim "flg_x"
   flg_y :: TV Int8 <- dPrim "flg_y"
   let flg_param_x = Param mempty (tvVar flg_x) (MemPrim p_int8)
@@ -155,43 +158,26 @@ inBlockScanLookback constants arrs_full_size flag_arr arrs scan_lam = do
   dLParams (lambdaParams scan_lam)
 
   skip_threads <- dPrim "skip_threads"
-  let in_block_thread_active =
-        tvExp skip_threads .<=. in_block_id
-      actual_params = lambdaParams scan_lam
+  let thread_active = tvExp skip_threads .<=. ltid32
       (x_params, y_params) =
-        splitAt (length actual_params `div` 2) actual_params
+        splitAt (length (lambdaParams scan_lam) `div` 2) $ lambdaParams scan_lam
       y_to_x =
-        forM_ (zip x_params y_params) $ \(x, y) ->
-          when (primType (paramType x)) $
-            copyDWIM (paramName x) [] (Var (paramName y)) []
-      y_to_x_flg =
-        copyDWIM (tvVar flg_x) [] (Var (tvVar flg_y)) []
-
-  -- Set initial y values
-  sComment "read input for in-block scan" $ do
-    zipWithM_ readInitial (flg_param_y : y_params) (flag_arr : arrs)
-    -- Since the final result is expected to be in x_params, we may
-    -- need to copy it there for the first thread in the block.
-    sWhen (in_block_id .==. 0) $ do
-      y_to_x
-      y_to_x_flg
-
-  when array_scan barrier
-
-  let op_to_x = do
+        forM_ (zip (flg_param_x : x_params) (flg_param_y : y_params)) $ \(x, y) ->
+          copyDWIM (paramName x) [] (Var (paramName y)) []
+      op_to_x =
         sIf
           (flg_y_exp .==. statusP_e .||. flg_y_exp .==. statusX_e)
-          ( do
-              y_to_x_flg
-              y_to_x
-          )
+          y_to_x
           (compileBody' x_params $ lambdaBody scan_lam)
 
-  sComment "in-block scan (hopefully no barriers needed)" $ do
+  sComment "read input for warp scan" $
+    zipWithM_ readInitial (flg_param_y : y_params) (flag_arr : arrs)
+
+  sComment "warp scan" $ do
     skip_threads <-- 1
 
-    sWhile (tvExp skip_threads .<. block_size) $ do
-      warpLocal . sWhen in_block_thread_active $ do
+    sWhile (tvExp skip_threads .<. warp_size) $ do
+      warpLocal . sWhen thread_active $ do
         sComment "read operands" $
           zipWithM_
             (readParam (sExt64 $ tvExp skip_threads))
@@ -199,7 +185,7 @@ inBlockScanLookback constants arrs_full_size flag_arr arrs scan_lam = do
             (flag_arr : arrs)
         sComment "perform operation" op_to_x
 
-      warpLocal . sWhen in_block_thread_active . sComment "write result" $
+      warpLocal . sWhen thread_active . sComment "write result" $
         sequence_ $
           zipWith3
             writeResult
@@ -210,33 +196,18 @@ inBlockScanLookback constants arrs_full_size flag_arr arrs scan_lam = do
       skip_threads <-- tvExp skip_threads * 2
   where
     p_int8 = IntType Int8
-    block_size = 32
-    block_id = ltid32 `quot` block_size
-    in_block_id = ltid32 - block_id * block_size
+    warp_size = 32
     ltid32 = kernelLocalThreadId constants
     ltid = sExt64 ltid32
-    gtid = sExt64 $ kernelGlobalThreadId constants
-    array_scan = not $ all primType $ lambdaReturnType scan_lam
-    barrier
-      | array_scan =
-          sOp $ Imp.Barrier Imp.FenceGlobal
-      | otherwise =
-          sOp $ Imp.Barrier Imp.FenceLocal
 
-    readInitial p arr
-      | primType $ paramType p =
-          copyDWIMFix (paramName p) [] (Var arr) [ltid]
-      | otherwise =
-          copyDWIMFix (paramName p) [] (Var arr) [gtid]
-    readParam behind p arr
-      | primType $ paramType p =
-          copyDWIMFix (paramName p) [] (Var arr) [ltid - behind]
-      | otherwise =
-          copyDWIMFix (paramName p) [] (Var arr) [gtid - behind + arrs_full_size]
+    readInitial p arr =
+      copyDWIMFix (paramName p) [] (Var arr) [ltid]
+
+    readParam behind p arr =
+      copyDWIMFix (paramName p) [] (Var arr) [ltid - behind]
 
     writeResult x y arr = do
-      when (isPrimParam x) $
-        copyDWIMFix arr [ltid] (Var $ paramName x) []
+      copyDWIMFix arr [ltid] (Var $ paramName x) []
       copyDWIM (paramName y) [] (Var $ paramName x) []
 
 -- | Calculate the number of u64 words needed to store n bits
@@ -370,9 +341,6 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
   num_virt_blocks <-
     tvSize <$> dPrimV "num_virt_blocks" (n `ceilDiv` (tblock_size_e * chunk))
   let num_virt_blocks_e = pe64 num_virt_blocks
-
-  num_virt_threads <-
-    dPrimVE "num_virt_threads" $ num_virt_blocks_e * tblock_size_e
 
   let (gtids, dims) = unzip $ unSegSpace space
       dims' = map pe64 dims
@@ -611,7 +579,7 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
         blockScan
           crossesSegment
           tblock_size_e
-          num_virt_threads
+          tblock_size_e
           scan_op1
           prefixArrays
 
@@ -725,7 +693,6 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
                     lam' <- renameLambda scan_op1
                     inBlockScanLookback
                       constants
-                      num_virt_threads
                       warpscan
                       exchanges
                       lam'

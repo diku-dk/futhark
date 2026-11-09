@@ -123,6 +123,9 @@ transformStm (Let pat aux (WithAcc inputs lam)) =
   where
     transformInput (shape, arrs, op) =
       (shape,arrs,) <$> traverse (bitraverse transformLambda pure) op
+transformStm stm@(Let _ aux (Op _))
+  | "sequential" `inAttrs` stmAuxAttrs aux =
+      pure $ oneStm $ runIdentity $ rephraseStm toMC stm
 transformStm (Let pat aux (Op op)) =
   fmap (certify (stmAuxCerts aux)) <$> transformSOAC pat (stmAuxAttrs aux) op
 
@@ -145,8 +148,10 @@ transformBody (Body () stms res) =
 
 sequentialiseBody :: Body SOACS -> ExtractM (Body MC)
 sequentialiseBody = pure . runIdentity . rephraseBody toMC
-  where
-    toMC = injectSOACS OtherOp
+
+-- | Keep SOACs as they are, to be compiled to sequential code.
+toMC :: Rephraser Identity SOACS MC
+toMC = injectSOACS OtherOp
 
 transformFunDef :: FunDef SOACS -> ExtractM (FunDef MC)
 transformFunDef (FunDef entry attrs name rettype params body) = do

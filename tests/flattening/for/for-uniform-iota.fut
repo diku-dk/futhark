@@ -1,10 +1,10 @@
 -- ==
 -- input { [[1i64, 2i64, 0i64], [4i64, 0i64, 6i64]] }
 -- auto output
--- structure gpu { /Loop/SegMap 1 }
+-- structure gpu { Replicate 1 /Loop/SegMap 1 }
 
 def main [n] [m] (xss: [n][m]i64) =
-  #[flattening(only_inner)]
+  #[flattening(only_full)]
   map (\xs ->
          loop acc = xs
          for _i < 3 do

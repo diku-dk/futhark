@@ -4,7 +4,7 @@
 -- output { [[11i32, 0i32, 0i32], [14i32, 0i32, 0i32]] }
 
 def main [n] (xss: [][n]i32) =
-  #[sequential_inner]
+  #[flattening(only_outer)]
   map (\xs ->
          let xs' = loop xs = copy xs for _i < 10 do map (+ 1) xs
          let ys = replicate n 0

@@ -1090,14 +1090,6 @@ findDeps (For idx bound x) = do
     free = freeIn bound
 findDeps (While cond x) = do
   local (<> freeIn cond) $ findDeps x
-findDeps (Op (SegOp _ free _ _ retvals _)) =
-  mapM_
-    ( \x ->
-        addDeps (paramName x) $
-          namesFromList $
-            map paramName free
-    )
-    retvals
 findDeps (Op (ForEach _ _ _ body)) =
   findDeps body
 findDeps (Op (ForEachActive _ body)) =
@@ -1131,7 +1123,10 @@ depsFixedPoint deps =
     deps' = M.map grow deps
 
 -- | Find roots of variance. These are memory blocks declared in
--- the current scope as well as loop indices of foreach loops.
+-- the current scope, loop indices of foreach loops, and the results of
+-- nested SegOps. A SegOp in a kernel is run once per program instance,
+-- each of which receives its result through a pointer to its own lane
+-- of the variable (see 'MC.compileSetRetvalStructValues').
 findVarying :: MCCode -> [VName]
 findVarying (x :>>: y) = findVarying x ++ findVarying y
 findVarying (If _ x y) = findVarying x ++ findVarying y
@@ -1140,6 +1135,7 @@ findVarying (While _ x) = findVarying x
 findVarying (Op (ForEachActive _ body)) = findVarying body
 findVarying (Op (ForEach idx _ _ body)) = idx : findVarying body
 findVarying (DeclareMem mem _) = [mem]
+findVarying (Op (SegOp _ _ _ _ retvals _)) = map paramName retvals
 findVarying _ = []
 
 -- | Analyze variability in a body of code and run an action with
@@ -1148,7 +1144,7 @@ analyzeVariability :: MCCode -> ISPCCompilerM a -> ISPCCompilerM a
 analyzeVariability code m = do
   let roots = findVarying code
   let deps = depsFixedPoint $ execVariabilityM $ findDeps code
-  let safelist = M.filter (\b -> all (`notNameIn` b) roots) deps
+  let safelist = M.filterWithKey (\v b -> v `notElem` roots && all (`notNameIn` b) roots) deps
   let safe = namesFromList $ M.keys safelist
   pre_state <- GC.getUserState
   GC.modifyUserState (\s -> s {sUniform = safe})

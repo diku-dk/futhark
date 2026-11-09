@@ -1,10 +1,10 @@
 -- ==
 -- input { [3i64, 7i64, 9i64, 1i64, 7i64] }
 -- auto output
--- structure gpu { /Loop 1 }
+-- structure gpu { Replicate 15 /Loop 1 }
 
 def main (xs) =
-  #[flattening(only_inner)]
+  #[flattening(only_full)]
   map (\x ->
          let z' = iota x
          let (_, res, _) =
