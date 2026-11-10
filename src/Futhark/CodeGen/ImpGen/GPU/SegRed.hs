@@ -9,13 +9,8 @@
 --   kernel, with the final threadblock to write a result (tracked via
 --   an atomic counter) performing the final reduction as well.
 --
--- * Instead of depending on storage layout transformations to handle
---   non-commutative reductions efficiently, we slide a
---   @tblocksize@-sized window over the input, and perform a parallel
---   reduction for each window.  This sacrifices the notion of
---   efficient sequentialisation, but is sometimes faster and
---   definitely simpler and more predictable (and uses less auxiliary
---   storage).
+-- * We have various strategies for handling non-commutative reductions. See
+--   Note [Stage one strategies].
 --
 -- For segmented reductions we use the approach from "Strategies for
 -- Regular Segmented Reductions on GPU" (FHPC '17).  This involves
@@ -30,10 +25,8 @@
 --   value per segment.
 --
 --   Each thread /can/ read multiple elements, which will greatly
---   increase performance; however, if the reduction is
---   non-commutative we will have to use a less efficient traversal
---   (with interim block-wide reductions) to enable coalesced memory
---   accesses, just as in the non-segmented case.
+--   increase performance.  Non-commutative reductions use the same
+--   strategies as in the non-segmented case.
 --
 -- * Small: is used to let each block process *multiple* segments
 --   within a block. We will only use this approach when we can
@@ -41,13 +34,6 @@
 --   cases, we would allocate a /whole/ block per segment with the
 --   large strategy, but at most 50% of the threads in the block would
 --   have any element to read, which becomes highly inefficient.
---
--- An optimization specfically targeted at non-segmented and large-segments
--- segmented reductions with non-commutative is made: The stage one main loop is
--- essentially stripmined by a factor *chunk*, inserting collective copies via
--- shared memory of each reduction parameter going into the intra-block (partial)
--- reductions. This saves a factor *chunk* number of intra-block reductions at
--- the cost of some overhead in collective copies.
 module Futhark.CodeGen.ImpGen.GPU.SegRed
   ( compileSegRed,
     compileSegRed',
@@ -72,6 +58,11 @@ import Prelude hiding (quot, rem)
 forM2_ :: (Monad m) => [a] -> [b] -> (a -> b -> m c) -> m ()
 forM2_ xs ys f = forM_ (zip xs ys) (uncurry f)
 
+-- | The total size of values of the given types in 32-bit words, where
+-- smaller types occupy a full word.
+primWords :: [PrimType] -> Int
+primWords = sum . map ((`div` 4) . max 4 . primByteSize)
+
 -- | Given available register and a list of parameter types, compute
 -- the largest available chunk size given the parameters for which we
 -- want chunking and the available resources.
@@ -91,7 +82,7 @@ getRedChunkSize types = do
       sizes = map primByteSize types'
 
       sum_sizes = sum sizes
-      sum_sizes' = sum (map (sMax64 4 . primByteSize) types') `quot` 4
+      sum_sizes' = fromIntegral $ primWords types'
       max_size = maximum sizes
 
       mem_constraint = max k_mem sum_sizes `quot` max_size
@@ -153,6 +144,45 @@ isPrimSegBinOp segbinop =
   all primType (lambdaReturnType $ segBinOpLambda segbinop)
     && shapeRank (segBinOpShape segbinop) == 0
 
+-- | How the first stage of a reduction distributes the input among the threads.
+-- For elaboration on the strategies, see Note [Stage one strategies].
+data StageOne
+  = -- | Thread @t@ of @T@ handles elements @t@, @t+T@, @t+2T@, and so on, not
+    -- combining the per-thread results until all input has been processed.
+    -- Requires a commutative operator.
+    StageOneStrided
+  | -- | Each block handles a sequence of contiguous tiles, using collective
+    -- copies through shared memory and a block-wide reduction per tile.
+    -- Requires primitive (non-array) operands.
+    StageOneTiled
+  | -- | Each thread handles a contiguous range of the input.
+    StageOneContiguous
+  | -- | Each block slides a window of @tblock_size@ elements across a
+    -- contiguous range of the input, with a block-wide reduction per window.
+    StageOneWindow
+  deriving (Eq)
+
+-- | The largest total size of the reduction operands, in 32-bit words, for
+-- which we use 'StageOneTiled'. Heuristically chosen. It is difficult to make
+-- this a tuning parameter, as the strategy is a compile-time choice.
+maxTiledOperandWords :: Int
+maxTiledOperandWords = 16
+
+stageOneStrategy :: [SegBinOp GPUMem] -> StageOne
+stageOneStrategy segbinops
+  | all ((== Commutative) . segBinOpComm) segbinops =
+      StageOneStrided
+  | not $ all isPrimSegBinOp segbinops =
+      StageOneWindow
+  | operand_words <= maxTiledOperandWords =
+      StageOneTiled
+  | otherwise =
+      StageOneContiguous
+  where
+    operand_words =
+      primWords . map elemType $
+        concatMap (lambdaReturnType . segBinOpLambda) segbinops
+
 -- | Like 'compileSegRed', but where the body is a monadic action.
 compileSegRed' ::
   Pat LetDecMem ->
@@ -175,18 +205,18 @@ compileSegRed' pat grid space segbinops map_body_cont = do
         (compileReduction (chunk_v, chunk_const) largeSegmentsReduction)
   where
     compileReduction chunk f =
-      f pat num_tblocks tblock_size chunk space segbinops map_body_cont
+      f pat num_tblocks tblock_size strategy chunk space segbinops map_body_cont
 
     param_types = map paramType $ concatMap paramOf segbinops
 
     num_tblocks = gridNumBlocks grid
     tblock_size = gridBlockSize grid
 
-    chunk_const =
-      if Noncommutative `elem` map segBinOpComm segbinops
-        && all isPrimSegBinOp segbinops
-        then getRedChunkSize param_types
-        else Imp.ValueExp $ IntValue $ intValue Int64 (1 :: Int64)
+    strategy = stageOneStrategy segbinops
+
+    chunk_const
+      | strategy == StageOneTiled = getRedChunkSize param_types
+      | otherwise = Imp.ValueExp $ IntValue $ intValue Int64 (1 :: Int64)
 
 -- | Prepare intermediate arrays for the reduction.  Prim-typed
 -- arguments go in shared memory (so we need to do the allocation of
@@ -198,14 +228,14 @@ compileSegRed' pat grid space segbinops map_body_cont = do
 -- For more info about the intermediate arrays used for the different reduction
 -- kernels, see note [IntermArrays].
 makeIntermArrays ::
+  StageOne ->
   Imp.TExp Int64 ->
   SubExp ->
   SubExp ->
   [SegBinOp GPUMem] ->
   InKernelGen [SegRedIntermediateArrays]
-makeIntermArrays tblock_id tblock_size chunk segbinops
-  | Noncommutative <- mconcat (map segBinOpComm segbinops),
-    all isPrimSegBinOp segbinops =
+makeIntermArrays strategy tblock_id tblock_size chunk segbinops
+  | strategy == StageOneTiled =
       noncommPrimSegRedInterms
   | otherwise =
       generalSegRedInterms tblock_id tblock_size segbinops
@@ -282,10 +312,10 @@ generalSegRedInterms tblock_id tblock_size segbinops =
 -- | Arrays for storing block results.
 --
 -- The block-result arrays have an extra dimension because they are
--- also used for keeping vectorised accumulators for first-stage
--- reduction, if necessary.  If necessary, this dimension has size
--- tblock_size, and otherwise 1.  When actually storing block results,
--- the first index is set to 0.
+-- also used for keeping the per-thread accumulators for first-stage
+-- reduction of non-primitive operands.  In that case, this dimension
+-- has size tblock_size, and otherwise 1.  When actually storing block
+-- results, the first index is set to 0.
 groupResultArrays ::
   SubExp ->
   SubExp ->
@@ -308,6 +338,7 @@ type DoCompileSegRed =
   Pat LetDecMem ->
   Count NumBlocks SubExp ->
   Count BlockSize SubExp ->
+  StageOne ->
   (TV Int64, Imp.KernelConstExp) ->
   SegSpace ->
   [SegBinOp GPUMem] ->
@@ -315,7 +346,7 @@ type DoCompileSegRed =
   CallKernelGen ()
 
 nonsegmentedReduction :: DoCompileSegRed
-nonsegmentedReduction (Pat segred_pes) num_tblocks tblock_size (chunk_v, chunk_const) space segbinops map_body_cont = do
+nonsegmentedReduction (Pat segred_pes) num_tblocks tblock_size strategy (chunk_v, chunk_const) space segbinops map_body_cont = do
   let (gtids, dims) = unzip $ unSegSpace space
       chunk = tvExp chunk_v
       num_tblocks_se = unCount num_tblocks
@@ -341,7 +372,7 @@ nonsegmentedReduction (Pat segred_pes) num_tblocks tblock_size (chunk_v, chunk_c
     let ltid = kernelLocalThreadId constants
     let tblock_id = kernelBlockId constants
 
-    interms <- makeIntermArrays (sExt64 tblock_id) tblock_size_se (tvSize chunk_v) segbinops
+    interms <- makeIntermArrays strategy (sExt64 tblock_id) tblock_size_se (tvSize chunk_v) segbinops
     sync_arr <- sAllocArray "sync_arr" Bool (Shape [intConst Int32 1]) $ Space "shared"
 
     -- Since this is the nonsegmented case, all outer segment IDs must
@@ -355,6 +386,7 @@ nonsegmentedReduction (Pat segred_pes) num_tblocks tblock_size (chunk_v, chunk_c
         zip3 segbinops interms reds_block_res_arrs
     new_lambdas <-
       reductionStageOne
+        strategy
         gtids
         n
         global_tid
@@ -384,7 +416,7 @@ nonsegmentedReduction (Pat segred_pes) num_tblocks tblock_size (chunk_v, chunk_c
           (fromInteger i)
 
 smallSegmentsReduction :: DoCompileSegRed
-smallSegmentsReduction (Pat segred_pes) num_tblocks tblock_size _ space segbinops map_body_cont = do
+smallSegmentsReduction (Pat segred_pes) num_tblocks tblock_size _ _ space segbinops map_body_cont = do
   let (gtids, dims) = unzip $ unSegSpace space
       dims' = map pe64 dims
       segment_size = last dims'
@@ -495,7 +527,7 @@ smallSegmentsReduction (Pat segred_pes) num_tblocks tblock_size _ space segbinop
       sOp $ Imp.Barrier Imp.FenceLocal
 
 largeSegmentsReduction :: DoCompileSegRed
-largeSegmentsReduction (Pat segred_pes) num_tblocks tblock_size (chunk_v, chunk_const) space segbinops map_body_cont = do
+largeSegmentsReduction (Pat segred_pes) num_tblocks tblock_size strategy (chunk_v, chunk_const) space segbinops map_body_cont = do
   let (gtids, dims) = unzip $ unSegSpace space
       dims' = map pe64 dims
       num_segments = product $ init dims'
@@ -555,7 +587,7 @@ largeSegmentsReduction (Pat segred_pes) num_tblocks tblock_size (chunk_v, chunk_
     let tblock_id = sExt64 $ kernelBlockId constants
         ltid = kernelLocalThreadId constants
 
-    interms <- makeIntermArrays tblock_id tblock_size_se (tvSize chunk_v) segbinops
+    interms <- makeIntermArrays strategy tblock_id tblock_size_se (tvSize chunk_v) segbinops
     sync_arr <- sAllocArray "sync_arr" Bool (Shape [intConst Int32 1]) $ Space "shared"
 
     -- We probably do not have enough actual threadblocks to cover the
@@ -583,6 +615,7 @@ largeSegmentsReduction (Pat segred_pes) num_tblocks tblock_size (chunk_v, chunk_
           zip3 segbinops interms reds_block_res_arrs
       new_lambdas <-
         reductionStageOne
+          strategy
           gtids
           n
           global_tid
@@ -633,7 +666,9 @@ data SegBinOpSlug = SegBinOpSlug
   { slugOp :: SegBinOp GPUMem,
     -- | Intermediate arrays needed for the given reduction.
     slugInterms :: SegRedIntermediateArrays,
-    -- | Place(s) to store block accumulator(s) in stage 1 reduction.
+    -- | Per-thread accumulator(s) for the stage one reduction.  After
+    -- each block-wide reduction, the accumulator(s) of thread 0 hold
+    -- the result for the block.
     slugAccs :: [(VName, [Imp.TExp Int64])],
     -- | Global memory destination(s) for the final result(s) for this
     -- particular reduction.
@@ -652,10 +687,10 @@ segBinOpSlug ltid tblock_id (op, interms, block_res_arrs) = do
     mkAcc p block_res_arr
       | Prim t <- paramType p,
         shapeRank (segBinOpShape op) == 0 = do
-          block_res_acc <- dPrimS (baseName (paramName p) <> "_block_res_acc") t
-          pure (block_res_acc, [])
+          thread_acc <- dPrimS (baseName (paramName p) <> "_thread_acc") t
+          pure (thread_acc, [])
       -- if this is a non-primitive reduction, the global mem result array will
-      -- double as accumulator.
+      -- double as the per-thread accumulators.
       | otherwise =
           pure (block_res_arr, [sExt64 ltid, sExt64 tblock_id])
 
@@ -674,9 +709,6 @@ slugNeutral = segBinOpNeutral . slugOp
 slugShape :: SegBinOpSlug -> Shape
 slugShape = segBinOpShape . slugOp
 
-slugsComm :: [SegBinOpSlug] -> Commutativity
-slugsComm = mconcat . map (segBinOpComm . slugOp)
-
 slugSplitParams :: SegBinOpSlug -> ([LParam GPUMem], [LParam GPUMem])
 slugSplitParams slug = splitAt (length (slugNeutral slug)) $ slugParams slug
 
@@ -689,7 +721,43 @@ slugPrivChunks = privateChunks . slugInterms
 slugCollCopyArrs :: SegBinOpSlug -> [VName]
 slugCollCopyArrs = collCopyArrs . slugInterms
 
+-- | When 'sequentialStageOneBody' performs the block-wide reduction.
+data BlockReduceAt = ReducePerIteration | ReduceAfterLoop
+  deriving (Eq)
+
+-- | Each thread sequentially reduces @q@ elements, with block-wide reductions
+-- as determined by 'BlockReduceAt'. The function maps the iteration number to
+-- the index of the element.
+sequentialStageOneBody ::
+  [SegBinOpSlug] ->
+  DoSegBody ->
+  TV Int64 ->
+  Imp.TExp Int64 ->
+  Imp.TExp Int64 ->
+  BlockReduceAt ->
+  InKernelGen () ->
+  (Imp.TExp Int64 -> Imp.TExp Int64) ->
+  InKernelGen ()
+sequentialStageOneBody slugs body_cont glb_ind_var q n reduce_at doBlockReduce index = do
+  sFor "i" q $ \i -> do
+    glb_ind_var <-- index i
+
+    sWhen (tvExp glb_ind_var .<. n) $
+      sComment "apply map function(s)" $
+        body_cont $ \all_red_res -> do
+          let maps_res = chunks (map (length . slugNeutral) slugs) all_red_res
+
+          forM2_ slugs maps_res $ \slug map_res ->
+            sLoopNest (slugShape slug) $ \vec_is ->
+              applyRedOp slug vec_is map_res
+
+    when (reduce_at == ReducePerIteration) doBlockReduce
+
+  sOp $ Imp.ErrorSync Imp.FenceLocal
+  when (reduce_at == ReduceAfterLoop) doBlockReduce
+
 reductionStageOne ::
+  StageOne ->
   [VName] ->
   Imp.TExp Int64 ->
   Imp.TExp Int64 ->
@@ -699,28 +767,28 @@ reductionStageOne ::
   [SegBinOpSlug] ->
   DoSegBody ->
   InKernelGen [Lambda GPUMem]
-reductionStageOne gtids n global_tid q chunk threads_per_segment slugs body_cont = do
+reductionStageOne strategy gtids n global_tid q chunk threads_per_segment slugs body_cont = do
   constants <- kernelConstants <$> askEnv
   let glb_ind_var = mkTV (last gtids)
       ltid = sExt64 $ kernelLocalThreadId constants
 
   dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
 
-  sComment "ne-initialise the outer (per-block) accumulator(s)" $ do
+  sComment "ne-initialise the per-thread accumulator(s)" $ do
     forM_ slugs $ \slug ->
       forM2_ (slugAccs slug) (slugNeutral slug) $ \(acc, acc_is) ne ->
         sLoopNest (slugShape slug) $ \vec_is ->
           copyDWIMFix acc (acc_is ++ vec_is) ne []
 
   new_lambdas <- mapM (renameLambda . slugLambda) slugs
-  let tblock_size = sExt32 $ kernelBlockSize constants
   let doBlockReduce =
         forM2_ slugs new_lambdas $ \slug new_lambda -> do
           let accs = slugAccs slug
           let params = slugParams slug
+          let tblock_size = sExt32 $ kernelBlockSize constants
           sLoopNest (slugShape slug) $ \vec_is -> do
             let block_red_arrs = slugBlockRedArrs slug
-            sComment "store accs. prims go in lmem; non-prims in params (in global mem)" $
+            sComment "store reduction accs" $
               forM_ (zip3 block_red_arrs accs params) $
                 \(arr, (acc, acc_is), p) ->
                   if isPrimParam p
@@ -731,7 +799,7 @@ reductionStageOne gtids n global_tid q chunk threads_per_segment slugs body_cont
             blockReduce tblock_size new_lambda block_red_arrs
             sOp $ Imp.Barrier Imp.FenceLocal
 
-            sComment "thread 0 updates per-block acc(s); rest reset to ne" $ do
+            sComment "thread 0 keeps the block result in its accumulator; rest reset to neutral" $ do
               sIf
                 (ltid .==. 0)
                 ( forM2_ accs (lambdaParams new_lambda) $
@@ -743,8 +811,8 @@ reductionStageOne gtids n global_tid q chunk threads_per_segment slugs body_cont
                       copyDWIMFix acc (acc_is ++ vec_is) ne []
                 )
 
-  case (slugsComm slugs, all (isPrimSegBinOp . slugOp) slugs) of
-    (Noncommutative, True) ->
+  case strategy of
+    StageOneTiled ->
       noncommPrimParamsStageOneBody
         slugs
         body_cont
@@ -754,74 +822,43 @@ reductionStageOne gtids n global_tid q chunk threads_per_segment slugs body_cont
         n
         chunk
         doBlockReduce
-    _ ->
-      generalStageOneBody
-        slugs
-        body_cont
-        glb_ind_var
-        global_tid
-        q
-        n
-        threads_per_segment
-        doBlockReduce
+    StageOneStrided ->
+      sequentialStageOneBody slugs body_cont glb_ind_var q n ReduceAfterLoop doBlockReduce $
+        \i -> global_tid + threads_per_segment * i
+    StageOneContiguous ->
+      sequentialStageOneBody slugs body_cont glb_ind_var q n ReduceAfterLoop doBlockReduce $
+        \i -> global_tid * q + i
+    StageOneWindow -> do
+      let window_size = kernelBlockSize constants
+      block_base_offset <-
+        dPrimVE "block_base_offset" $ (global_tid `quot` window_size) * q * window_size
+      sequentialStageOneBody slugs body_cont glb_ind_var q n ReducePerIteration doBlockReduce $
+        \i -> block_base_offset + i * window_size + ltid
 
   pure new_lambdas
 
-generalStageOneBody ::
-  [SegBinOpSlug] ->
-  DoSegBody ->
-  TV Int64 ->
-  Imp.TExp Int64 ->
-  Imp.TExp Int64 ->
-  Imp.TExp Int64 ->
-  Imp.TExp Int64 ->
-  InKernelGen () ->
+-- | Combine the accumulators of a reduction with the given next values. The
+-- vector indexes select the elements of a vectorised reduction, and are
+-- appended to the indexes of both.
+applyRedOp ::
+  SegBinOpSlug ->
+  [Imp.TExp Int64] ->
+  [(SubExp, [Imp.TExp Int64])] ->
   InKernelGen ()
-generalStageOneBody slugs body_cont glb_ind_var global_tid q n threads_per_segment doBlockReduce = do
-  let is_comm = slugsComm slugs == Commutative
-
-  constants <- kernelConstants <$> askEnv
-  let tblock_size = kernelBlockSize constants
-      ltid = sExt64 $ kernelLocalThreadId constants
-
-  -- this block's id within its designated segment, and this block's initial
-  -- global offset.
-  tblock_id_in_segment <- dPrimVE "tblock_id_in_segment" $ global_tid `quot` tblock_size
-  block_base_offset <- dPrimVE "block_base_offset" $ tblock_id_in_segment * q * tblock_size
-
-  sFor "i" q $ \i -> do
-    block_offset <- dPrimVE "block_offset" $ block_base_offset + i * tblock_size
-    glb_ind_var
-      <-- if is_comm
-        then global_tid + threads_per_segment * i
-        else block_offset + ltid
-
-    sWhen (tvExp glb_ind_var .<. n) $
-      sComment "apply map function(s)" $
-        body_cont $ \all_red_res -> do
-          let maps_res = chunks (map (length . slugNeutral) slugs) all_red_res
-
-          forM2_ slugs maps_res $ \slug map_res ->
-            sLoopNest (slugShape slug) $ \vec_is -> do
-              let (acc_params, next_params) = slugSplitParams slug
-              sComment "load accumulator(s)" $
-                forM2_ acc_params (slugAccs slug) $ \p (acc, acc_is) ->
-                  copyDWIMFix (paramName p) [] (Var acc) (acc_is ++ vec_is)
-              sComment "load next value(s)" $
-                forM2_ next_params map_res $ \p (res, res_is) ->
-                  copyDWIMFix (paramName p) [] res (res_is ++ vec_is)
-              sComment "apply reduction operator(s)"
-                $ compileStms mempty (bodyStms $ slugBody slug)
-                $ sComment "store in accumulator(s)"
-                $ forM2_
-                  (slugAccs slug)
-                  (map resSubExp $ bodyResult $ slugBody slug)
-                $ \(acc, acc_is) se ->
-                  copyDWIMFix acc (acc_is ++ vec_is) se []
-
-    unless is_comm doBlockReduce
-  sOp $ Imp.ErrorSync Imp.FenceLocal
-  when is_comm doBlockReduce
+applyRedOp slug vec_is next_values = do
+  let (acc_params, next_params) = slugSplitParams slug
+  sComment "load accumulator(s)" $
+    forM2_ acc_params (slugAccs slug) $ \p (acc, acc_is) ->
+      copyDWIMFix (paramName p) [] (Var acc) (acc_is ++ vec_is)
+  sComment "load next value(s)" $
+    forM2_ next_params next_values $ \p (v, v_is) ->
+      copyDWIMFix (paramName p) [] v (v_is ++ vec_is)
+  sComment "apply reduction operator(s)" $
+    compileStms mempty (bodyStms $ slugBody slug) $
+      sComment "store in accumulator(s)" $
+        forM2_ (slugAccs slug) (map resSubExp $ bodyResult $ slugBody slug) $
+          \(acc, acc_is) se ->
+            copyDWIMFix acc (acc_is ++ vec_is) se []
 
 noncommPrimParamsStageOneBody ::
   [SegBinOpSlug] ->
@@ -890,23 +927,10 @@ noncommPrimParamsStageOneBody slugs body_cont glb_ind_var global_tid q n chunk d
 
           sOp $ Imp.Barrier Imp.FenceLocal
 
-    sComment "per-thread sequential reduction of private chunk(s)" $ do
+    sComment "per-thread sequential reduction of private chunk(s)" $
       chunkLoop $ \k ->
-        forM_ slugs $ \slug -> do
-          let accs = map fst $ slugAccs slug
-          let (acc_ps, next_ps) = slugSplitParams slug
-          let ps_accs_chunks = zip4 acc_ps next_ps accs (slugPrivChunks slug)
-
-          sComment "load params for all reductions" $ do
-            forM_ ps_accs_chunks $ \(acc_p, next_p, acc, priv_chunk) -> do
-              copyDWIM (paramName acc_p) [] (Var acc) []
-              copyDWIMFix (paramName next_p) [] (Var priv_chunk) [k]
-
-          sComment "apply reduction operator(s)" $ do
-            let binop_ress = map resSubExp $ bodyResult $ slugBody slug
-            compileStms mempty (bodyStms $ slugBody slug) $
-              forM2_ accs binop_ress $ \acc binop_res ->
-                copyDWIM acc [] binop_res []
+        forM_ slugs $ \slug ->
+          applyRedOp slug [] [(Var c, [k]) | c <- slugPrivChunks slug]
     doLMemBlockReduce
   sOp $ Imp.ErrorSync Imp.FenceLocal
 
@@ -1045,8 +1069,8 @@ reductionStageTwo segred_pes tblock_id segment_gtids first_block_for_segment blo
 
 -- Note [IntermArrays]
 --
--- Intermediate memory for the nonsegmented and large segments non-commutative
--- reductions with all primitive parameters:
+-- Intermediate memory for the nonsegmented and large segments reductions using
+-- 'StageOneTiled' (see Note [Stage one strategies]):
 --
 --   These kernels need shared memory for 1) the initial collective copy, 2) the
 --   (virtualized) block reductions, and (TODO: this one not implemented yet!)
@@ -1085,9 +1109,63 @@ reductionStageTwo segred_pes tblock_id segment_gtids first_block_for_segment blo
 --   Aside from shared memory, these kernels also require a CHUNK-sized array of
 --   thread-private register memory per reduction operator.
 --
--- For all other reductions, ie. commutative reductions, reductions with at
--- least one non-primitive operator, and small segments reductions:
+-- For all other reductions, ie. those using 'StageOneStrided',
+-- 'StageOneContiguous', or 'StageOneWindow', and small segments
+-- reductions:
 --
 --   These kernels use shared memory only for the intra-block reductions, and
 --   since they do not use chunking or CHUNK, they all require onlly `tblock_size
 --   * max elem_sizes` bytes of shared memory and no thread-private register mem.
+
+-- Note [Stage one strategies]
+--
+-- In the first stage of a nonsegmented or large-segments reduction, each
+-- thread reduces some of the input elements, after which the per-thread
+-- results are combined by a block-wide reduction.  The strategy decides which
+-- elements a thread reduces.
+--
+-- A commutative operator allows thread @t@ of @T@ to reduce elements @t@,
+-- @t+T@, @t+2T@, and so on ('StageOneStrided'). This gives coalesced memory
+-- accesses and a single block-wide reduction at the end, and we always pick
+-- this strategy for any commutative operator.
+--
+-- A non-commutative operator requires that each thread reduces a contiguous
+-- range of elements.  There are three ways of achieving this:
+--
+-- - 'StageOneContiguous': each thread reduces a contiguous range of @q@
+--   elements, followed by a single block-wide reduction. Order is preserved
+--   because consecutive threads have consecutive ranges, the block-wide
+--   reduction combines the threads in order, and stage two combines the blocks
+--   in order. This is similar to 'StageOneStrided', but results in noncoalesced
+--   reads. However, this strategy can still be a good choice for complex
+--   noncommutative reductions that need fairly little input from global memory,
+--   but have large operands.
+--
+-- - 'StageOneTiled': each block processes a sequence of contiguous tiles of
+--   @tblock_size * chunk@ elements. The map function is applied to the elements
+--   of a tile with coalesced accesses, its results are stored in thread-private
+--   chunks, and the chunks are transposed through shared memory (the collective
+--   copies), such that each thread obtains @chunk@ consecutive elements, which
+--   it reduces sequentially. Since the elements a thread obtains from
+--   consecutive tiles are not adjacent, each tile ends with a block-wide
+--   reduction, whose result thread 0 keeps in its accumulator. The chunk
+--   size amortises the block-wide reductions, but is bounded by the private
+--   storage of @chunk@ copies of the operands (see 'getRedChunkSize'). This
+--   requires non-array operands.
+--
+-- - 'StageOneWindow': each block slides a window of @tblock_size@ elements
+--   across a contiguous range of @q * tblock_size@ elements, with coalesced
+--   accesses and a block-wide reduction per window, whose result is kept in
+--   the accumulator of thread 0.  This is like 'StageOneTiled' with a chunk
+--   size of 1, but needs no private copies of the operands, and so works for
+--   non-primitive operands.  It shares its code with 'StageOneStrided',
+--   except for the indexing and the placement of the block-wide reduction.
+--
+-- 'StageOneTiled' is preferable for cheap operators, where the reduction is
+-- bound by memory bandwidth.  'StageOneContiguous' is preferable for expensive
+-- operators, where the block-wide reductions (which apply the operator several
+-- times per element in each wave, often divergently) dominate.  We have no
+-- good static measure of operator cost, so we use the size of the operands as
+-- a crude proxy: we use 'StageOneTiled' when the operands are primitive and
+-- take up at most 'maxTiledOperandWords' 32-bit words in total.  The threshold
+-- is a heuristic.
