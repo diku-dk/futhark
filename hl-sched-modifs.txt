@@ -31,4 +31,8 @@ that include the word "cosmin", so you can grep for them.
 6. High-Level Schedules are implemented starting with new source file
      `Futhark.Optimise.Fusion.HLsched`, which exports `applyHLsched`
 
-7. ,,,
+7. In src/Futhark/SoP/Monad.hs: modified `transitiveClosure` which otherwise
+     enters an infinite loop when the symbol is VName
+     (because `freeIn x` includes `x` when `x` is a VName)
+
+8. ,,,

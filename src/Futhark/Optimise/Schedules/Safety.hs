@@ -27,6 +27,8 @@ import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Traversable
 import Futhark.IR.SOACS
+import Futhark.SoP.FourierMotzkin( ($<=$) )
+import Futhark.Optimise.Schedules.ScheduleM( ScheduleM )
 import Futhark.Optimise.Schedules.EnvUtils
 import Futhark.Optimise.Schedules.SchedUtils
 import Futhark.SoP.SoP
@@ -64,7 +66,7 @@ import Debug.Trace
 --    3. check safety for stripmining redomaps with Macc: all such strips
 --         should be on top, because we do not change the operator.
 checkValidSched :: TopEnv -> HLSched -> Stm SOACS -> 
-                   (Bool, [Bool], Maybe (Lambda SOACS, [SubExp], Commutativity))
+                   ScheduleM (Bool, [Bool], Maybe (Lambda SOACS, [SubExp], Commutativity))
 checkValidSched _ _ stm@(Let pat _ _)
   | length (patElems pat) > 1 =
   error $ "Schedules are currently restricted to one result, stm: " ++ prettyString stm
@@ -72,11 +74,11 @@ checkValidSched tenv sched stm
   | n <- last (origids sched),
     n >= 0,
     Just dims_kind_mbop <- stmtMatchesSched (freeIn stm) tenv stm [0..n],
-    (_, _, mbop) : _ <- dims_kind_mbop =
-  let colapse_each_dim = saneLmadDims tenv sched
-      strides_of_nest = reverse $ snd $ mapAccumL ff (int2SoP 1) $ reverse dims_kind_mbop
+    (_, _, mbop) : _ <- dims_kind_mbop = do
+  colapse_each_dim <- saneLmadDims tenv sched
+  let strides_of_nest = reverse $ snd $ mapAccumL ff (int2SoP 1) $ reverse dims_kind_mbop
       ok_sane = all sanityCheckDim $ zip3 colapse_each_dim (zip strides_of_nest [0..n-1]) dims_kind_mbop
-  in  (ok_sane, map fst colapse_each_dim, mbop)
+  pure (ok_sane, map fst colapse_each_dim, mbop)
   where
     ff cur_stride (len_sop, kd, _)
       | kd == RedoMapF || kd == DoLoop = (cur_stride, int2SoP 0)
@@ -104,8 +106,8 @@ checkValidSched tenv sched stm
               prettyString ((sched_len, nest_len), (sched_strd, nest_strd))
 --
 checkValidSched _ sched _ =
-  trace ("\n\n\n!!! Schedule FAILS : " ++ prettyString sched ++ "\n\n\n")
-    (False, [], Nothing)
+  trace ("\n\n\n!!! Schedule FAILS : " ++ prettyString sched ++ "\n\n\n") $
+    pure (False, [], Nothing)
 
 --
 -- | Checks that @orig_dim_lens@ are morally equal to the latter result modulo
@@ -147,13 +149,13 @@ applySubsToTerm _ (term, i) = term2SoP term i
 --     1. the boolen indicates whether the dimension's split has introduced redundant computation
 --     2. a tuple denoting the collapsed number-of-elements and stride of that dimension;
 --        this is to be checked w.r.t. original dimensions of the target nest.
-saneLmadDims :: TopEnv -> HLSched -> [(Bool, (SoP VName, SoP VName))]
-saneLmadDims _env sched =
+saneLmadDims :: TopEnv -> HLSched -> ScheduleM [(Bool, (SoP VName, SoP VName))]
+saneLmadDims _env sched = do
   let orig_dims_strd = zip (origids sched) $ zip (map snd $ dimlens sched) (map snd $ strides sched) 
       per_dim_split  = splitLmadPerDim 0 [[]] orig_dims_strd
-      per_dim_res = map (colapseOneDim False . reverse) per_dim_split
-  in  trace ("\n\n\n!!!Orig Sched: " ++ prettyString per_dim_split ++ " Sane Result: " ++ prettyString per_dim_res++"\n\n\n") $
-        per_dim_res
+  per_dim_res <- mapM (colapseOneDim False . reverse) per_dim_split
+  trace ("\n\n\n!!!Orig Sched: " ++ prettyString per_dim_split ++ " Sane Result: " ++ prettyString per_dim_res++"\n\n\n") $
+    pure per_dim_res
   where
     splitLmadPerDim res_k (dim_res:res) ((k, dim_strd):lmad)
       | res_k == k = splitLmadPerDim res_k ((dim_res++[dim_strd]):res) lmad
@@ -165,35 +167,38 @@ saneLmadDims _env sched =
     splitLmadPerDim _ res [] = reverse res
     --
     hasLenOne (n,_) = isZero $ n .-. int2SoP 1
-    queryGeq0 _sop = True
-    -- ^ ToDo: This should be a query under the Fourier-Motzkin Monad!!!
+    queryGeq0 sop = int2SoP 0 $<=$ sop
     --
-    colapseOneDim :: Bool -> [(SoP VName, SoP VName)] -> (Bool, (SoP VName, SoP VName)) 
+    colapseOneDim :: Bool -> [(SoP VName, SoP VName)] -> ScheduleM (Bool, (SoP VName, SoP VName)) 
     colapseOneDim _ [] = error "In colapseLMAD: reached illegal empty lmad case!"
-    colapseOneDim kd [pt] = (kd, pt)
-    colapseOneDim kd ( (n1,s1) : (n2_s2) : lmad ) =
-      let (kd', ns) = applyRules kd (n1,s1) (n2_s2) 
-      in  colapseOneDim kd' $ ns : lmad
+    colapseOneDim kd [pt] = pure (kd, pt)
+    colapseOneDim kd ( (n1,s1) : (n2_s2) : lmad ) = do
+      (kd', ns) <- applyRules kd (n1,s1) (n2_s2) 
+      colapseOneDim kd' $ ns : lmad
     --
     applyRules kd ns1 ns2
-      | isZero (snd ns1) && isZero (snd ns2) = (kd, (fst ns1 .*. fst ns2, snd ns1))
+      | isZero (snd ns1) && isZero (snd ns2) =
+      pure (kd, (fst ns1 .*. fst ns2, snd ns1))
       | isZero (snd ns1) || isZero (snd ns2) =
       error $ "applyRules: cannot combine a zero with a non-zero stride: " ++ prettyString (ns1, ns2)    
     applyRules kd ns1 ns2
-      | hasLenOne ns1 = (kd, ns2)
-      | hasLenOne ns2 = (kd, ns1)
+      | hasLenOne ns1 = pure (kd, ns2)
+      | hasLenOne ns2 = pure (kd, ns1)
     applyRules _ (n1, s1) (n2, s2)
-      | s1 == s2 = (True, (n1 .+. n2 .-. int2SoP 1, s1))
+      | s1 == s2 =
+      pure (True, (n1 .+. n2 .-. int2SoP 1, s1))
     applyRules kd (n1, s1) (n2, s2)
       | ordered_syms <- S.toList (S.difference (free s2) (free s1)) ++ S.toList (free s1),
-        Just (q, r) <- polyDivRem ordered_syms s2 s1 =
-      case (isZero r, queryGeq0 (n1 .-. q)) of
+        Just (q, r) <- polyDivRem ordered_syms s2 s1 = do
+      query_success <- queryGeq0 (n1 .-. q) 
+      case (isZero r, query_success) of
         (False, _) -> error ( "Rule2 fails due to non-zero rem: " ++ prettyString r ++
                               " args " ++ prettyString ((n1, s1), (n2, s2)) )
         (_, False) -> error ( "Rule2 fails due to unknown pos diff: " ++ prettyString (n1 .-. q) ++
                               " args " ++ prettyString ((n1, s1), (n2, s2)) )
-        _ -> let kd' = not $ isZero $ n1 .-. q
-             in  ( kd || kd', (n2 .*. q .+. n1 .-. q, s1) )
+        _ -> do 
+          let kd' = not $ isZero $ n1 .-. q
+          pure ( kd || kd', (n2 .*. q .+. n1 .-. q, s1) )
     applyRules _ (n1, s1) (n2, s2) =
       error $ "SoP's poly division with rem failed for input " ++ prettyString ((n1, s1), (n2, s2))
 

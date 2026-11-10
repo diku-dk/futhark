@@ -18,6 +18,7 @@ import Futhark.IR.SOACS
 import Futhark.Transform.Rename (renameLambda)
 import Futhark.IR.SOACS.Simplify (simplifyLambda)
 import Futhark.Optimise.Fusion(fuseInLambda)
+import Futhark.Optimise.Schedules.ScheduleM
 import Futhark.Optimise.Schedules.EnvUtils
   ( TopEnv(..), invPerm, eqPEs, addPes, mulPes, minPes,
     peFromSe, updateTopdownEnv, addIota2Env )
@@ -47,9 +48,9 @@ import Futhark.SoP.SoP
 --         in if statements that ensures that the accumulator instance is inside the
 --         original iteration space.
 applyStripmining ::
-    (LocalScope SOACS m, MonadFreshNames m) =>
-    TopEnv -> HLSched -> Stm SOACS ->
-    m (Stms SOACS, TopEnv, Exp SOACS)
+    -- (LocalScope SOACS m, MonadFreshNames m) =>
+    TopEnv -> HLSched -> Stm SOACS -> ScheduleM (Stms SOACS, TopEnv, Exp SOACS)
+    -- m (Stms SOACS, TopEnv, Exp SOACS)
 applyStripmining env sched stm@(Let pat aux e)
   | Op soac@(Screma _ _ (ScremaForm _ [] _)) <- e = do
     (prologue_stms, env', stms') <- stripmineStmt 0 env sched (Let pat aux (Op soac))
@@ -188,9 +189,9 @@ stripmineRedoMap _ _ _ _ (ScremaForm _ scans _) =
 --     by a high-level schedule `sched`. The input arrays and types
 --     are given in `inp_nm_tps`, and the input arrays are assumed
 --     to not be transformed.
-stripmineLambda :: (LocalScope SOACS m, MonadFreshNames m) =>
+stripmineLambda :: -- (LocalScope SOACS m, MonadFreshNames m) =>
     Int -> TopEnv -> HLSched -> Lambda SOACS ->
-    m (Stms SOACS, TopEnv, Lambda SOACS)
+    ScheduleM (Stms SOACS, TopEnv, Lambda SOACS) -- m (Stms SOACS, TopEnv, Lambda SOACS)
 stripmineLambda _k env sched lam
   | null (dimlens sched) = pure $ (mempty, env, lam)
 stripmineLambda k env sched lam0 = do
@@ -206,9 +207,9 @@ stripmineLambda k env sched lam0 = do
   new_lam' <- renameLambda new_lam >>= simplifyLambda 0
   pure (prologue_stms, new_env, new_lam')
 
-stripmineBody :: (LocalScope SOACS m, MonadFreshNames m) =>
+stripmineBody :: -- (LocalScope SOACS m, MonadFreshNames m) =>
     Int -> TopEnv -> HLSched  -> Body SOACS ->
-    m (Stms SOACS, TopEnv, Body SOACS)
+    ScheduleM (Stms SOACS, TopEnv, Body SOACS) -- m (Stms SOACS, TopEnv, Body SOACS)
 stripmineBody k env sched bdy = do
   scope <- askScope
   (localScope (scope <> scopeOf (bodyStms bdy)) $
@@ -220,9 +221,9 @@ stripmineBody k env sched bdy = do
       pure (acc_prologue <> new_prologue, new_env, acc_stms <> new_stms)
     g (prol', env', stms') = (prol', env', bdy { bodyStms = stms' })
 
-stripmineStmt :: (LocalScope SOACS m, MonadFreshNames m) =>
+stripmineStmt :: -- (LocalScope SOACS m, MonadFreshNames m) =>
     Int -> TopEnv -> HLSched -> Stm SOACS ->
-    m (Stms SOACS, TopEnv, Stms SOACS)
+    ScheduleM (Stms SOACS, TopEnv, Stms SOACS) -- m (Stms SOACS, TopEnv, Stms SOACS)
 stripmineStmt _ env sched stm
   | null (dimlens sched) = pure $ (Sq.empty, env, Sq.singleton stm)
   -- ^ no schedule to apply, just return statement
@@ -468,8 +469,9 @@ stripmineStmt k env sched stm@(Let pat aux
 --------------------------------------------------------------------------
 --- Stripmining Other Statements
 --------------------------------------------------------------------------
-stripmineStmt _k env _sched stm =
-  pure (mempty, updateTopdownEnv env stm, Sq.singleton stm)
+stripmineStmt _k env _sched stm = do
+  env' <- updateTopdownEnv env stm
+  pure (mempty, env', Sq.singleton stm)
 
 {--
 stripmineStmt _k env _sched stm@(Let pat _aux e) = do 

@@ -329,6 +329,7 @@ library
       Futhark.Optimise.Schedules.ScheduleM
       Futhark.Optimise.Schedules.EnvUtils
       Futhark.Optimise.Schedules.SchedUtils
+      Futhark.Optimise.Schedules.ChainHelper
       Futhark.Optimise.Schedules.Safety
       Futhark.Optimise.Schedules.Stripmine
       Futhark.Optimise.Schedules.Permute

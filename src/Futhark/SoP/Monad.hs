@@ -366,8 +366,18 @@ class (Ord u, Free u u) => RangeRelated u where
         | S.null active = closure
         | (sym, active') <- S.deleteFindMin active,
           closure' <- closure <> rangeRelatedTo sym,
-          seen' <- S.insert sym seen =
+          seen' <- S.insert sym seen,
+          syms_in_sym <- free sym S.\\ S.singleton sym =
             case M.lookup sym rs of
+              Nothing ->
+                let active'' = active' <> syms_in_sym
+                 in tc rs closure' seen' active''
+              Just range ->
+                let new_syms = free range S.\\ seen
+                    active'' = active' <> syms_in_sym <> new_syms
+                 in tc rs closure' seen' active''
+{--
+              -- adding sym in both cases introduces nontermination
               Nothing ->
                 let active'' = active' <> free sym
                  in tc rs closure' seen' active''
@@ -375,6 +385,7 @@ class (Ord u, Free u u) => RangeRelated u where
                 let new_syms = free range S.\\ seen
                     active'' = active' <> free sym <> new_syms
                  in tc rs closure' seen' active''
+--}
 
 substEquivs :: (MonadSoP u e m) => SoP u -> m (SoP u)
 substEquivs sop = flip substitute sop <$> getEquivs

@@ -71,11 +71,15 @@ data BotEnv = BotEnv
     --   (3) an LMAD index-function supporting layout transformations,
     --   (4) the chain of statements until reaching the target soac;
     --       the last element must be the statement defining the schedule.
+  , soac_tab :: M.Map VName (Stm SOACS)
+    -- ^ binds a result name with its SOAC stm target to rescheduling
+  , target_soac_names :: Names
+    -- ^ the result names for the SOACs that are to be rescheduled in this pass
   , optstms   :: Stms SOACS
   }
 
 freshBotEnv :: BotEnv
-freshBotEnv = BotEnv mempty mempty
+freshBotEnv = BotEnv mempty mempty mempty mempty
 
 
 splitAtSched :: Int -> HLSched -> (HLSched, HLSched)

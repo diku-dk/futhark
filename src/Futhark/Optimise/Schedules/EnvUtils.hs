@@ -26,15 +26,17 @@ module Futhark.Optimise.Schedules.EnvUtils
   )
 where
 
+import Control.Monad(foldM)
 import Data.List qualified as L
---import Data.Set qualified as S 
---import Data.Maybe
 import Data.Map.Strict qualified as M
 import Futhark.IR.SOACS hiding (SOAC (..))
 import Futhark.Tools
 import Futhark.SoP.SoP
---import Futhark.SoP.Convert
---import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..))
+import Futhark.SoP.Refine (addRel)
+-- import Futhark.SoP.FourierMotzkin( ($<$), ($<=$) )
+import Futhark.Optimise.Schedules.ScheduleM (ScheduleM)
+-- import Futhark.SoP.Convert
+-- import Futhark.SoP.Monad (AlgEnv (..), MonadSoP (..))
 
 -- import Debug.Trace
 
@@ -142,47 +144,57 @@ addTransf2Env env nm_new nm_old perm_new =
     composePerms prm_new prm_old = 
       map (\ i -> prm_old !! i) prm_new
 
-{--
-addBinOp2Env :: TopEnv -> (VName, Type) -> BinOp -> SubExp -> SubExp -> TopEnv
-addBinOp2Env env (nm,tp) bop s1 s2 =
-  env { scalars = M.insert nm (BinOpExp bop (expSE s1) (expSE s2)) (scalars env) }
-  where expSE se = peFromSe env (elemType tp) se
---}
-
-{--
--- @fromSoP@ and @toSoPNum@ require to work under @MonadSoP@
-addBinOp2Env :: (MonadSoP VName (PrimExp VName) m) => TopEnv -> (VName, Type) -> BinOp -> SubExp -> SubExp -> m TopEnv
-addBinOp2Env env (nm,tp) bop s1 s2 = do
-  let ((pex1, sop1), (pex2, sop2)) = (expSE s1, expSE s2)
-      fv_sop = S.union (freeInSoP sop1) (freeInSoP sop2)
-      -- in order for this to work, it needs to be inside a monad
-  pe_sop1 <- fromSoP sop1
-  pe_sop2 <- fromSoP sop2
-  (_, sop0) <- toSoPNum $ BinOpExp bop pe_sop1 pe_sop2
-  let sop  = if null (S.difference (freeInSoP sop0) fv_sop)
-             then sop0 -- success, no new variables were introduced
-             else sym2SoP nm -- binop result is not in SoP domain
-      pe   = BinOpExp bop pex1 pex2
-  pure $ env { scalars = M.insert nm (pe, sop) (scalars env) }
-  where
-    expSE se = peFromSe env (elemType tp) se
-    freeInSoP :: SoP VName -> S.Set VName
-    freeInSoP = free
---}
-
 -- | The top-down pass records the scalar expansion, iotas,
 --     tiling calls and the like.
 --   ToDos:
 --     1. maybe record also the change-of-layout transformations
 --        into an LMAD, i.e., in the @arrTransf@ filed of @TopEnv@
-updateTopdownEnv :: TopEnv -> Stm SOACS -> TopEnv
-updateTopdownEnv env (Let pat _aux (Apply fnm arg_diets _ _))
+updateTopdownEnv :: TopEnv -> Stm SOACS -> ScheduleM TopEnv
+updateTopdownEnv env (Let pat aux e)
+  | BasicOp (Assert (Var nm) _ _) <- e,
+    Just onecomp <- M.lookup nm (compTrace (assertHelp env)) =
+  handleComparison onecomp
+  --
+  | BasicOp (Assert (Var nm) arg1 arg2) <- e,
+    Just nms <- M.lookup nm (conjTrace (assertHelp env)) = do
+      let mkDummyStmt x = Let pat aux $ BasicOp $ Assert (Var x) arg1 arg2
+      foldM updateTopdownEnv env $ map mkDummyStmt $ namesToList nms
+  --
+  | True = pure $ updateTopdownEnvHelper env $ Let pat aux e
+  where
+    handleComparison (CmpEq ptp@(IntType _), s1, s2) =
+    -- ^ for now we only treat equality; ToDo: handle inequalities using FM's monoid
+      case (peFromSe env ptp s2, peFromSe env ptp s1) of
+        ( ((LeafExp nm _), _), (p1,sop1) ) ->
+          pure $ env { scalars = M.insert nm (p1,sop1) (scalars env) }
+        ( (p2,sop2), ((LeafExp nm _), _) ) ->
+          pure $ env { scalars = M.insert nm (p2,sop2) (scalars env) }
+        _ -> pure env
+    handleComparison (CmpSlt intp, s1, s2) = do
+    -- ^ s1 < s2
+      let ptp = IntType intp
+          (_, sop1) = peFromSe env ptp s1
+          (_, sop2) = peFromSe env ptp s2
+      -- here: add sop1 < sop2 to FM monad
+      addRel (sop1 :<: sop2)
+      pure env
+{--
+      success <- rollbackAlgEnv $ do
+        addRel (sop1 :<: sop2)
+        sop1 $<$ sop2
+      pure $ if success then env else env
+--}
+    --
+    handleComparison _ = pure env
+
+updateTopdownEnvHelper :: TopEnv -> Stm SOACS -> TopEnv
+updateTopdownEnvHelper env (Let pat _aux (Apply fnm arg_diets _ _))
   | any (`L.isPrefixOf` (nameToString fnm)) tileFuns,
     [(size_se, _)] <- arg_diets,
     ptp:_ <- map (elemType . patElemDec)  $ patElems pat =
   addTileBinding env (peFromSe env ptp size_se) $
     map patElemName $ patElems pat
-updateTopdownEnv env (Let pat@(Pat [PatElem pat_nm pat_tp]) aux e)
+updateTopdownEnvHelper env (Let (Pat [PatElem pat_nm pat_tp]) _aux e)
   | BasicOp (Iota w start stride Int64) <- e,
     start == se0 && stride == se1,
     pe_sop_w <- peFromSe env i64ptp w =
@@ -197,23 +209,27 @@ updateTopdownEnv env (Let pat@(Pat [PatElem pat_nm pat_tp]) aux e)
     let compTrace' = M.insert pat_nm (cmpop, s1, s2) $ compTrace $ assertHelp env
     in  env { assertHelp = (assertHelp env) { compTrace = compTrace' } }
   | BasicOp (BinOp bop s1 s2) <- e,
-    Prim ptp <- pat_tp =
+    Prim ptp@(IntType{}) <- pat_tp =
     let (p1, sop1) = peFromSe env ptp s1
         (p2, sop2) = peFromSe env ptp s2
         pex = BinOpExp bop p1 p2
         sop = applyBinOp2SoP bop sop1 sop2
     in env { scalars = M.insert pat_nm (pex,sop) (scalars env) }
+  | BasicOp (BinOp{}) <- e = env
   | BasicOp (UnOp unop se) <- e,
-    Prim ptp <- pat_tp,
+    Prim ptp@(IntType{}) <- pat_tp,
     (pe, sop) <- peFromSe env ptp se =
     env { scalars = M.insert pat_nm (UnOpExp unop pe, applyUnOp2SoP unop sop) (scalars env) }
+  | BasicOp (UnOp{}) <- e = env
+{--
   | BasicOp (Assert (Var nm) _ _) <- e,
     Just onecomp <- M.lookup nm (compTrace (assertHelp env)) =
       handleComparison onecomp
   | BasicOp (Assert (Var nm) arg1 arg2) <- e,
     Just nms <- M.lookup nm (conjTrace (assertHelp env)) =
       let mkDummyStmt x = Let pat aux $ BasicOp $ Assert (Var x) arg1 arg2
-      in  foldl updateTopdownEnv env $ map mkDummyStmt $ namesToList nms
+      in  foldl updateTopdownEnvHelper env $ map mkDummyStmt $ namesToList nms
+--}
   | BasicOp (ArrayLit arg_ses (Prim ptp)) <- e =
     env { arrayLits = M.insert pat_nm (map (peFromSe env ptp) arg_ses) (arrayLits env) }
   | BasicOp (Scratch _ptp [se]) <- e,
@@ -252,17 +268,7 @@ updateTopdownEnv env (Let pat@(Pat [PatElem pat_nm pat_tp]) aux e)
       | Just nms <- M.lookup nm (conjTrace (assertHelp env)) = nms
     getConj (Var nm) = oneName nm
     getConj _ = mempty
-    --
-    handleComparison (CmpEq ptp@(IntType _), s1, s2) =
-    -- ^ for now we only treat equality; ToDo: handle inequalities using FM's monoid
-      case (peFromSe env ptp s2, peFromSe env ptp s1) of
-        ( ((LeafExp nm _), _), (p1,sop1) ) ->
-          env { scalars = M.insert nm (p1,sop1) (scalars env) }
-        ( (p2,sop2), ((LeafExp nm _), _) ) ->
-          env { scalars = M.insert nm (p2,sop2) (scalars env) }
-        _ -> env
-    handleComparison _ = env
-updateTopdownEnv env _ = env
+updateTopdownEnvHelper env _ = env
 
 -------------------------------------------------------
 --- Simple Utilities
