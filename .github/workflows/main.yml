@@ -33,15 +33,24 @@ jobs:
     runs-on: ubuntu-24.04-arm
     steps:
     - uses: actions/checkout@v7
+
     - name: Install Nix
       uses: cachix/install-nix-action@v27
+
     - uses: cachix/cachix-action@v17
       with:
         name: futhark
         authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
         signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
+
     - name: Build Futhark
       run: nix build .#tarball-nightly
+
+    - uses: ./.github/actions/check-linux-arm64-tarball
+      with:
+        tarball: result/futhark-nightly-linux-arm64.tar.xz
+        directory: futhark-nightly-linux-arm64
+
     - uses: actions/upload-artifact@v5
       with:
         name: futhark-nightly-linux-arm64.tar.xz
@@ -776,7 +785,7 @@ jobs:
 
   deploy-nightly:
     runs-on: ubuntu-24.04
-    needs: [build-linux-x86_64-nix, build-mac-cabal, build-windows-cabal, test-tools]
+    needs: [build-linux-x86_64-nix, build-linux-arm64-nix, build-mac-cabal, build-windows-cabal, test-tools]
     if: github.ref == 'refs/heads/master'
 
     steps:
@@ -800,11 +809,15 @@ jobs:
 
     - uses: actions/download-artifact@v8
       with:
+        name: futhark-nightly-linux-arm64.tar.xz
+
+    - uses: actions/download-artifact@v8
+      with:
         name: prelude-docs.tar.xz
 
     - name: scp tarballs to server
       run: |
-        scp -o StrictHostKeyChecking=no futhark-nightly-*-x86_64.{tar.xz,zip} futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/releases
+        scp -o StrictHostKeyChecking=no futhark-nightly-*-{x86_64,arm64}.{tar.xz,zip} futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/releases
 
     - name: copy docs to server
       run: |
