@@ -29,6 +29,29 @@ jobs:
         name: futhark-nightly-linux-x86_64.tar.xz
         path: result/futhark-nightly-linux-x86_64.tar.xz
 
+  build-linux-arm64-nix:
+    runs-on: ubuntu-24.04-arm
+    steps:
+    - uses: actions/checkout@v7
+    - name: Install Nix
+      uses: cachix/install-nix-action@v27
+    - uses: cachix/cachix-action@v17
+      with:
+        name: futhark
+        authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+        signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
+    - name: Build Futhark
+      run: nix build .#tarball-nightly
+    - uses: ./.github/actions/check-linux-arm64-tarball
+      with:
+        tarball: result/futhark-nightly-linux-arm64.tar.xz
+        directory: futhark-nightly-linux-arm64
+    - uses: actions/upload-artifact@v5
+      with:
+        name: futhark-nightly-linux-arm64.tar.xz
+        path: result/futhark-nightly-linux-arm64.tar.xz
+        if-no-files-found: error
+
   build-linux-cabal:
     runs-on: ubuntu-24.04
 
