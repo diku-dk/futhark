@@ -717,11 +717,13 @@ It is generally a bad idea for ``s`` to be non-constant.
 Slicing of multiple dimensions can be done by separating with commas,
 and may be intermixed freely with indexing.
 
-If ``s`` is elided it defaults to ``1``.  If ``i`` or ``j`` is elided, their
-value depends on the sign of ``s``.  If ``s`` is positive, ``i`` become ``0``
-and ``j`` become the length of the array.  If ``s`` is negative, ``i`` becomes
-the length of the array minus one, and ``j`` becomes minus one.  This means that
-``a[::-1]`` is the reverse of the array ``a``.
+If ``s`` is elided it defaults to ``1``. If ``i`` or ``j`` is elided, their
+value depends on the sign of ``s``. If ``s`` is positive, ``i`` become ``0`` and
+``j`` become the length of the array. If ``s`` is negative, ``i`` becomes the
+length of the array minus one, and ``j`` becomes minus one. This means that
+``a[::-1]`` is the reverse of the array ``a``, and that ``a[:]`` retrives the
+entire dimension - this is only useful when slicing multiple dimensions. Note
+that ``a[::]`` is not syntactically valid.
 
 In the general case, the size of the array produced by a slice is
 unknown (see `Size types`_).  In a few cases, the size is known
