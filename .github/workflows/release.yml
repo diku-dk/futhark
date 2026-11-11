@@ -6,7 +6,7 @@ on:
     - 'v*' # Push events to matching v*, i.e. v1.0, v20.15.10
 
 jobs:
-  build:
+  build-linux-x86_64:
     name: Create and upload release tarballs
     if: github.event.base_ref == 'refs/heads/master'
     runs-on: ubuntu-latest
@@ -81,7 +81,7 @@ jobs:
 
   publish-linux-arm64:
     name: Publish Linux Arm64 release tarball
-    needs: [build, build-linux-arm64]
+    needs: [build-linux-x86_64, build-linux-arm64]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
