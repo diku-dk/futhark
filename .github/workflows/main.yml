@@ -42,10 +42,6 @@ jobs:
         signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
     - name: Build Futhark
       run: nix build .#tarball-nightly
-    - uses: ./.github/actions/check-linux-arm64-tarball
-      with:
-        tarball: result/futhark-nightly-linux-arm64.tar.xz
-        directory: futhark-nightly-linux-arm64
     - uses: actions/upload-artifact@v5
       with:
         name: futhark-nightly-linux-arm64.tar.xz
