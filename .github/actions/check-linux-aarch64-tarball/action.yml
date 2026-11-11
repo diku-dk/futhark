@@ -1,0 +1,39 @@
+# Just a quick check; no reason to run the entire test suite.
+name: Check Linux ARM64 tarball
+description: Install and smoke-test a statically linked Linux ARM64 tarball
+inputs:
+  tarball:
+    description: Path to the tarball to check
+    required: true
+  directory:
+    description: Top-level directory inside the tarball
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Check and install tarball
+      shell: bash
+      env:
+        TARBALL: ${{ inputs.tarball }}
+        DIRECTORY: ${{ inputs.directory }}
+      run: |
+        set -euo pipefail
+        tar -xf "$TARBALL" -C "$RUNNER_TEMP"
+        binary="$RUNNER_TEMP/$DIRECTORY/bin/futhark"
+        readelf -h "$binary" | grep -E 'Machine:.*AArch64'
+        readelf -l "$binary" > "$RUNNER_TEMP/futhark-program-headers"
+        readelf -d "$binary" > "$RUNNER_TEMP/futhark-dynamic-section"
+        if grep -q 'INTERP' "$RUNNER_TEMP/futhark-program-headers" ||
+           grep -q '(NEEDED)' "$RUNNER_TEMP/futhark-dynamic-section"; then
+          echo "Futhark binary is not statically linked" >&2
+          exit 1
+        fi
+        make -C "$RUNNER_TEMP/$DIRECTORY" install PREFIX="$RUNNER_TEMP/futhark-install"
+        echo "$RUNNER_TEMP/futhark-install/bin" >> "$GITHUB_PATH"
+    - name: Test compiler and generated code
+      shell: bash
+      run: |
+        set -euo pipefail
+        futhark --version
+        futhark test -i tests/primitive/i32_division.fut
+        futhark test -c --backend=c tests/primitive/i32_division.fut
