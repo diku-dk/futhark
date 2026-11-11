@@ -159,9 +159,9 @@
               ]
               [
                 "linux-x86_64"
-                "linux-arm64"
+                "linux-aarch64"
                 "x86_darwin-64"
-                "darwin-arm64"
+                "darwin-aarch64"
               ]
               system;
 

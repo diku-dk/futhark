@@ -29,7 +29,7 @@ jobs:
         name: futhark-nightly-linux-x86_64.tar.xz
         path: result/futhark-nightly-linux-x86_64.tar.xz
 
-  build-linux-arm64-nix:
+  build-linux-aarch64-nix:
     runs-on: ubuntu-24.04-arm
     steps:
     - uses: actions/checkout@v7
@@ -46,15 +46,15 @@ jobs:
     - name: Build Futhark
       run: nix build .#tarball-nightly
 
-    - uses: ./.github/actions/check-linux-arm64-tarball
+    - uses: ./.github/actions/check-linux-aarch64-tarball
       with:
-        tarball: result/futhark-nightly-linux-arm64.tar.xz
-        directory: futhark-nightly-linux-arm64
+        tarball: result/futhark-nightly-linux-aarch64.tar.xz
+        directory: futhark-nightly-linux-aarch64
 
     - uses: actions/upload-artifact@v5
       with:
-        name: futhark-nightly-linux-arm64.tar.xz
-        path: result/futhark-nightly-linux-arm64.tar.xz
+        name: futhark-nightly-linux-aarch64.tar.xz
+        path: result/futhark-nightly-linux-aarch64.tar.xz
         if-no-files-found: error
 
   build-linux-cabal:
@@ -115,24 +115,24 @@ jobs:
 
     - name: Build
       run: |
-        cp -r tools/release/skeleton futhark-nightly-macos-arm64
+        cp -r tools/release/skeleton futhark-nightly-macos-aarch64
 
-        mkdir -p futhark-nightly-macos-arm64/bin
+        mkdir -p futhark-nightly-macos-aarch64/bin
         cabal v2-update
-        cabal install --install-method=copy --overwrite-policy=always --installdir=futhark-nightly-macos-arm64/bin
-        mkdir -p futhark-nightly-macos-arm64/share/man/man1/
+        cabal install --install-method=copy --overwrite-policy=always --installdir=futhark-nightly-macos-aarch64/bin
+        mkdir -p futhark-nightly-macos-aarch64/share/man/man1/
         (cd docs; make man)
-        cp -r docs/_build/man/* futhark-nightly-macos-arm64/share/man/man1/
+        cp -r docs/_build/man/* futhark-nightly-macos-aarch64/share/man/man1/
 
-        mkdir -p futhark-nightly-macos-arm64/share/futhark
-        cp LICENSE futhark-nightly-macos-arm64/share/futhark/
-        echo "${GITHUB_SHA}" > futhark-nightly-macos-arm64/commit-id
-        tar -Jcf futhark-nightly-macos-arm64.tar.xz futhark-nightly-macos-arm64
+        mkdir -p futhark-nightly-macos-aarch64/share/futhark
+        cp LICENSE futhark-nightly-macos-aarch64/share/futhark/
+        echo "${GITHUB_SHA}" > futhark-nightly-macos-aarch64/commit-id
+        tar -Jcf futhark-nightly-macos-aarch64.tar.xz futhark-nightly-macos-aarch64
 
     - uses: actions/upload-artifact@v5
       with:
-        name: futhark-nightly-macos-arm64.tar.xz
-        path: futhark-nightly-macos-arm64.tar.xz
+        name: futhark-nightly-macos-aarch64.tar.xz
+        path: futhark-nightly-macos-aarch64.tar.xz
 
   build-windows-cabal:
     runs-on: windows-latest
@@ -785,7 +785,7 @@ jobs:
 
   deploy-nightly:
     runs-on: ubuntu-24.04
-    needs: [build-linux-x86_64-nix, build-linux-arm64-nix, build-mac-cabal, build-windows-cabal, test-tools]
+    needs: [build-linux-x86_64-nix, build-linux-aarch64-nix, build-mac-cabal, build-windows-cabal, test-tools]
     if: github.ref == 'refs/heads/master'
 
     steps:
@@ -801,7 +801,7 @@ jobs:
 
     - uses: actions/download-artifact@v8
       with:
-        name: futhark-nightly-macos-arm64.tar.xz
+        name: futhark-nightly-macos-aarch64.tar.xz
 
     - uses: actions/download-artifact@v8
       with:
@@ -809,7 +809,7 @@ jobs:
 
     - uses: actions/download-artifact@v8
       with:
-        name: futhark-nightly-linux-arm64.tar.xz
+        name: futhark-nightly-linux-aarch64.tar.xz
 
     - uses: actions/download-artifact@v8
       with:
@@ -817,7 +817,7 @@ jobs:
 
     - name: scp tarballs to server
       run: |
-        scp -o StrictHostKeyChecking=no futhark-nightly-*-{x86_64,arm64}.{tar.xz,zip} futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/releases
+        scp -o StrictHostKeyChecking=no futhark-nightly-*-{x86_64,aarch64}.{tar.xz,zip} futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/releases
 
     - name: copy docs to server
       run: |
@@ -832,5 +832,5 @@ jobs:
         name: "nightly"
         files: |
           futhark-nightly-linux-x86_64.tar.xz
-          futhark-nightly-macos-arm64.tar.xz
+          futhark-nightly-macos-aarch64.tar.xz
           futhark-nightly-windows-x86_64.zip

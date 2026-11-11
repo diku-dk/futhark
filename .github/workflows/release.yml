@@ -55,8 +55,8 @@ jobs:
         TARBALL: ${{ steps.metadata.outputs.TARBALL }}
       run: scp -o StrictHostKeyChecking=no result/$TARBALL futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/releases
 
-  build-linux-arm64:
-    name: Build Linux Arm64 release tarball
+  build-linux-aarch64:
+    name: Build Linux Aarch64 release tarball
     if: github.event.base_ref == 'refs/heads/master'
     runs-on: ubuntu-24.04-arm
     steps:
@@ -69,26 +69,26 @@ jobs:
         echo "VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
     - name: Build tarball
       run: nix build .#tarball
-    - uses: ./.github/actions/check-linux-arm64-tarball
+    - uses: ./.github/actions/check-linux-aarch64-tarball
       with:
-        tarball: result/futhark-${{ steps.metadata.outputs.VERSION }}-linux-arm64.tar.xz
-        directory: futhark-${{ steps.metadata.outputs.VERSION }}-linux-arm64
+        tarball: result/futhark-${{ steps.metadata.outputs.VERSION }}-linux-aarch64.tar.xz
+        directory: futhark-${{ steps.metadata.outputs.VERSION }}-linux-aarch64
     - uses: actions/upload-artifact@v5
       with:
-        name: futhark-linux-arm64-release
-        path: result/futhark-${{ steps.metadata.outputs.VERSION }}-linux-arm64.tar.xz
+        name: futhark-linux-aarch64-release
+        path: result/futhark-${{ steps.metadata.outputs.VERSION }}-linux-aarch64.tar.xz
         if-no-files-found: error
 
-  publish-linux-arm64:
-    name: Publish Linux Arm64 release tarball
-    needs: [build-linux-x86_64, build-linux-arm64]
+  publish-linux-aarch64:
+    name: Publish Linux Aarch64 release tarball
+    needs: [build-linux-x86_64, build-linux-aarch64]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
     - uses: actions/download-artifact@v8
       with:
-        name: futhark-linux-arm64-release
+        name: futhark-linux-aarch64-release
     - name: Install SSH key
       uses: shimataro/ssh-key-action@v2
       with:
@@ -99,7 +99,7 @@ jobs:
         GH_TOKEN: ${{ github.token }}
         GH_REPO: ${{ github.repository }}
       run: |
-        tarball="futhark-${GITHUB_REF#refs/tags/v}-linux-arm64.tar.xz"
+        tarball="futhark-${GITHUB_REF#refs/tags/v}-linux-aarch64.tar.xz"
         scp -o StrictHostKeyChecking=no "$tarball" futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/releases
         gh release upload "$GITHUB_REF_NAME" "$tarball" --clobber
 
