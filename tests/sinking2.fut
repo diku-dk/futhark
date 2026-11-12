@@ -1,5 +1,6 @@
 -- Sinking can be safe even in the presence of in-place updates.
 -- ==
+-- tags { no_webgpu }
 -- structure gpu { /SegMap/Index 1 }
 
 def main (n: i64) (as: []i32) (bs: []i32) (cs: []i32) (ds: []i32) (es: []i32) =

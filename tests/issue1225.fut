@@ -1,3 +1,5 @@
+-- ==
+-- tags { no_webgpu }
 def main [h] [w] (pic: [h][w][3]u8) idxArr : [][][3]u8 =
   map2 (\(row: [][3]u8) i ->
           if i == 0

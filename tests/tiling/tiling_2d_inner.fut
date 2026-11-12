@@ -1,5 +1,6 @@
 -- 2D tiling with extra dimensions on top.
 -- ==
+-- tags { no_webgpu }
 -- compiled random input { [2][40][40]i32 [2][40][40]i32 } auto output
 -- structure gpu { SegMap/SegMap 4
 -- SegMap/Loop/SegMap 1

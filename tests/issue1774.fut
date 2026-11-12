@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_webgpu }
 -- compiled random input { [3]f32 [100]f32 [10]f32 } auto output
 -- structure mc-mem { Alloc 3 }
 

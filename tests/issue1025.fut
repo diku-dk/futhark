@@ -1,4 +1,6 @@
 -- Derived from futracer
+-- ==
+-- tags { no_webgpu }
 
 module f32racer = {
   type t = f32

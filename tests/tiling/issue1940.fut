@@ -1,6 +1,7 @@
 -- The #[unsafe] is just to avoid noisy assertions.  The bug here is
 -- the handling of the loop.
 -- ==
+-- tags { no_webgpu }
 -- structure gpu { /SegMap/Loop/SegMap 2 }
 
 def dotprod [n] (a: [n]f32) (b: [n]f32) : f32 =

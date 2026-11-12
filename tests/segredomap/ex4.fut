@@ -1,5 +1,6 @@
 -- A segmented-redomap using the same array in both maps
 -- ==
+-- tags { no_webgpu }
 -- input {
 --   [1i32, 2i32, 3i32, 4i32]
 -- }

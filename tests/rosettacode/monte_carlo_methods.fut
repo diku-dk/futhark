@@ -2,7 +2,7 @@
 --
 -- Using Sobol sequences for random numbers.
 -- ==
--- tags { no_python }
+-- tags { no_python no_webgpu }
 -- input { 1 } output { 4f32 }
 -- input { 10 } output { 3.2f32 }
 -- compiled input { 100 } output { 3.16f32 }

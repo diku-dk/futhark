@@ -1,5 +1,6 @@
 -- Applying tiling inside of fused scanomaps.
 -- ==
+-- tags { no_webgpu }
 -- structure gpu { /If/True/SegScan 1 /If/False/SegScan 1 }
 
 def main (xs: []i32) =

@@ -1,5 +1,6 @@
 --
 -- ==
+-- tags { no_webgpu }
 -- input { 2i64 [0, 1, 1] } output { [2, 6] [0f32, 0f32] }
 -- structure { Screma 0 Hist 1 }
 

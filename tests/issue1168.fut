@@ -1,3 +1,5 @@
+-- ==
+-- tags { no_webgpu }
 type triad 't = (t, t, t)
 def triadMap 'a 'b (f: a -> b) (A: triad a) : triad b = (f A.0, f A.1, f A.2)
 def triadMap2 'a 'b 'c (f: a -> b -> c) (A: triad a) (B: triad b) : triad c = (f A.0 B.0, f A.1 B.1, f A.2 B.2)

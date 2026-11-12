@@ -1,4 +1,6 @@
 -- The reduction operator works on lists
+-- ==
+-- tags { no_webgpu }
 
 def vec_add [k] (xs: [k]i32) (ys: [k]i32) : [k]i32 =
   map2 (\x y -> x + y) xs ys

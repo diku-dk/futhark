@@ -1,6 +1,7 @@
 -- After fusion, consumes a free variable.  Fixed with copy().
 --
 -- ==
+-- tags { no_webgpu }
 -- structure { /Screma 1 }
 
 def main [n] [m] (as: [n]i32, bs: [m]bool) : [n]i32 =

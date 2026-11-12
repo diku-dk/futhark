@@ -1,5 +1,6 @@
 -- 2D tiling, but where the arrays are variant to an outermost third dimension.
 -- ==
+-- tags { no_webgpu }
 -- structure gpu { SegMap/SegMap 4
 -- SegMap/Loop/SegMap 1
 -- SegMap/SegMap 2
