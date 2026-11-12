@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Better GPU code generation for reductions with very complicated operators.
 
+* Optimised internal book-keeping of GPU operations, resulting in lower static
+  memory usage for large programs.
+
 ### Removed
 
 ### Changed

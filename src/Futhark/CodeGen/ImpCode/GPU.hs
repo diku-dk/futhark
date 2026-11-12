@@ -7,6 +7,8 @@ module Futhark.CodeGen.ImpCode.GPU
     KernelConst (..),
     KernelConstExp,
     HostOp (..),
+    Bookkeeping (..),
+    bookkeepingSize,
     KernelOp (..),
     Fence (..),
     AtomicOp (..),
@@ -48,7 +50,28 @@ data HostOp
   | GetSize VName Name SizeClass
   | CmpSizeLe VName Name SizeClass Exp
   | GetSizeMax VName SizeClass
+  | -- | Bind the given device memory to one of the bookkeeping buffers of the
+    -- context.
+    GetBookkeeping VName Bookkeeping
   deriving (Show)
+
+-- | The bookkeeping buffers are device buffers of 32-bit integers that belong
+-- to the context and are shared by all kernels. They are zero whenever no
+-- kernel is running, and a kernel that uses them must leave them zeroed when it
+-- succeeds, and the context zeroes them again after a failure. As kernels run
+-- serially, they never compete for them. If we ever add support for multiple
+-- streams, we must have a set of buffers per stream.
+data Bookkeeping
+  = -- | Counters, e.g. for detecting the last block to finish.
+    BookkeepingCounters
+  | -- | Locks for operations that cannot be done atomically.
+    BookkeepingLocks
+  deriving (Eq, Ord, Show)
+
+-- | The number of 32-bit integers in a bookkeeping buffer.
+bookkeepingSize :: Bookkeeping -> Integer
+bookkeepingSize BookkeepingCounters = 1024
+bookkeepingSize BookkeepingLocks = 100151
 
 -- | The size of one dimension of a block.
 type BlockDim = Either Exp KernelConstExp
@@ -114,6 +137,10 @@ instance Pretty HostOp where
       <> parens (commasep [pretty key, pretty size_class])
   pretty (GetSizeMax dest size_class) =
     pretty dest <+> "<-" <+> "get_size_max" <> parens (pretty size_class)
+  pretty (GetBookkeeping dest BookkeepingCounters) =
+    pretty dest <+> "<-" <+> "bookkeeping_counters()"
+  pretty (GetBookkeeping dest BookkeepingLocks) =
+    pretty dest <+> "<-" <+> "bookkeeping_locks()"
   pretty (CmpSizeLe dest name size_class x) =
     pretty dest
       <+> "<-"
@@ -132,6 +159,8 @@ instance FreeIn HostOp where
   freeIn' (GetSizeMax dest _) =
     freeIn' dest
   freeIn' (GetSize dest _ _) =
+    freeIn' dest
+  freeIn' (GetBookkeeping dest _) =
     freeIn' dest
 
 instance FreeIn Kernel where

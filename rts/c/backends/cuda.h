@@ -215,6 +215,8 @@ struct futhark_context {
   CUdeviceptr global_failure_args;
   // True if a potentially failing kernel has been enqueued.
   int32_t failure_is_an_option;
+  CUdeviceptr bookkeeping_counters;
+  CUdeviceptr bookkeeping_locks;
   int total_runs;
   long int total_runtime;
   int64_t peak_mem_usage_device;
@@ -724,6 +726,16 @@ static int cuda_event_report(struct str_builder* sb, void* p) {
   return 0;
 }
 
+static int zero_bookkeeping(struct futhark_context* ctx) {
+  CUDA_SUCCEED_OR_RETURN(cuMemsetD8Async(ctx->bookkeeping_counters, 0,
+                                         sizeof(int32_t)*bookkeeping_counters_size,
+                                         ctx->stream));
+  CUDA_SUCCEED_OR_RETURN(cuMemsetD8Async(ctx->bookkeeping_locks, 0,
+                                         sizeof(int32_t)*bookkeeping_locks_size,
+                                         ctx->stream));
+  return 0;
+}
+
 int futhark_context_sync(struct futhark_context* ctx) {
   CUDA_SUCCEED_OR_RETURN(cuCtxPushCurrent(ctx->cu_ctx));
   CUDA_SUCCEED_OR_RETURN(cuCtxSynchronize());
@@ -744,6 +756,11 @@ int futhark_context_sync(struct futhark_context* ctx) {
                              cuMemcpyHtoD(ctx->global_failure,
                                           &no_failure,
                                           sizeof(int32_t)));
+
+      // The failing kernel may have left the bookkeeping buffers nonzero.
+      if (zero_bookkeeping(ctx) != 0) {
+        return 1;
+      }
 
       int64_t args[max_failure_args+1];
       CUDA_SUCCEED_OR_RETURN(
@@ -856,6 +873,12 @@ int backend_context_setup(struct futhark_context* ctx) {
   // The +1 is to avoid zero-byte allocations.
   CUDA_SUCCEED_FATAL(cuMemAlloc(&ctx->global_failure_args, sizeof(int64_t)*(max_failure_args+1)));
 
+  CUDA_SUCCEED_FATAL(cuMemAlloc(&ctx->bookkeeping_counters, sizeof(int32_t)*bookkeeping_counters_size));
+  CUDA_SUCCEED_FATAL(cuMemAlloc(&ctx->bookkeeping_locks, sizeof(int32_t)*bookkeeping_locks_size));
+  if (zero_bookkeeping(ctx) != 0) {
+    return 1;
+  }
+
   if ((ctx->kernels = init_builtin_kernels(ctx)) == NULL) {
     return 1;
   }
@@ -868,6 +891,8 @@ void backend_context_teardown(struct futhark_context* ctx) {
     free_builtin_kernels(ctx, ctx->kernels);
     cuMemFree(ctx->global_failure);
     cuMemFree(ctx->global_failure_args);
+    cuMemFree(ctx->bookkeeping_counters);
+    cuMemFree(ctx->bookkeeping_locks);
     if (gpu_free_all(ctx) != FUTHARK_SUCCESS) {
       futhark_panic(-1, "Failed to free GPU memory:\n%s", ctx->error);
     }

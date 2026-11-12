@@ -32,7 +32,7 @@ module Futhark.CodeGen.ImpGen.GPU.Base
     blockCoverSpace,
     fenceForArrays,
     updateAcc,
-    genZeroes,
+    bookkeepingArray,
     isPrimParam,
     kernelConstToExp,
     getSize,
@@ -182,15 +182,16 @@ updateAcc safety acc is vs = sComment "UpdateAcc" $ do
             Nothing ->
               error $ "Missing locks for " ++ prettyString acc
 
--- | Generate a constant device array of 32-bit integer zeroes with
--- the given number of elements.  Initialised with a replicate.
-genZeroes :: Name -> Int -> CallKernelGen VName
-genZeroes desc n = genConstants $ do
-  counters_mem <- sAlloc (desc <> "_mem") (4 * fromIntegral n) (Space "device")
-  let shape = Shape [intConst Int64 (fromIntegral n)]
-  counters <- sArrayInMem desc int32 shape counters_mem
-  sReplicate counters $ intConst Int32 0
-  pure (namesFromList [counters_mem], counters)
+-- | Retrieve a bookkeeping array.
+bookkeepingArray :: Imp.Bookkeeping -> CallKernelGen VName
+bookkeepingArray b = do
+  mem <- sDeclareMem (desc <> "_mem") (Space "device")
+  sOp $ Imp.GetBookkeeping mem b
+  sArrayInMem desc int32 (Shape [intConst Int64 $ Imp.bookkeepingSize b]) mem
+  where
+    desc = case b of
+      Imp.BookkeepingCounters -> "counters"
+      Imp.BookkeepingLocks -> "locks"
 
 compileThreadExp :: ExpCompiler GPUMem KernelEnv Imp.KernelOp
 compileThreadExp (Pat [pe]) (BasicOp (Opaque _ se)) =

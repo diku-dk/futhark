@@ -126,6 +126,7 @@ findParamUsers env defs = M.mapWithKey onParam
     getSize (ImpOpenCL.CmpSizeLe _ v _) = Just v
     getSize (ImpOpenCL.GetSizeMax {}) = Nothing
     getSize (ImpOpenCL.LaunchKernel {}) = Nothing
+    getSize (ImpOpenCL.GetBookkeeping {}) = Nothing
     directUseInFun fun = mapMaybe getSize $ toList $ functionBody fun
     direct_uses = map (second directUseInFun) $ unFunctions $ defFuns defs
 
@@ -235,6 +236,8 @@ onHostOp _ (ImpGPU.CmpSizeLe v key _ x) =
   pure $ ImpOpenCL.CmpSizeLe v key x
 onHostOp _ (ImpGPU.GetSizeMax v size_class) =
   pure $ ImpOpenCL.GetSizeMax v size_class
+onHostOp _ (ImpGPU.GetBookkeeping v b) =
+  pure $ ImpOpenCL.GetBookkeeping v b
 
 genGPUCode ::
   Env ->
