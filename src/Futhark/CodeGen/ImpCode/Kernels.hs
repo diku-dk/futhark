@@ -5,6 +5,8 @@ module Futhark.CodeGen.ImpCode.Kernels
     KernelArg (..),
     HostCode,
     HostOp (..),
+    Bookkeeping (..),
+    bookkeepingSize,
     KernelSafety (..),
     numFailureParams,
     FailureMsg (..),
@@ -17,7 +19,13 @@ module Futhark.CodeGen.ImpCode.Kernels
 where
 
 import Futhark.CodeGen.ImpCode
-import Futhark.CodeGen.ImpCode.GPU (BlockDim, KernelConst (..), KernelConstExp)
+import Futhark.CodeGen.ImpCode.GPU
+  ( BlockDim,
+    Bookkeeping (..),
+    KernelConst (..),
+    KernelConstExp,
+    bookkeepingSize,
+  )
 import Futhark.IR.GPU.Sizes
 import Futhark.Util.Pretty
 
@@ -73,6 +81,7 @@ data HostOp
   | GetSize VName Name
   | CmpSizeLe VName Name Exp
   | GetSizeMax VName SizeClass
+  | GetBookkeeping VName Bookkeeping
   deriving (Show)
 
 instance Pretty HostOp where

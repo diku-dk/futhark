@@ -449,6 +449,8 @@ struct futhark_context {
   cl_mem global_failure_args;
   // True if a potentially failing kernel has been enqueued.
   cl_int failure_is_an_option;
+  cl_mem bookkeeping_counters;
+  cl_mem bookkeeping_locks;
   int total_runs;
   long int total_runtime;
   int64_t peak_mem_usage_device;
@@ -672,6 +674,19 @@ static int opencl_event_report(struct str_builder* sb, void* p) {
   return 0;
 }
 
+static int zero_bookkeeping(struct futhark_context* ctx) {
+  cl_int zero = 0;
+  OPENCL_SUCCEED_OR_RETURN(clEnqueueFillBuffer(ctx->queue, ctx->bookkeeping_counters,
+                                               &zero, sizeof(zero),
+                                               0, sizeof(int32_t)*bookkeeping_counters_size,
+                                               0, NULL, NULL));
+  OPENCL_SUCCEED_OR_RETURN(clEnqueueFillBuffer(ctx->queue, ctx->bookkeeping_locks,
+                                               &zero, sizeof(zero),
+                                               0, sizeof(int32_t)*bookkeeping_locks_size,
+                                               0, NULL, NULL));
+  return 0;
+}
+
 int futhark_context_sync(struct futhark_context* ctx) {
   // Check for any delayed error.
   cl_int failure_idx = -1;
@@ -695,6 +710,11 @@ int futhark_context_sync(struct futhark_context* ctx) {
                              clEnqueueWriteBuffer(ctx->queue, ctx->global_failure, CL_TRUE,
                                                   0, sizeof(cl_int), &no_failure,
                                                   0, NULL, NULL));
+
+    // The failing kernel may have left the bookkeeping buffers nonzero.
+    if (zero_bookkeeping(ctx) != 0) {
+      return 1;
+    }
 
     int64_t args[max_failure_args+1];
     OPENCL_SUCCEED_OR_RETURN(
@@ -1154,6 +1174,18 @@ int backend_context_setup(struct futhark_context* ctx) {
                    sizeof(int64_t)*(max_failure_args+1), NULL, &error);
   OPENCL_SUCCEED_OR_RETURN(error);
 
+  ctx->bookkeeping_counters =
+    clCreateBuffer(ctx->ctx, CL_MEM_READ_WRITE,
+                   sizeof(int32_t)*bookkeeping_counters_size, NULL, &error);
+  OPENCL_SUCCEED_OR_RETURN(error);
+  ctx->bookkeeping_locks =
+    clCreateBuffer(ctx->ctx, CL_MEM_READ_WRITE,
+                   sizeof(int32_t)*bookkeeping_locks_size, NULL, &error);
+  OPENCL_SUCCEED_OR_RETURN(error);
+  if (zero_bookkeeping(ctx) != 0) {
+    return 1;
+  }
+
   if ((ctx->kernels = init_builtin_kernels(ctx)) == NULL) {
     return 1;
   }
@@ -1168,6 +1200,8 @@ void backend_context_teardown(struct futhark_context* ctx) {
     free_builtin_kernels(ctx, ctx->kernels);
     OPENCL_SUCCEED_FATAL(clReleaseMemObject(ctx->global_failure));
     OPENCL_SUCCEED_FATAL(clReleaseMemObject(ctx->global_failure_args));
+    OPENCL_SUCCEED_FATAL(clReleaseMemObject(ctx->bookkeeping_counters));
+    OPENCL_SUCCEED_FATAL(clReleaseMemObject(ctx->bookkeeping_locks));
     (void)gpu_free_all(ctx);
     (void)clReleaseProgram(ctx->clprogram);
     (void)clReleaseCommandQueue(ctx->queue);

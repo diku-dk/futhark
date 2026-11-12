@@ -196,21 +196,19 @@ prepareAtomicUpdateGlobal ::
       [Imp.TExp Int64] -> InKernelGen ()
     )
 prepareAtomicUpdateGlobal l segments dests slug =
-  -- We need a separate lock array if the operators are not all of a
-  -- particularly simple form that permits pure atomic operations.
+  -- We need locks if the operators are not all of a particularly
+  -- simple form that permits pure atomic operations.
   case (l, slugAtomicUpdate slug) of
     (_, AtomicPrim f) -> pure (l, f (Space "global") dests)
     (_, AtomicCAS f) -> pure (l, f (Space "global") dests)
     (Just l', AtomicLocking f) -> pure (l, f l' (Space "global") dests)
     (Nothing, AtomicLocking f) -> do
-      -- The number of locks used here is too low, but since we are
-      -- currently forced to inline a huge list, I'm keeping it down
-      -- for now.  Some quick experiments suggested that it has little
-      -- impact anyway (maybe the locking case is just too slow).
-      --
-      -- A fun solution would also be to use a simple hashing
-      -- algorithm to ensure good distribution of locks.
-      let num_locks = 100151
+      -- The lock for a bucket is chosen by its flat index modulo the
+      -- number of locks.  More locks, or a simple hashing algorithm
+      -- that distributes the buckets better, might reduce contention,
+      -- but quick experiments suggested that it has little impact
+      -- (maybe the locking case is just too slow).
+      let num_locks = Imp.bookkeepingSize Imp.BookkeepingLocks
           dims =
             map pe64 $
               shapeDims segments
@@ -218,7 +216,7 @@ prepareAtomicUpdateGlobal l segments dests slug =
                 ++ [tvSize (slugNumSubhistos slug)]
                 ++ shapeDims (histShape (slugOp slug))
 
-      locks <- genZeroes "hist_locks" num_locks
+      locks <- bookkeepingArray Imp.BookkeepingLocks
       let l' = Locking locks 0 1 0 (pure . (`rem` fromIntegral num_locks) . flattenIndex dims)
       pure (Just l', f l' (Space "global") dests)
 

@@ -183,6 +183,14 @@ def initialise_opencl_object(
     )
     self.failure_is_an_option = np.int32(0)
 
+    self.bookkeeping_counters = self.pool.allocate(
+        np.int32().itemsize * self.bookkeeping_counters_size
+    )
+    self.bookkeeping_locks = self.pool.allocate(
+        np.int32().itemsize * self.bookkeeping_locks_size
+    )
+    zero_bookkeeping(self)
+
     if "default_group_size" in user_sizes:
         default_group_size = user_sizes["default_group_size"]
         del user_sizes["default_group_size"]
@@ -389,6 +397,23 @@ def opencl_free_all(self):
     self.pool.free_held()
 
 
+def zero_bookkeeping(self):
+    cl.enqueue_fill_buffer(
+        self.queue,
+        self.bookkeeping_counters,
+        np.int32(0),
+        0,
+        np.int32().itemsize * self.bookkeeping_counters_size,
+    )
+    cl.enqueue_fill_buffer(
+        self.queue,
+        self.bookkeeping_locks,
+        np.int32(0),
+        0,
+        np.int32().itemsize * self.bookkeeping_locks_size,
+    )
+
+
 def sync(self):
     failure = np.empty(1, dtype=np.int32)
     cl.enqueue_copy(self.queue, failure, self.global_failure, is_blocking=True)
@@ -402,6 +427,9 @@ def sync(self):
             0,
             np.int32().itemsize,
         )
+
+        # The failing kernel may have left the bookkeeping buffers nonzero.
+        zero_bookkeeping(self)
 
         # Read failure args.
         failure_args = np.empty(

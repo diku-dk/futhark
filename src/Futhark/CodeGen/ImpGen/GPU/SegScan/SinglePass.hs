@@ -360,7 +360,8 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
           <$> sAllocArray "aggregates" ty (Shape [num_virt_blocks]) (Space "device")
           <*> sAllocArray "incprefixes" ty (Shape [num_virt_blocks]) (Space "device")
 
-  global_id <- genZeroes "global_dynid" 1
+  -- The first counter hands out the dynamic IDs.
+  global_id <- bookkeepingArray Imp.BookkeepingCounters
 
   let attrs' =
         attrs

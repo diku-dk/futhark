@@ -42,7 +42,6 @@ module Futhark.CodeGen.ImpGen.GPU.SegRed
 where
 
 import Control.Monad
-import Data.List (zip4)
 import Data.Map qualified as M
 import Data.Maybe
 import Futhark.CodeGen.ImpCode.GPU qualified as Imp
@@ -355,7 +354,7 @@ nonsegmentedReduction (Pat segred_pes) num_tblocks tblock_size strategy (chunk_v
       global_tid = Imp.le64 $ segFlat space
       n = pe64 $ last dims
 
-  counters <- genZeroes "counters" $ length segbinops
+  counters <- bookkeepingArray Imp.BookkeepingCounters
 
   reds_block_res_arrs <- groupResultArrays num_tblocks_se tblock_size_se segbinops
 
@@ -401,19 +400,15 @@ nonsegmentedReduction (Pat segred_pes) num_tblocks tblock_size strategy (chunk_v
             (map (length . segBinOpNeutral) segbinops)
             segred_pes
 
-    forM_ (zip4 segred_pess slugs new_lambdas [0 ..]) $
-      \(pes, slug, new_lambda, i) ->
-        reductionStageTwo
-          pes
-          tblock_id
-          [0]
-          0
-          (sExt64 $ kernelNumBlocks constants)
-          slug
-          new_lambda
-          counters
-          sync_arr
-          (fromInteger i)
+    reductionStageTwo
+      tblock_id
+      [0]
+      0
+      (sExt64 $ kernelNumBlocks constants)
+      (zip3 segred_pess slugs new_lambdas)
+      counters
+      sync_arr
+      0
 
 smallSegmentsReduction :: DoCompileSegRed
 smallSegmentsReduction (Pat segred_pes) num_tblocks tblock_size _ _ space segbinops map_body_cont = do
@@ -569,13 +564,13 @@ largeSegmentsReduction (Pat segred_pes) num_tblocks tblock_size strategy (chunk_
   -- However, we exploit the fact that the number of segments being
   -- reduced at any point in time is limited by the number of
   -- threadblocks. If we bound the number of threadblocks, we can get away
-  -- with using that many counters.  FIXME: Is this limit checked
-  -- anywhere?  There are other places in the compiler that will fail
-  -- if the block count exceeds the maximum block size, which is at
-  -- most 1024 anyway.
-  let counters_per_op = 1024
-  counters <-
-    genZeroes "counters" $ fromIntegral $ length segbinops * counters_per_op
+  -- with using that many counters, so we use the bookkeeping counters (see
+  -- 'Imp.Bookkeeping'), indexed by the segment modulo their number.  FIXME:
+  -- Is this limit checked anywhere?  There are other places in the compiler
+  -- that will fail if the block count exceeds the maximum block size, which
+  -- is at most 1024 anyway.
+  counters <- bookkeepingArray Imp.BookkeepingCounters
+  let num_counters = Imp.bookkeepingSize Imp.BookkeepingCounters
 
   let attrs =
         (defKernelAttrs num_tblocks tblock_size)
@@ -631,23 +626,15 @@ largeSegmentsReduction (Pat segred_pes) num_tblocks tblock_size strategy (chunk_
               segred_pes
 
           multiple_blocks_per_segment =
-            forM_ (zip4 segred_pess slugs new_lambdas [0 ..]) $
-              \(pes, slug, new_lambda, i) -> do
-                let counter_idx =
-                      fromIntegral (i * counters_per_op)
-                        + flat_segment_id
-                          `rem` fromIntegral counters_per_op
-                reductionStageTwo
-                  pes
-                  virttblock_id
-                  (map Imp.le64 segment_gtids)
-                  first_block_for_segment
-                  blocks_per_segment
-                  slug
-                  new_lambda
-                  counters
-                  sync_arr
-                  counter_idx
+            reductionStageTwo
+              virttblock_id
+              (map Imp.le64 segment_gtids)
+              first_block_for_segment
+              blocks_per_segment
+              (zip3 segred_pess slugs new_lambdas)
+              counters
+              sync_arr
+              (flat_segment_id `rem` fromIntegral num_counters)
 
           one_block_per_segment =
             sComment "first thread in block saves final result to memory" $
@@ -934,38 +921,35 @@ noncommPrimParamsStageOneBody slugs body_cont glb_ind_var global_tid q n chunk d
     doLMemBlockReduce
   sOp $ Imp.ErrorSync Imp.FenceLocal
 
+-- | The second stage of a reduction where each segment is handled by more than
+-- one block. Each block writes its partial results for all the operators, and
+-- the last block of the segment to do so combines them into the final results.
+-- The blocks find out which of them is last by incrementing a counter for the
+-- segment, which the last block then resets.
 reductionStageTwo ::
-  [PatElem LetDecMem] ->
   Imp.TExp Int32 ->
   [Imp.TExp Int64] ->
   Imp.TExp Int64 ->
   Imp.TExp Int64 ->
-  SegBinOpSlug ->
-  Lambda GPUMem ->
+  [([PatElem LetDecMem], SegBinOpSlug, Lambda GPUMem)] ->
   VName ->
   VName ->
   Imp.TExp Int64 ->
   InKernelGen ()
-reductionStageTwo segred_pes tblock_id segment_gtids first_block_for_segment blocks_per_segment slug new_lambda counters sync_arr counter_idx = do
+reductionStageTwo tblock_id segment_gtids first_block_for_segment blocks_per_segment reds counters sync_arr counter_idx = do
   constants <- kernelConstants <$> askEnv
 
   let ltid32 = kernelLocalThreadId constants
-      ltid = sExt64 ltid32
-      tblock_size = kernelBlockSize constants
-
-  let (acc_params, next_params) = slugSplitParams slug
-      nes = slugNeutral slug
-      red_arrs = slugBlockRedArrs slug
-      block_res_arrs = blockResArrs slug
 
   old_counter <- dPrim "old_counter"
   (counter_mem, _, counter_offset) <- fullyIndexArray counters [counter_idx]
-  sComment "first thread in block saves block result to global memory" $
+  sComment "first thread in block saves block results to global memory" $
     sWhen (ltid32 .==. 0) $ do
-      forM_ (take (length nes) $ zip block_res_arrs (slugAccs slug)) $ \(v, (acc, acc_is)) ->
-        writeAtomic v [0, sExt64 tblock_id] (Var acc) acc_is
-      -- Increment the counter, thus stating that our result is
-      -- available.
+      forM_ reds $ \(_, slug, _) ->
+        forM_ (take (length (slugNeutral slug)) $ zip (blockResArrs slug) (slugAccs slug)) $
+          \(v, (acc, acc_is)) ->
+            writeAtomic v [0, sExt64 tblock_id] (Var acc) acc_is
+      -- Increment the counter, thus declaring that our results are available.
       sOp
         $ Imp.Atomic DefaultSpace
         $ Imp.AtomicAdd
@@ -974,8 +958,8 @@ reductionStageTwo segred_pes tblock_id segment_gtids first_block_for_segment blo
           counter_mem
           counter_offset
         $ untyped (1 :: Imp.TExp Int32)
-      -- Now check if we were the last block to write our result.  If
-      -- so, it is our responsibility to produce the final result.
+      -- Now check if we were the last block to write our results.  If
+      -- so, it is our responsibility to produce the final results.
       sWrite sync_arr [0] $ untyped $ tvExp old_counter .==. sExt32 (blocks_per_segment - 1)
 
   sOp $ Imp.Barrier Imp.FenceGlobal
@@ -983,7 +967,7 @@ reductionStageTwo segred_pes tblock_id segment_gtids first_block_for_segment blo
   is_last_block <- dPrim "is_last_block"
   copyDWIMFix (tvVar is_last_block) [] (Var sync_arr) [0]
   sWhen (tvExp is_last_block) $ do
-    -- The final block has written its result (and it was
+    -- The final block has written its results (and it was
     -- us!), so read in all the block results and perform the
     -- final stage of the reduction.  But first, we reset the
     -- counter so it is ready for next time.  This is done
@@ -996,69 +980,88 @@ reductionStageTwo segred_pes tblock_id segment_gtids first_block_for_segment blo
             untyped $
               sExt32 (negate blocks_per_segment)
 
-    sLoopNest (slugShape slug) $ \vec_is -> do
-      unless (null $ slugShape slug) $
-        sOp (Imp.Barrier Imp.FenceLocal)
+    mapM_ (finalReduction segment_gtids first_block_for_segment blocks_per_segment) reds
 
-      -- There is no guarantee that the number of threadblocks for the
-      -- segment is less than the threadblock size, so each thread may
-      -- have to read multiple elements.  We do this in a sequential
-      -- way that may induce non-coalesced accesses, but the total
-      -- number of accesses should be tiny here.
-      --
-      -- TODO: here we *could* insert a collective copy of the num_tblocks
-      -- per-block results. However, it may not be beneficial, since num_tblocks
-      -- is not necessarily larger than tblock_size, meaning the number of
-      -- uncoalesced reads here may be insignificant. In fact, if we happen to
-      -- have a num_tblocks < tblock_size, then the collective copy would add
-      -- unnecessary overhead. Also, this code is only executed by a single
-      -- block.
-      sComment "read in the per-block-results" $ do
-        read_per_thread <-
-          dPrimVE "read_per_thread" $
-            blocks_per_segment `ceilDiv` sExt64 tblock_size
+-- | Combine the partial results that the blocks of a segment have written for
+-- one operator. Executed by a single block.
+finalReduction ::
+  [Imp.TExp Int64] ->
+  Imp.TExp Int64 ->
+  Imp.TExp Int64 ->
+  ([PatElem LetDecMem], SegBinOpSlug, Lambda GPUMem) ->
+  InKernelGen ()
+finalReduction segment_gtids first_block_for_segment blocks_per_segment (segred_pes, slug, new_lambda) = do
+  constants <- kernelConstants <$> askEnv
 
-        forM2_ acc_params nes $ \p ne ->
-          copyDWIM (paramName p) [] ne []
+  let ltid32 = kernelLocalThreadId constants
+      ltid = sExt64 ltid32
+      tblock_size = kernelBlockSize constants
 
-        sFor "i" read_per_thread $ \i -> do
-          block_res_id <-
-            dPrimVE "block_res_id" $
-              ltid * read_per_thread + i
-          index_of_block_res <-
-            dPrimVE "index_of_block_res" $
-              first_block_for_segment + block_res_id
+  let (acc_params, next_params) = slugSplitParams slug
+      nes = slugNeutral slug
+      red_arrs = slugBlockRedArrs slug
+      block_res_arrs = blockResArrs slug
 
-          sWhen (block_res_id .<. blocks_per_segment) $ do
-            forM2_ next_params block_res_arrs $
-              \p block_res_arr ->
-                copyDWIMFix
-                  (paramName p)
-                  []
-                  (Var block_res_arr)
-                  ([0, index_of_block_res] ++ vec_is)
+  sLoopNest (slugShape slug) $ \vec_is -> do
+    unless (null $ slugShape slug) $
+      sOp (Imp.Barrier Imp.FenceLocal)
 
-            compileStms mempty (bodyStms $ slugBody slug) $
-              forM2_ acc_params (map resSubExp $ bodyResult $ slugBody slug) $ \p se ->
-                copyDWIMFix (paramName p) [] se []
+    -- There is no guarantee that the number of threadblocks for the segment is
+    -- less than the threadblock size, so each thread may have to read multiple
+    -- elements. We do this in a sequential way that may induce non-coalesced
+    -- accesses, but the total number of accesses should be tiny here.
+    --
+    -- TODO: here we *could* insert a collective copy of the num_tblocks
+    -- per-block results. However, it may not be beneficial, since num_tblocks
+    -- is not necessarily larger than tblock_size, meaning the number of
+    -- uncoalesced reads here may be insignificant. In fact, if we happen to
+    -- have a num_tblocks < tblock_size, then the collective copy would add
+    -- unnecessary overhead. Also, this code is only executed by a single block.
+    sComment "read in the per-block-results" $ do
+      read_per_thread <-
+        dPrimVE "read_per_thread" $
+          blocks_per_segment `ceilDiv` sExt64 tblock_size
 
-      forM2_ acc_params red_arrs $ \p arr ->
-        when (isPrimParam p) $
-          copyDWIMFix arr [ltid] (Var $ paramName p) []
+      forM2_ acc_params nes $ \p ne ->
+        copyDWIM (paramName p) [] ne []
 
-      sOp $ Imp.ErrorSync Imp.FenceLocal
+      sFor "i" read_per_thread $ \i -> do
+        block_res_id <-
+          dPrimVE "block_res_id" $
+            ltid * read_per_thread + i
+        index_of_block_res <-
+          dPrimVE "index_of_block_res" $
+            first_block_for_segment + block_res_id
 
-      sComment "reduce the per-block results" $ do
-        blockReduce (sExt32 tblock_size) new_lambda red_arrs
+        sWhen (block_res_id .<. blocks_per_segment) $ do
+          forM2_ next_params block_res_arrs $ \p block_res_arr ->
+            copyDWIMFix
+              (paramName p)
+              []
+              (Var block_res_arr)
+              ([0, index_of_block_res] ++ vec_is)
 
-        sComment "and back to memory with the final result" $
-          sWhen (ltid32 .==. 0) $
-            forM2_ segred_pes (lambdaParams new_lambda) $ \pe p ->
-              copyDWIMFix
-                (patElemName pe)
-                (segment_gtids ++ vec_is)
-                (Var $ paramName p)
-                []
+          compileStms mempty (bodyStms $ slugBody slug) $
+            forM2_ acc_params (map resSubExp $ bodyResult $ slugBody slug) $ \p se ->
+              copyDWIMFix (paramName p) [] se []
+
+    forM2_ acc_params red_arrs $ \p arr ->
+      when (isPrimParam p) $
+        copyDWIMFix arr [ltid] (Var $ paramName p) []
+
+    sOp $ Imp.ErrorSync Imp.FenceLocal
+
+    sComment "reduce the per-block results" $ do
+      blockReduce (sExt32 tblock_size) new_lambda red_arrs
+
+      sComment "and back to memory with the final result" $
+        sWhen (ltid32 .==. 0) $
+          forM2_ segred_pes (lambdaParams new_lambda) $ \pe p ->
+            copyDWIMFix
+              (patElemName pe)
+              (segment_gtids ++ vec_is)
+              (Var $ paramName p)
+              []
 
 -- Note [IntermArrays]
 --
