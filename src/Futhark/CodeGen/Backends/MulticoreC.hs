@@ -309,6 +309,7 @@ generateParLoopFn lexical basename code fstruct free retval = do
         mapM_ GC.item =<< GC.declAllocatedMem
         mapM_ GC.item code'
         free_mem <- GC.freeAllocatedMem
+        mapM_ GC.item =<< GC.errorLabel
         GC.stm [C.cstm|cleanup: {$stms:free_cached $items:free_mem}|]
     pure
       [C.cedecl|int $id:s(void *args, typename int64_t iterations, int tid, struct scheduler_info info) {
@@ -398,12 +399,13 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
     Nothing ->
       GC.stm [C.cstm|$id:ftask_name.nested_fn=NULL;|]
 
+  failure <- GC.failureJump
   let ftask_err = fpar_task <> "_err"
       code =
         [C.citems|int $id:ftask_err = scheduler_prepare_task(&ctx->scheduler, &$id:ftask_name);
                   if ($id:ftask_err != 0) {
                     err = $id:ftask_err;
-                    goto cleanup;
+                    $stm:failure
                   }|]
 
   mapM_ GC.item code
@@ -430,6 +432,7 @@ compileOp (ParLoop s' body free) = do
         mapM_ GC.item =<< GC.declAllocatedMem
         free_mem <- GC.freeAllocatedMem
         mapM_ GC.item body'
+        mapM_ GC.item =<< GC.errorLabel
         GC.stm [C.cstm|cleanup: {$stms:free_cached $items:free_mem}|]
     pure
       [C.cedecl|static int $id:s(void *args,
@@ -456,6 +459,7 @@ compileOp (ParLoop s' body free) = do
 
   let ftask_err = ftask <> "_err"
       ftask_total = ftask <> "_total"
+  failure <- GC.failureJump
   code' <-
     benchmarkCode
       ftask_total
@@ -463,7 +467,7 @@ compileOp (ParLoop s' body free) = do
                                                            &$id:ftask_name);
                if ($id:ftask_err != 0) {
                  err = $id:ftask_err;
-                 goto cleanup;
+                 $stm:failure
                }|]
 
   mapM_ GC.item code'
@@ -489,6 +493,12 @@ compileOp (ExtractLane dest tar _) = do
   GC.stm [C.cstm|$id:dest = $exp:tar';|]
 compileOp (GetError v) =
   GC.stm [C.cstm|$id:v = ctx->error != NULL;|]
+compileOp (OnError body handler) =
+  GC.compileOnError propagate body handler
+  where
+    propagate = do
+      failure <- GC.failureJump
+      pure [C.citems|$stm:failure|]
 
 scopedBlock :: MCCode -> GC.CompilerM Multicore s ()
 scopedBlock code = do

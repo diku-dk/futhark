@@ -214,9 +214,15 @@ data KernelOp
     -- assertion. If so, all threads of the block execute the given code and
     -- then stop. The code must not fail, and is usually empty. Make sure all
     -- threads would reach all 'ErrorSync's if any of them do. A failing
-    -- assertion will jump to the next following 'ErrorSync', so make sure it's
-    -- not inside control flow or similar.
+    -- assertion will jump to the next following 'ErrorSync' (unless it is in
+    -- the body of an 'OnError'), so make sure it's not inside control flow or
+    -- similar.
     ErrorSync Fence (Code KernelOp)
+  | -- | @OnError body handler@ executes @body@, and if it fails, the failing
+    -- thread executes @handler@ before the failure propagates as usual. This is
+    -- for code that a failing thread must still execute, such as releasing a
+    -- lock. The handler must not fail, and @body@ must not contain barriers.
+    OnError (Code KernelOp) (Code KernelOp)
   deriving (Show)
 
 -- | Atomic operations return the value stored before the update. This
@@ -294,6 +300,8 @@ instance Pretty KernelOp where
       handler' = case handler of
         Skip -> mempty
         _ -> " on_error" <> brace (pretty handler)
+  pretty (OnError body handler) =
+    "on_error" <> brace (pretty body) <> brace (pretty handler)
   pretty (Atomic _ (AtomicAdd t old arr ind x)) =
     pretty old
       <+> "<-"
@@ -369,6 +377,7 @@ instance FreeIn KernelOp where
   freeIn' (Atomic _ op) = freeIn' op
   freeIn' (SharedAlloc _ size) = freeIn' size
   freeIn' (ErrorSync _ handler) = freeIn' handler
+  freeIn' (OnError body handler) = freeIn' body <> freeIn' handler
   freeIn' _ = mempty
 
 brace :: Doc a -> Doc a
