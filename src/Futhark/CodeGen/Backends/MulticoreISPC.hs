@@ -790,6 +790,16 @@ compileGetStructVals struct a b = concat <$> zipWithM field a b
                      $id:name.size = 0;
                      $id:name.references = NULL;|]
 
+-- | Does this code contain an 'OnError', not counting those in the tasks of
+-- nested 'SegOp's?
+hasOnError :: MCCode -> Bool
+hasOnError = any onOp
+  where
+    onOp OnError {} = True
+    onOp (ForEach _ _ _ body) = hasOnError body
+    onOp (ForEachActive _ body) = hasOnError body
+    onOp _ = False
+
 -- | Can the given code produce an error? If so, we can't use foreach
 -- loops, since they don't allow for early-outs in error handling.
 mayProduceError :: MCCode -> Bool
@@ -800,6 +810,7 @@ mayProduceError (While _ x) = mayProduceError x
 mayProduceError (Op (ForEachActive _ body)) = mayProduceError body
 mayProduceError (Op (ForEach _ _ _ body)) = mayProduceError body
 mayProduceError (Op SegOp {}) = True
+mayProduceError (Op (OnError x y)) = mayProduceError x || mayProduceError y
 mayProduceError Allocate {} = True
 mayProduceError Assert {} = True
 mayProduceError SetMem {} = True
@@ -874,6 +885,7 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
                         struct $id:fstruct $tyqual:uniform * $tyqual:uniform args,
                         $tyqual:uniform int iterations);|]
 
+  failure <- GC.failureJump
   aos_name <- newVName "aos"
   GC.items
     [C.citems|
@@ -892,10 +904,16 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
     $escstm:("#else")
     err = $id:schedn(ctx, &$id:(fstruct <> "_"), $exp:e');
     if (err != 0) {
-      goto cleanup;
+      $stm:failure
     }
     $escstm:("#endif")|]
   GC.stms read_retvals
+compileOp (ISPCKernel body free)
+  | hasOnError body =
+      -- See Note [OnError in ISPC kernels].
+      local (\env -> env {GC.envOperations = MC.operations}) $
+        MC.compileOp $
+          ISPCKernel body free
 compileOp (ISPCKernel body free) = do
   free_ctypes <- mapM MC.paramToCType free
   let free_args = map paramName free
@@ -912,7 +930,9 @@ compileOp (ISPCKernel body free) = do
           GC.collect $ do
             GC.decl [C.cdecl|$tyqual:uniform struct futhark_context * $tyqual:uniform ctx = $id:fstruct'->ctx;|]
             GC.items =<< compileGetStructVals fstruct free_args free_ctypes
-            body' <- GC.collect $ compileCode body
+            body' <- GC.collect $ do
+              compileCode body
+              GC.items =<< GC.errorLabel
             mapM_ GC.item decl_cached
             mapM_ GC.item =<< GC.declAllocatedMem
 
@@ -963,11 +983,12 @@ compileOp (ISPCKernel body free) = do
         }|]
 
   -- Generate C code to call into ISPC kernel
+  failure <- GC.failureJump
   GC.items
     [C.citems|
     err = $id:ispcShim(start, end, & $id:fstruct');
     if (err != 0) {
-      goto cleanup;
+      $stm:failure
     }|]
 compileOp (ForEach i from bound body) = do
   from' <- compileExp from
@@ -1094,6 +1115,9 @@ findDeps (Op (ForEach _ _ _ body)) =
   findDeps body
 findDeps (Op (ForEachActive _ body)) =
   findDeps body
+findDeps (Op (OnError body handler)) = do
+  findDeps body
+  findDeps handler
 findDeps (SetScalar name e) =
   addDeps name $ freeIn e
 findDeps (Call tars _ args) =
@@ -1133,6 +1157,7 @@ findVarying (If _ x y) = findVarying x ++ findVarying y
 findVarying (For _ _ x) = findVarying x
 findVarying (While _ x) = findVarying x
 findVarying (Op (ForEachActive _ body)) = findVarying body
+findVarying (Op (OnError body handler)) = findVarying body ++ findVarying handler
 findVarying (Op (ForEach idx _ _ body)) = idx : findVarying body
 findVarying (DeclareMem mem _) = [mem]
 findVarying (Op (SegOp _ _ _ _ retvals _)) = map paramName retvals
@@ -1167,3 +1192,14 @@ getVariabilityQuals name = variQuals <$> getVariability name
   where
     variQuals Uniform = [C.ctyquals|$tyqual:uniform|]
     variQuals Varying = []
+
+-- Note [OnError in ISPC kernels]
+--
+-- The handler of an 'OnError' is reached by jumping to a label when the body
+-- fails, but ISPC does not allow jumps in varying control flow, and the body of
+-- a 'ForEach' may be duplicated, which would duplicate the label.  Failures in
+-- ISPC kernels instead return from the kernel, which would skip the handler.
+-- We therefore do not generate ISPC for a kernel that contains an 'OnError',
+-- but compile it as C, exactly like the multicore C backend does.  'OnError' is
+-- used only around the operator of a lock-based update, whose execution is
+-- mostly serialised anyway, but the rest of the kernel loses vectorisation.

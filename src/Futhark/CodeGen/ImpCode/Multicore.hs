@@ -48,6 +48,11 @@ data Multicore
     GetError VName
   | -- | An atomic operation on a memory block in the given space.
     Atomic Space AtomicOp
+  | -- | @OnError body handler@ executes @body@, and if it fails, executes
+    -- @handler@ before the failure propagates as usual.  This is for code that
+    -- must still be executed after a failure, such as releasing a lock.  The
+    -- handler must not fail.
+    OnError MCCode MCCode
 
 -- | Multicore code.
 type MCCode = Code Multicore
@@ -156,6 +161,8 @@ instance Pretty Multicore where
     pretty dest <+> "<-" <+> "extract" <+> parens (commasep $ map pretty [tar, lane])
   pretty (GetError v) =
     pretty v <+> "<-" <+> "get_error()"
+  pretty (OnError body handler) =
+    "on_error" <+> nestedBlock (pretty body) <+> nestedBlock (pretty handler)
 
 instance FreeIn SchedulerInfo where
   freeIn' (SchedulerInfo iter _) = freeIn' iter
@@ -186,6 +193,8 @@ instance FreeIn Multicore where
     freeIn' dest <> freeIn' tar <> freeIn' lane
   freeIn' (GetError v) =
     freeIn' v
+  freeIn' (OnError body handler) =
+    freeIn' body <> freeIn' handler
 
 -- | Whether 'lexicalMemoryUsageMC' should look inside nested kernels
 -- or not.
@@ -215,6 +224,7 @@ lexicalMemoryUsageMC gokernel func =
     -- go into new functions. For the Multicore backend, we can do it, though.
     goOp f (ForEach _ _ _ body) = go f body
     goOp f (ForEachActive _ body) = go f body
+    goOp f (OnError body handler) = f body <> f handler
     goOp f (ISPCKernel body _) =
       case gokernel of
         TraverseKernels -> go f body

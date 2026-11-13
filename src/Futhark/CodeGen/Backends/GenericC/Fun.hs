@@ -32,7 +32,7 @@ compileFunBody output_ptrs outputs code = do
     setRetVal' p (MemParam name space) =
       -- It is required that the memory block is already initialised
       -- (although it may be NULL).
-      setMem [C.cexp|*$exp:p|] name space [C.cstm|{err = 1; goto cleanup;}|]
+      setMem [C.cexp|*$exp:p|] name space memoryFailure
     setRetVal' p (ScalarParam name _) =
       stm [C.cstm|*$exp:p = $id:name;|]
 
@@ -64,6 +64,7 @@ compileFun get_constants extra (fname, func) = inNewFunction $ do
     body' <- collect $ compileFunBody out_ptrs outputs body
     decl_mem <- declAllocatedMem
     free_mem <- freeAllocatedMem
+    error_label <- errorLabel
     let futhark_function =
           C.DeclSpec [] [C.EscTypeQual "FUTHARK_FUN_ATTR" mempty] (C.Tint Nothing mempty) mempty
 
@@ -76,6 +77,7 @@ compileFun get_constants extra (fname, func) = inNewFunction $ do
                $items:decl_mem
                $items:get_constants
                $items:body'
+               $items:error_label
               cleanup:
                {
                $stms:free_cached

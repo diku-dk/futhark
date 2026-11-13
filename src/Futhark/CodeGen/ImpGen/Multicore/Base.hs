@@ -157,6 +157,7 @@ isLoadBalanced (Imp.Op (Imp.ParLoop _ code _)) = isLoadBalanced code
 isLoadBalanced (Imp.Op (Imp.ForEachActive _ a)) = isLoadBalanced a
 isLoadBalanced (Imp.Op (Imp.ForEach _ _ _ a)) = isLoadBalanced a
 isLoadBalanced (Imp.Op (Imp.ISPCKernel a _)) = isLoadBalanced a
+isLoadBalanced (Imp.Op (Imp.OnError a b)) = isLoadBalanced a && isLoadBalanced b
 isLoadBalanced _ = True
 
 decideScheduling' :: SegOp () rep -> Imp.MCCode -> Imp.Scheduling
@@ -467,8 +468,11 @@ atomicUpdateLocking _ op = AtomicLocking $ \locking arrs bucket -> do
     sUnless (lock_acquired .==. 0) $ do
       dLParams acc_params
       bind_acc_params
-      op_body
-      do_hist
+      -- A thread whose operator fails must still release the lock, or other
+      -- threads would wait for it forever.
+      update <- collect $ op_body >> do_hist
+      on_error <- collect release_lock
+      sOp $ Imp.OnError update on_error
       release_lock
   where
     writeArray bucket arr val = copyDWIMFix arr bucket val []
@@ -546,5 +550,6 @@ taskProvenance = Imp.foldProvenances onOp
     onOp (Imp.ISPCKernel code _) = taskProvenance code
     onOp (Imp.ForEach _ _ _ code) = taskProvenance code
     onOp (Imp.ForEachActive _ code) = taskProvenance code
+    onOp (Imp.OnError code handler) = taskProvenance code <> taskProvenance handler
     onOp _ = mempty
     onTask (Imp.ParallelTask code) = taskProvenance code
