@@ -306,7 +306,8 @@ calledInHostOp (CallKernel k) = calledFuncs calledInKernelOp $ kernelBody k
 calledInHostOp _ = mempty
 
 calledInKernelOp :: KernelOp -> S.Set Name
-calledInKernelOp = const mempty
+calledInKernelOp (ErrorSync _ handler) = calledFuncs calledInKernelOp handler
+calledInKernelOp _ = mempty
 
 ensureDeviceFuns :: ImpGPU.KernelCode -> OnKernelM [Name]
 ensureDeviceFuns code = do
@@ -645,13 +646,14 @@ inKernelOperations env mode body =
       GC.modifyUserState $ \s ->
         s {kernelSharedMemory = (name', size) : kernelSharedMemory s}
       GC.stm [C.cstm|$id:name = (__local unsigned char*) $id:name';|]
-    kernelOps (ErrorSync f) = do
+    kernelOps (ErrorSync f handler) = do
       label <- nextErrorLabel
       pending <- kernelSyncPending <$> GC.getUserState
       when pending $ do
         pendingError False
+        handler' <- GC.collect $ GC.compileCode handler
         GC.stm [C.cstm|$id:label: barrier($exp:(fence f));|]
-        GC.stm [C.cstm|if (local_failure) { return; }|]
+        GC.stm [C.cstm|if (local_failure) { $items:handler' return; }|]
       GC.stm [C.cstm|barrier($exp:(fence f));|]
       GC.modifyUserState $ \s -> s {kernelHasBarriers = True}
       incErrorLabel
@@ -904,6 +906,7 @@ typesInCode (Meta _) = mempty
 typesInCode (DebugPrint _ v) = maybe mempty typesInExp v
 typesInCode (TracePrint msg) = foldMap typesInExp msg
 typesInCode (GetUserParam _ _ def) = typesInExp (untyped def)
+typesInCode (Op (ErrorSync _ handler)) = typesInCode handler
 typesInCode Op {} = mempty
 
 typesInExp :: Exp -> S.Set PrimType

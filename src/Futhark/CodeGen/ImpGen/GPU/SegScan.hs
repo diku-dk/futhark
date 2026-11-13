@@ -57,9 +57,11 @@ canBeSinglePass scan_ops =
     ok op =
       segBinOpShape op == mempty
         && all primType (lambdaReturnType (segBinOpLambda op))
-        && not (bodyHas isAssert (lambdaBody (segBinOpLambda op)))
-    isAssert (BasicOp Assert {}) = True
-    isAssert _ = False
+        && not (bodyHas canFail (lambdaBody (segBinOpLambda op)))
+    canFail (BasicOp Assert {}) = True
+    -- We assume any non-builtin function may fail.
+    canFail (Apply fname _ _ _) = not $ isBuiltInFunction fname
+    canFail _ = False
 
 -- | Compile 'SegScan' instance to host-level code with calls to
 -- various kernels.

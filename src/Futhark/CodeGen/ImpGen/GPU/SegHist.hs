@@ -779,7 +779,7 @@ histKernelLocalPass
                           copyDWIMFix (paramName p) [] v is
                         do_op (bucket_is ++ is)
 
-        sOp $ Imp.ErrorSync Imp.FenceGlobal
+        sOp $ Imp.ErrorSync Imp.FenceGlobal mempty
 
         sComment "Compact the multiple shared memory subhistograms to result in global memory" $
           onSlugs $ \slug dests hist_H_chk histo_dims _histo_size bins_per_thread -> do

@@ -518,9 +518,9 @@ blockScan seg_flag arrs_full_size w lam arrs = localOps threadOperations $ do
 
       errorsync
         | array_scan =
-            sOp $ Imp.ErrorSync Imp.FenceGlobal
+            sOp $ Imp.ErrorSync Imp.FenceGlobal mempty
         | otherwise =
-            sOp $ Imp.ErrorSync Imp.FenceLocal
+            sOp $ Imp.ErrorSync Imp.FenceLocal mempty
 
       writeBlockResult p arr =
         copyDWIMFix arr [sExt64 chunk_id] (Var $ paramName p) []
@@ -645,8 +645,8 @@ blockReduceWithOffset offset w lam arrs = do
         | otherwise = sOp $ Imp.Barrier Imp.FenceGlobal
 
       errorsync
-        | all primType $ lambdaReturnType lam = sOp $ Imp.ErrorSync Imp.FenceLocal
-        | otherwise = sOp $ Imp.ErrorSync Imp.FenceGlobal
+        | all primType $ lambdaReturnType lam = sOp $ Imp.ErrorSync Imp.FenceLocal mempty
+        | otherwise = sOp $ Imp.ErrorSync Imp.FenceGlobal mempty
 
       readReduceArgument param arr = do
         let i = local_tid + tvExp offset
@@ -1190,7 +1190,7 @@ virtualiseBlocks SegVirt required_blocks m = do
         (tvExp phys_tblock_id + i * sExt32 (kernelNumBlocks constants))
     -- Make sure the virtual block is actually done before we let
     -- another virtual block have its way with it.
-    sOp $ Imp.ErrorSync Imp.FenceGlobal
+    sOp $ Imp.ErrorSync Imp.FenceGlobal mempty
 virtualiseBlocks _ _ m =
   m . tvExp . kernelBlockIdVar . kernelConstants =<< askEnv
 
