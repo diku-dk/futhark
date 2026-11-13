@@ -480,7 +480,7 @@ smallSegmentsReduction (Pat segred_pes) num_tblocks tblock_size _ _ space segbin
           in_bounds
           out_of_bounds
 
-      sOp $ Imp.ErrorSync Imp.FenceLocal -- Also implicitly barrier.
+      sOp $ Imp.ErrorSync Imp.FenceLocal mempty -- Also implicitly barrier.
       let crossesSegment from to =
             (sExt64 to - sExt64 from) .>. (sExt64 to `rem` segment_size)
       sWhen (segment_size .>. 0) $
@@ -740,7 +740,7 @@ sequentialStageOneBody slugs body_cont glb_ind_var q n reduce_at doBlockReduce i
 
     when (reduce_at == ReducePerIteration) doBlockReduce
 
-  sOp $ Imp.ErrorSync Imp.FenceLocal
+  sOp $ Imp.ErrorSync Imp.FenceLocal mempty
   when (reduce_at == ReduceAfterLoop) doBlockReduce
 
 reductionStageOne ::
@@ -782,7 +782,7 @@ reductionStageOne strategy gtids n global_tid q chunk threads_per_segment slugs 
                     then copyDWIMFix arr [ltid] (Var acc) (acc_is ++ vec_is)
                     else copyDWIMFix (paramName p) [] (Var acc) (acc_is ++ vec_is)
 
-            sOp $ Imp.ErrorSync Imp.FenceLocal -- Also implicitly barrier.
+            sOp $ Imp.ErrorSync Imp.FenceLocal mempty -- Also implicitly barrier.
             blockReduce tblock_size new_lambda block_red_arrs
             sOp $ Imp.Barrier Imp.FenceLocal
 
@@ -894,7 +894,7 @@ noncommPrimParamsStageOneBody slugs body_cont glb_ind_var global_tid q n chunk d
                 copyDWIMFix priv_chunk [k] ne []
         )
 
-    sOp $ Imp.ErrorSync Imp.FenceLocal
+    sOp $ Imp.ErrorSync Imp.FenceLocal mempty
 
     sComment "effectualize collective copies in shared memory" $ do
       forM_ slugs $ \slug -> do
@@ -919,7 +919,7 @@ noncommPrimParamsStageOneBody slugs body_cont glb_ind_var global_tid q n chunk d
         forM_ slugs $ \slug ->
           applyRedOp slug [] [(Var c, [k]) | c <- slugPrivChunks slug]
     doLMemBlockReduce
-  sOp $ Imp.ErrorSync Imp.FenceLocal
+  sOp $ Imp.ErrorSync Imp.FenceLocal mempty
 
 -- | The second stage of a reduction where each segment is handled by more than
 -- one block. Each block writes its partial results for all the operators, and
@@ -1049,7 +1049,7 @@ finalReduction segment_gtids first_block_for_segment blocks_per_segment (segred_
       when (isPrimParam p) $
         copyDWIMFix arr [ltid] (Var $ paramName p) []
 
-    sOp $ Imp.ErrorSync Imp.FenceLocal
+    sOp $ Imp.ErrorSync Imp.FenceLocal mempty
 
     sComment "reduce the per-block results" $ do
       blockReduce (sExt32 tblock_size) new_lambda red_arrs

@@ -210,13 +210,13 @@ data KernelOp
     -- warp. Only supported for CUDA and HIP.
     WarpSync
   | SharedAlloc VName (Count Bytes (TExp Int64))
-  | -- | Perform a barrier and also check whether any
-    -- threads have failed an assertion.  Make sure all
-    -- threads would reach all 'ErrorSync's if any of them
-    -- do.  A failing assertion will jump to the next
-    -- following 'ErrorSync', so make sure it's not inside
-    -- control flow or similar.
-    ErrorSync Fence
+  | -- | Perform a barrier and also check whether any threads have failed an
+    -- assertion. If so, all threads of the block execute the given code and
+    -- then stop. The code must not fail, and is usually empty. Make sure all
+    -- threads would reach all 'ErrorSync's if any of them do. A failing
+    -- assertion will jump to the next following 'ErrorSync', so make sure it's
+    -- not inside control flow or similar.
+    ErrorSync Fence (Code KernelOp)
   deriving (Show)
 
 -- | Atomic operations return the value stored before the update. This
@@ -286,10 +286,14 @@ instance Pretty KernelOp where
     "warp_sync()"
   pretty (SharedAlloc name size) =
     pretty name <+> equals <+> "shared_alloc" <> parens (pretty size)
-  pretty (ErrorSync FenceLocal) =
-    "error_sync_local()"
-  pretty (ErrorSync FenceGlobal) =
-    "error_sync_global()"
+  pretty (ErrorSync f handler) =
+    sync f <> handler'
+    where
+      sync FenceLocal = "error_sync_local()"
+      sync FenceGlobal = "error_sync_global()"
+      handler' = case handler of
+        Skip -> mempty
+        _ -> " on_error" <> brace (pretty handler)
   pretty (Atomic _ (AtomicAdd t old arr ind x)) =
     pretty old
       <+> "<-"
@@ -364,6 +368,7 @@ instance Pretty KernelOp where
 instance FreeIn KernelOp where
   freeIn' (Atomic _ op) = freeIn' op
   freeIn' (SharedAlloc _ size) = freeIn' size
+  freeIn' (ErrorSync _ handler) = freeIn' handler
   freeIn' _ = mempty
 
 brace :: Doc a -> Doc a

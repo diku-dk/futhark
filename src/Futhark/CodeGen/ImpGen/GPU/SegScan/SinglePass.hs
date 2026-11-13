@@ -524,7 +524,16 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
 
           sIf (virt_tid .<. n) in_bounds out_of_bounds
 
-      sOp $ Imp.ErrorSync Imp.FenceLocal
+      -- See Note [Failures in single-pass scan].
+      publish_on_failure <- collect . sWhen (ltid32 .==. 0) $ do
+        everythingVolatile $
+          forM_ (zip incprefixArrays scanop_nes) $ \(incprefixArray, ne) ->
+            copyDWIMFix incprefixArray [tvExp dyn_id] ne []
+        sOp global_fence
+        everythingVolatile $
+          copyDWIMFix statusFlags [tvExp dyn_id] (intConst Int8 statusP) []
+      sOp $ Imp.ErrorSync Imp.FenceLocal publish_on_failure
+
       sComment "Transpose scan inputs" $ do
         forM_ (zip transposedArrays scan_private_chunks) $ \(trans, priv) -> do
           sFor "i" chunk $ \i -> do
@@ -584,7 +593,7 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
           scan_op1
           prefixArrays
 
-        sOp $ Imp.ErrorSync Imp.FenceLocal
+        sOp $ Imp.ErrorSync Imp.FenceLocal mempty
 
         let firstThread acc prefixes =
               copyDWIMFix (tvVar acc) [] (Var prefixes) [sExt64 tblock_size_e - 1]
@@ -814,7 +823,7 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
                 lambdaParams $
                   segPostOpLambda post_op
 
-      sComment "Compute post op and write to global memory." $ do
+      sComment "Compute post op and write to global memory." $
         sFor "i" chunk $ \i -> do
           flat_idx <- dPrimVE "flat_idx" $ thd_offset + i * tblock_size_e
           sWhen (flat_idx .<. n) $ do
@@ -851,5 +860,28 @@ compileSegScan pat lvl space ts scan_op map_kbody post_op = do
                       then pure ()
                       else copyDWIMFix (patElemName pe) (map le64 gtids) subexp []
 
-      sOp local_barrier
+      -- The block has published its prefix, so it may stop here.
+      sOp $ Imp.ErrorSync Imp.FenceLocal mempty
 {-# NOINLINE compileSegScan #-}
+
+-- Note [Failures in single-pass scan]
+--
+-- Normally, when a thread fails, its whole thread block stops at the next
+-- 'Imp.ErrorSync'. The single-pass scan cannot allow that before the block has
+-- published its prefix, as each block waits in the lookback for the status
+-- flags of the blocks with smaller dynamic IDs, so a block that stops before
+-- publishing its flag leaves every later block waiting forever. Stopping after
+-- publishing is fine, no block waits for the larger dynamic IDs that are then
+-- skipped. The block that fetches the last ID normally resets the dynamic ID
+-- counter, so after a failure the counter may be left nonzero. This is
+-- harmless, as the runtime system resets the bookkeeping buffers when it
+-- reports the failure.
+--
+-- The only failures before publishing are in the segop body (the "map part"),
+-- as 'canBeSinglePass' checks that the scan operator cannot fail. The
+-- 'Imp.ErrorSync' after the map therefore has a handler that publishes the
+-- neutral element as the block's inclusive prefix before the block stops. The
+-- later blocks then compute meaningless results, but as the failure is recorded
+-- globally, the results are never used. Failures in the post op reach the
+-- 'Imp.ErrorSync' at the end of the virtual block, after the prefix has been
+-- published.

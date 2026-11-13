@@ -38,6 +38,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Execution errors with array-operator scans with nonstandard tuning settings.
 
+* On GPU backends, a failing safety check in code fused with a scan could cause
+  barrier divergence or deadlocks.
+
 ## [0.28.2]
 
 ### Added
