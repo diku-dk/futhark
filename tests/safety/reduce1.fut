@@ -7,3 +7,30 @@ def main [n] (xs: *[n]f32) =
     let l = if xs[i] < xs[j] then i else j
     in assert (l != 1337) l
   in reduce op 0 (iota n)
+
+-- The following operator fails once partial results reach 100, which for an
+-- input of ones happens in the block-wide reductions rather than in the
+-- per-thread folds.
+
+def op_100 (x: i32) (y: i32) = assert (x + y < 100) (x + y)
+
+-- ==
+-- entry: block_nonseg
+-- input { 4096i64 } error: x \+ y < 100
+
+entry block_nonseg n = reduce_comm op_100 0 (opaque (replicate n 1))
+
+-- ==
+-- entry: block_seg
+-- input { 4i64 1024i64 } error: x \+ y < 100
+-- input { 100i64 120i64 } error: x \+ y < 100
+
+entry block_seg m n = map (reduce op_100 0) (opaque (replicate m (replicate n 1)))
+
+-- ==
+-- entry: block_intra
+-- input { 4i64 1024i64 } error: x \+ y < 100
+
+entry block_intra m n =
+  #[flattening(only_intra)]
+  map (\xs -> reduce op_100 0 (map (+ 0) xs)) (opaque (replicate m (replicate n 1)))

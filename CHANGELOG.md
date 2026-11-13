@@ -45,6 +45,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   barriers stopped only the failing thread rather than its whole thread block,
   which could cause deadlocks.
 
+* On GPU backends, reductions and scans with operators that contain assertions
+  could cause barrier divergence.
+
 ## [0.28.2]
 
 ### Added
