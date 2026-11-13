@@ -41,6 +41,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * On GPU backends, a failing safety check in code fused with a scan could cause
   barrier divergence or deadlocks.
 
+* On the `cuda` and `hip` backends, a failing safety check in a kernel with
+  barriers stopped only the failing thread rather than its whole thread block,
+  which could cause deadlocks.
+
 ## [0.28.2]
 
 ### Added

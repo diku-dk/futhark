@@ -363,17 +363,32 @@ onKernel target kernel = do
   let (use_params, unpack_params) =
         unzip $ mapMaybe useAsParam $ kernelUses kernel
 
-  -- The local_failure variable is an int despite only really storing
-  -- a single bit of information, as some OpenCL implementations
-  -- (e.g. AMD) does not like byte-sized shared memory (and the others
-  -- likely pad to a whole word anyway).
-  let (safety, error_init)
+  -- The local_failure variable is an int despite only really storing a single
+  -- bit of information, as some OpenCL implementations (e.g. AMD) does not like
+  -- byte-sized shared memory (and the others likely pad to a whole word
+  -- anyway). The CUDA/HIP prelude #defines __local to nothing, so we need
+  -- special handling here to get a shared-memory local variable. Ugly...
+  let cuda_local_failure_decl =
+        [C.citem|$escstm:("__shared__ volatile int local_failure;")|]
+      local_failure_decl =
+        case target of
+          TargetOpenCL -> [C.citem|volatile __local int local_failure;|]
+          TargetCUDA -> cuda_local_failure_decl
+          TargetHIP -> cuda_local_failure_decl
+
+      -- No thread may write a failure before all threads have cleared it.
+      local_failure_barrier
+        | kernelHasBarriers kstate = [C.citems|barrier(CLK_LOCAL_MEM_FENCE);|]
+        | otherwise = []
+
+      (safety, error_init)
         -- We conservatively assume that any called function can fail.
         | not $ null called =
             ( SafetyFull,
-              [C.citems|volatile __local int local_failure;
+              [C.citems|$item:local_failure_decl
                         // Harmless for all threads to write this.
-                        local_failure = 0;|]
+                        local_failure = 0;
+                        $items:local_failure_barrier|]
             )
         | length (kernelFailures kstate) == length failures =
             if kernelFailureTolerant kernel
@@ -392,14 +407,14 @@ onKernel target kernel = do
               else
                 ( SafetyFull,
                   [C.citems|
-                     volatile __local int local_failure;
+                     $item:local_failure_decl
                      if (failure_is_an_option) {
                        int failed = *global_failure >= 0;
                        if (failed) {
                          return;
                        }
                      }
-                     // All threads write this value - it looks like CUDA has a compiler bug otherwise.
+                     // Harmless for all threads to write this.
                      local_failure = 0;
                      barrier(CLK_LOCAL_MEM_FENCE);
                   |]
