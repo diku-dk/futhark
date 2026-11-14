@@ -56,7 +56,7 @@ prepareNewMem arr space shape pt = do
     [C.cexp|$exp:arr->mem|]
     [C.cexp|$exp:arr_size * $int:(primByteSize pt::Int)|]
     space
-    [C.cstm|err = 1;|]
+    (pure [C.cstm|err = 1;|])
 
 arrayLibraryFunctions ::
   Publicness ->
@@ -114,7 +114,7 @@ arrayLibraryFunctions pub space pt signed rank = do
       let dim_s = "dim" ++ show i
        in stm [C.cstm|arr->shape[$int:i] = $id:dim_s;|]
 
-  free_body <- collect $ unRefMem [C.cexp|arr->mem|] space [C.cstm|ret = 1;|]
+  free_body <- collect $ unRefMem [C.cexp|arr->mem|] space $ pure [C.cstm|ret = 1;|]
 
   values_body <-
     collect $

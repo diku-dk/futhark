@@ -874,6 +874,7 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
                         struct $id:fstruct $tyqual:uniform * $tyqual:uniform args,
                         $tyqual:uniform int iterations);|]
 
+  failure <- GC.failureJump
   aos_name <- newVName "aos"
   GC.items
     [C.citems|
@@ -892,7 +893,7 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
     $escstm:("#else")
     err = $id:schedn(ctx, &$id:(fstruct <> "_"), $exp:e');
     if (err != 0) {
-      goto cleanup;
+      $stm:failure
     }
     $escstm:("#endif")|]
   GC.stms read_retvals
@@ -912,7 +913,9 @@ compileOp (ISPCKernel body free) = do
           GC.collect $ do
             GC.decl [C.cdecl|$tyqual:uniform struct futhark_context * $tyqual:uniform ctx = $id:fstruct'->ctx;|]
             GC.items =<< compileGetStructVals fstruct free_args free_ctypes
-            body' <- GC.collect $ compileCode body
+            body' <- GC.collect $ do
+              compileCode body
+              GC.items =<< GC.errorLabel
             mapM_ GC.item decl_cached
             mapM_ GC.item =<< GC.declAllocatedMem
 
@@ -963,11 +966,12 @@ compileOp (ISPCKernel body free) = do
         }|]
 
   -- Generate C code to call into ISPC kernel
+  failure <- GC.failureJump
   GC.items
     [C.citems|
     err = $id:ispcShim(start, end, & $id:fstruct');
     if (err != 0) {
-      goto cleanup;
+      $stm:failure
     }|]
 compileOp (ForEach i from bound body) = do
   from' <- compileExp from
