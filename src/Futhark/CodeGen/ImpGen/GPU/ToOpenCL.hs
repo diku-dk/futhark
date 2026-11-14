@@ -189,6 +189,7 @@ codeMayFail f (x :>>: y) = codeMayFail f x || codeMayFail f y
 codeMayFail f (For _ _ x) = codeMayFail f x
 codeMayFail f (While _ x) = codeMayFail f x
 codeMayFail f (If _ x y) = codeMayFail f x || codeMayFail f y
+codeMayFail f (OnFailure x y) = codeMayFail f x || codeMayFail f y
 codeMayFail _ _ = False
 
 hostOpMayFail :: ImpGPU.HostOp -> Bool
@@ -813,7 +814,11 @@ inKernelOperations env mode body =
       GC.readScalarPointerWithQuals pointerQuals
 
     -- A failing thread jumps to the next error label, which is either at an
-    -- 'ErrorSync' or at the end of the kernel.
+    -- 'ErrorSync', before the handler of an 'OnFailure', or at the end of the
+    -- kernel. Since 'local_failure' is set before the jump, the handler of an
+    -- 'OnFailure' can propagate the failure with a plain jump. Device functions
+    -- instead return on failure, which would skip such a handler, so they must
+    -- not contain an 'OnFailure'.
     whatNext
       | mode == FunMode = pure [C.citems|return 1;|]
       | has_communication = do
@@ -895,6 +900,7 @@ typesInCode (Call _ _ es) = mconcat $ map typesInArg es
 typesInCode (If (TPrimExp e) c1 c2) =
   typesInExp e <> typesInCode c1 <> typesInCode c2
 typesInCode (Assert e _ _) = typesInExp e
+typesInCode (OnFailure body handler) = typesInCode body <> typesInCode handler
 typesInCode (Meta _) = mempty
 typesInCode (DebugPrint _ v) = maybe mempty typesInExp v
 typesInCode (TracePrint msg) = foldMap typesInExp msg

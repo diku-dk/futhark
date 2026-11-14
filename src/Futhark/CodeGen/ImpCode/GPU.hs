@@ -214,8 +214,9 @@ data KernelOp
     -- assertion. If so, all threads of the block execute the given code and
     -- then stop. The code must not fail, and is usually empty. Make sure all
     -- threads would reach all 'ErrorSync's if any of them do. A failing
-    -- assertion will jump to the next following 'ErrorSync', so make sure it's
-    -- not inside control flow or similar.
+    -- assertion will jump to the next following 'ErrorSync' (unless it is in
+    -- the body of an 'OnFailure'), so make sure it's not inside control flow or
+    -- similar.
     ErrorSync Fence (Code KernelOp)
   deriving (Show)
 
@@ -293,7 +294,7 @@ instance Pretty KernelOp where
       sync FenceGlobal = "error_sync_global()"
       handler' = case handler of
         Skip -> mempty
-        _ -> " on_error" <> brace (pretty handler)
+        _ -> " on_failure" <> brace (pretty handler)
   pretty (Atomic _ (AtomicAdd t old arr ind x)) =
     pretty old
       <+> "<-"

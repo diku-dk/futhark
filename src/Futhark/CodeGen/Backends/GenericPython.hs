@@ -1355,6 +1355,10 @@ compileCode (Imp.While cond body) = do
   cond' <- compileExp $ Imp.untyped cond
   body' <- collect $ compileCode body
   stm $ While cond' body'
+compileCode (Imp.OnFailure body handler) = do
+  body' <- collect $ compileCode body
+  handler' <- collect $ compileCode handler
+  stm $ Try body' [Catch (Var "Exception") $ handler' ++ [Raise $ Var "e"]]
 compileCode (Imp.For i bound body) = do
   bound' <- compileExp bound
   let i' = compileName i

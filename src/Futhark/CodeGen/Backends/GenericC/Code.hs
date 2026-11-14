@@ -286,6 +286,25 @@ compileCode (Assert e msg (loc, locs)) = do
   stm [C.cstm|if (!$exp:e') { $items:err }|]
   where
     stacktrace = T.unpack $ prettyStacktrace 0 $ map locText $ loc : locs
+compileCode (OnFailure body handler) = do
+  -- Failures in the body jump to its own error label, after which the handler
+  -- runs and the failure continues to the enclosing error label.
+  (body', error_label) <- withoutPendingFailures $ do
+    body' <- collect $ compileCode body
+    (body',) <$> errorLabel
+  if null error_label
+    then items [C.citems|{ $items:body' }|]
+    else do
+      handler' <- collect $ compileCode handler
+      failure <- failureJump
+      no_failure <- newVName "no_failure"
+      items
+        [C.citems|{ $items:body' }
+                  goto $id:no_failure;
+                  $items:error_label
+                  { $items:handler' }
+                  $stm:failure
+                  $id:no_failure: ;|]
 compileCode (Allocate _ _ ScalarSpace {}) =
   -- Handled by the declaration of the memory block, which is
   -- translated to an actual array.
