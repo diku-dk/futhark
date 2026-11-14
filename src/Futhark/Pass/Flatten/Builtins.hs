@@ -67,19 +67,13 @@ numberOfBlocks ::
   Name ->
   SubExp ->
   SubExp ->
-  m (SubExp, SubExp)
+  m SubExp
 numberOfBlocks desc w tblock_size = do
   max_num_tblocks_key <- nameFromText . prettyText <$> newVName (desc <> "_num_tblocks")
-  num_tblocks <-
-    letSubExp "num_tblocks" $
-      Op $
-        SizeOp $
-          CalcNumBlocks w max_num_tblocks_key tblock_size
-  num_threads <-
-    letSubExp "num_threads" $
-      BasicOp $
-        BinOp (Mul Int64 OverflowUndef) num_tblocks tblock_size
-  pure (num_tblocks, num_threads)
+  letSubExp "num_tblocks" $
+    Op $
+      SizeOp $
+        CalcNumBlocks w max_num_tblocks_key tblock_size
 
 -- | Like 'segThread', but cap the thread count to the input size.
 -- This is more efficient for small kernels, e.g. summing a small
@@ -104,7 +98,7 @@ segThreadCapped ws desc r = do
       let grid = KernelGrid (Count usable_groups) (Count tblock_size)
       pure $ SegThread SegNoVirt (Just grid)
     NoRecommendation v -> do
-      (num_tblocks, _) <- numberOfBlocks desc w tblock_size
+      num_tblocks <- numberOfBlocks desc w tblock_size
       let grid = KernelGrid (Count num_tblocks) (Count tblock_size)
       pure $ SegThread v (Just grid)
 
