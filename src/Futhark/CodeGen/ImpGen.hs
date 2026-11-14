@@ -50,6 +50,7 @@ module Futhark.CodeGen.ImpGen
     lookupAcc,
     askAttrs,
     askProvenance,
+    bodyMayFail,
 
     -- * Building Blocks
     TV,
@@ -126,6 +127,7 @@ where
 import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
+import Control.Monad.Writer (execWriter, tell)
 import Control.Parallel.Strategies
 import Data.Bifunctor (first)
 import Data.DList qualified as DL
@@ -134,6 +136,7 @@ import Data.List (find)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Map.Strict qualified as M
 import Data.Maybe
+import Data.Monoid (Any (..))
 import Data.Set qualified as S
 import Data.String
 import Data.Text qualified as T
@@ -1354,6 +1357,17 @@ localAttrs attrs = local $ \env -> env {envAttrs = attrs <> envAttrs env}
 -- | The provenance of whatever we are currently generating code for.
 askProvenance :: ImpM rep r op Provenance
 askProvenance = asks envProvenance
+
+-- | Can executing this body fail? This is the case if it contains an
+-- assertion, or calls a non-builtin function, which we conservatively assume
+-- may fail. Assertions inside 'Op's are not considered.
+bodyMayFail :: (ASTRep rep) => Body rep -> Bool
+bodyMayFail = any (expMayFail . stmExp) . bodyStms
+  where
+    expMayFail (BasicOp Assert {}) = True
+    expMayFail (Apply fname _ _ _) = not $ isBuiltInFunction fname
+    expMayFail e = getAny $ execWriter $ walkExpM walker e
+    walker = identityWalker {walkOnBody = \_ -> tell . Any . bodyMayFail}
 
 -- | Wrap any code emitted in the enclosed section with the current provenance,
 -- if any.

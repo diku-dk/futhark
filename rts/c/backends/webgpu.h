@@ -335,6 +335,9 @@ struct futhark_context {
   size_t max_cache;
 
   struct builtin_kernels* kernels;
+
+  WGPUBuffer bookkeeping_counters;
+  WGPUBuffer bookkeeping_locks;
 };
 
 // WebGPU reports errors such as failed validation asynchronously, so they are
@@ -589,6 +592,22 @@ int backend_context_setup(struct futhark_context *ctx) {
   wgpu_module_setup(ctx, program, &ctx->module, "Futhark program");
   free(program);
 
+  // WebGPU zero-initialises new buffers.  Since WebGPU does not support
+  // failure, a kernel cannot leave the bookkeeping buffers nonzero, so they
+  // never need to be re-zeroed.
+  WGPUBufferDescriptor counters_desc = {
+    .label = wgpu_str("bookkeeping_counters"),
+    .size = sizeof(int32_t)*bookkeeping_counters_size,
+    .usage = WGPUBufferUsage_Storage,
+  };
+  ctx->bookkeeping_counters = wgpuDeviceCreateBuffer(ctx->device, &counters_desc);
+  WGPUBufferDescriptor locks_desc = {
+    .label = wgpu_str("bookkeeping_locks"),
+    .size = sizeof(int32_t)*bookkeeping_locks_size,
+    .usage = WGPUBufferUsage_Storage,
+  };
+  ctx->bookkeeping_locks = wgpuDeviceCreateBuffer(ctx->device, &locks_desc);
+
   if ((ctx->kernels = init_builtin_kernels(ctx)) == NULL) {
     printf("Failed to init builtin kernels\n");
     return 1;
@@ -606,6 +625,8 @@ void backend_context_teardown(struct futhark_context *ctx) {
       futhark_panic(-1, "gpu_free_all failed");
     }
     wgpuBufferDestroy(ctx->scalar_readback_buffer);
+    wgpuBufferDestroy(ctx->bookkeeping_counters);
+    wgpuBufferDestroy(ctx->bookkeeping_locks);
     wgpuDeviceDestroy(ctx->device);
   //}
   free_list_destroy(&ctx->gpu_free_list);

@@ -257,7 +257,7 @@ scanStage1 scan_out map_out num_tblocks tblock_size space scans kbody = do
                           to' = sExt64 to + tvExp chunk_offset
                        in f from' to'
 
-              sOp $ Imp.ErrorSync fence
+              sOp $ Imp.ErrorSync fence mempty
 
               -- We need to avoid parameter name clashes.
               scan_op_renamed <- renameLambda scan_op
@@ -429,7 +429,7 @@ scanStage2 scan_out stage1_num_threads elems_per_group stage1_num_tblocks stage2
                   \(arr, se) ->
                     copyDWIMFix arr [localArrayIndex constants] se []
 
-              sOp $ Imp.ErrorSync fence
+              sOp $ Imp.ErrorSync fence mempty
 
               -- crossesSegment' maps block-local thread IDs to element
               -- indices, adjusting for the current chunk offset.
@@ -579,8 +579,9 @@ scanStage3 pat scan_out map_out num_tblocks tblock_size elems_per_group crossesS
                     (Var $ paramName p)
                     []
 
-      sOp $ Imp.Barrier Imp.FenceLocal
-
+      -- Each thread reads only the elements it wrote itself, so no barrier is
+      -- needed, and a failure must be able to reach the 'Imp.ErrorSync' at the
+      -- end of the iteration without passing one.
       if isIdentityPostOp post_op
         then pure ()
         else do
@@ -610,8 +611,6 @@ scanStage3 pat scan_out map_out num_tblocks tblock_size elems_per_group crossesS
                 sComment "write values" $
                   forM_ (zip (patElems pat) res) $ \(pe, subexp) ->
                     copyDWIMFix (patElemName pe) (map Imp.le64 gtids) subexp []
-
-      sOp $ Imp.Barrier Imp.FenceGlobal
 
 isIdentityPostOp :: SegPostOp rep -> Bool
 isIdentityPostOp post_op =

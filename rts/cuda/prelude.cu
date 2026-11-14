@@ -128,7 +128,9 @@ static inline __device__ void warp_sync() {
 #define INFINITY (1.0/0.0)
 #endif
 
-extern volatile __shared__ unsigned char shared_mem[];
+// shared_mem itself must be 8-byte aligned no matter what, in case we access it
+// with atomics.
+extern volatile __shared__ __attribute__((aligned(8))) unsigned char shared_mem[];
 
 #define SHARED_MEM_PARAM
 #define FUTHARK_KERNEL extern "C" __global__ __launch_bounds__(MAX_THREADS_PER_BLOCK)

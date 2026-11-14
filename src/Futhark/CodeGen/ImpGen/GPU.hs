@@ -239,9 +239,8 @@ withAcc pat inputs lam = do
     locksForInputs atomics ((c, (_, _, op)) : inputs')
       | Just (op_lam, _) <- op,
         AtomicLocking _ <- atomicUpdateLocking atomics op_lam = do
-          let num_locks = 100151
-          locks_arr <- genZeroes "withacc_locks" num_locks
-          let locks = Locks locks_arr num_locks
+          locks_arr <- bookkeepingArray Imp.BookkeepingLocks
+          let locks = Locks locks_arr $ fromInteger $ Imp.bookkeepingSize Imp.BookkeepingLocks
               extend env = env {hostLocks = M.insert c locks $ hostLocks env}
           localEnv extend $ locksForInputs atomics inputs'
       | otherwise =

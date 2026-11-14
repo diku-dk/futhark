@@ -43,10 +43,9 @@ You're done!  Congratulations!  Increment the version number in
 The following steps are for making the release available elsewhere.
 Some of them are supposed to be automatic.
 
- * **This is done automatically by a CI job**: Run
-   `tools/release/binary-tarball.sh . -X.Y.Z-linux-x86_64`.  This
-   produces `futhark-X.Y.Z-linux-x86_64.xz`.  Put this tarball in some
-   public location and make sure its permissions make it readable.
+ * **This is done automatically by CI**: Build the Linux x86_64 and
+   AArch64 tarballs with `nix build .#tarball` on native runners and
+   publish them to GitHub and `https://futhark-lang.org/releases/`.
 
  * **This is done automatically by a CI job**: Run
    `tools/release/hackage.sh`.

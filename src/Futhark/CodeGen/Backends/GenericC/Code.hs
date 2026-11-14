@@ -286,6 +286,25 @@ compileCode (Assert e msg (loc, locs)) = do
   stm [C.cstm|if (!$exp:e') { $items:err }|]
   where
     stacktrace = T.unpack $ prettyStacktrace 0 $ map locText $ loc : locs
+compileCode (OnFailure body handler) = do
+  -- Failures in the body jump to its own error label, after which the handler
+  -- runs and the failure continues to the enclosing error label.
+  (body', error_label) <- withoutPendingFailures $ do
+    body' <- collect $ compileCode body
+    (body',) <$> errorLabel
+  if null error_label
+    then items [C.citems|{ $items:body' }|]
+    else do
+      handler' <- collect $ compileCode handler
+      failure <- failureJump
+      no_failure <- newVName "no_failure"
+      items
+        [C.citems|{ $items:body' }
+                  goto $id:no_failure;
+                  $items:error_label
+                  { $items:handler' }
+                  $stm:failure
+                  $id:no_failure: ;|]
 compileCode (Allocate _ _ ScalarSpace {}) =
   -- Handled by the declaration of the memory block, which is
   -- translated to an actual array.
@@ -294,19 +313,20 @@ compileCode (Allocate name (Count (TPrimExp e)) space) = do
   size <- compileExp e
   cached <- cacheMem name
   case cached of
-    Just cur_size ->
+    Just cur_size -> do
+      failure <- failureJump
       stm
         [C.cstm|if ($exp:cur_size < $exp:size) {
                  err = lexical_realloc(ctx, &$exp:name, &$exp:cur_size, $exp:size);
                  if (err != FUTHARK_SUCCESS) {
-                   goto cleanup;
+                   $stm:failure
                  }
                 }|]
     _ ->
-      allocMem name size space [C.cstm|{err = 1; goto cleanup;}|]
+      allocMem name size space memoryFailure
 compileCode (Free name space) = do
   cached <- isJust <$> cacheMem name
-  unless cached $ unRefMem name space [C.cstm|{err = 1; goto cleanup;}|]
+  unless cached $ unRefMem name space memoryFailure
 compileCode (For i bound body) = do
   let i' = C.toIdent i
       t = primTypeToCType $ primExpType bound
@@ -403,7 +423,7 @@ compileCode (SetScalar dest src) = do
   src' <- compileExp src
   stm [C.cstm|$id:dest = $exp:src';|]
 compileCode (SetMem dest src space) =
-  setMem dest src space [C.cstm|{err = 1; goto cleanup;}|]
+  setMem dest src space
 compileCode (Call [dest] fname args)
   | isBuiltInFunction fname = do
       args' <- mapM compileArg args

@@ -104,7 +104,7 @@ blockChunkLoop ::
   InKernelGen ()
 blockChunkLoop w m = do
   -- The loop body contains error syncs, and failures must not jump into it.
-  sOp $ Imp.ErrorSync Imp.FenceLocal
+  sOp $ Imp.ErrorSync Imp.FenceLocal mempty
   constants <- kernelConstants <$> askEnv
   let max_chunk_size = sExt32 $ kernelBlockSize constants
   num_chunks <- dPrimVE "num_chunks" $ w `ceilDiv` max_chunk_size
@@ -168,7 +168,7 @@ virtualisedBlockScan seg_flag w lam arrs = do
 
     arrs_chunks <- mapM (sliceArray (sExt64 chunk_start) chunk_size) arrs
 
-    sOp $ Imp.ErrorSync Imp.FenceLocal
+    sOp $ Imp.ErrorSync Imp.FenceLocal mempty
 
     -- The chunks past this one are still live, so the second copy that
     -- 'blockScan' keeps of an array-typed element must go beyond the whole
@@ -384,7 +384,7 @@ compileBlockExp dest e = do
   -- Avoid that by always doing an error sync here.  Potential
   -- improvement: only do this if any errors are pending (this could
   -- also be handled in later codegen).
-  when (doSync e) $ sOp $ Imp.ErrorSync Imp.FenceLocal
+  when (doSync e) $ sOp $ Imp.ErrorSync Imp.FenceLocal mempty
   defCompileExp dest e
   where
     doSync Loop {} = True
@@ -472,7 +472,7 @@ compileBlockScan pat lvl space body scans post_op = do
   dScope Nothing $ scopeOfLParams $ lambdaParams post_lam
 
   computeScanInputs virt scan_arrs map_dests
-  sOp $ Imp.ErrorSync Imp.FenceLocal
+  sOp $ Imp.ErrorSync Imp.FenceLocal mempty
   doScan virt scan_arrs
   applyPostOp virt scan_arrs map_dests
 
@@ -673,7 +673,7 @@ compileBlockRed pat lvl space body ops = do
       tmp_arrs <- sharedArrays elems $ Shape dims
       blockCoverSegSpace (segVirt lvl) space $
         runBody tmp_arrs (map Imp.le64 ltids)
-      sOp $ Imp.ErrorSync Imp.FenceLocal
+      sOp $ Imp.ErrorSync Imp.FenceLocal mempty
       k $ forOps tmp_arrs
 
     -- A single segment, virtualised. We run the kernel body for one block-sized
@@ -696,16 +696,16 @@ compileBlockRed pat lvl space body ops = do
           sWhen (Imp.le64 ltid_name .<. dim') $
             runBody tmp_arrs [sExt64 ltid]
 
-        sOp $ Imp.ErrorSync Imp.FenceLocal
+        sOp $ Imp.ErrorSync Imp.FenceLocal mempty
 
         incorporateCarry (chunk_start .>. 0) [] tmps_for_ops
 
-        sOp $ Imp.ErrorSync Imp.FenceLocal
+        sOp $ Imp.ErrorSync Imp.FenceLocal mempty
 
         forM_ (zip ops tmps_for_ops) $ \(op, tmps) ->
           blockReduce (sExt32 (tvExp chunk_size)) (segBinOpLambda op) tmps
 
-        sOp $ Imp.ErrorSync Imp.FenceLocal
+        sOp $ Imp.ErrorSync Imp.FenceLocal mempty
 
         saveResults [] tmps_for_ops [DimFix 0]
 
@@ -746,7 +746,7 @@ compileBlockRed pat lvl space body ops = do
           sWhen in_bounds $
             runBody tmp_arrs [sExt64 ltid]
 
-        sOp $ Imp.ErrorSync Imp.FenceLocal
+        sOp $ Imp.ErrorSync Imp.FenceLocal mempty
 
         let (crosses_segment, shifted) =
               chunkSegFlags (Just seg_flag) chunk_start
@@ -758,13 +758,13 @@ compileBlockRed pat lvl space body ops = do
           (map (DimFix . Imp.le64) (init ltids))
           tmps_for_ops
 
-        sOp $ Imp.ErrorSync Imp.FenceLocal
+        sOp $ Imp.ErrorSync Imp.FenceLocal mempty
 
         -- Scan the currente chunk.
         forM_ (zip ops tmps_for_ops) $ \(op, tmps) ->
           blockScan shifted chunk_elems (tvExp chunk_size) (segBinOpLambda op) tmps
 
-        sOp $ Imp.ErrorSync Imp.FenceLocal
+        sOp $ Imp.ErrorSync Imp.FenceLocal mempty
 
         -- A thread whose element is the last of its segment holds that
         -- segment's final result. The thread holding the last element of the
@@ -791,9 +791,9 @@ compileBlockRed pat lvl space body ops = do
     singleSegmentCase dim' tmps_for_ops = do
       forM_ (zip ops tmps_for_ops) $ \(op, tmps) ->
         blockReduce (sExt32 dim') (segBinOpLambda op) tmps
-      sOp $ Imp.ErrorSync Imp.FenceLocal
+      sOp $ Imp.ErrorSync Imp.FenceLocal mempty
       saveResults [] tmps_for_ops [DimFix 0]
-      sOp $ Imp.ErrorSync Imp.FenceLocal
+      sOp $ Imp.ErrorSync Imp.FenceLocal mempty
 
     -- Multiple segments, with the whole index space staged in shared memory.
     -- These are turned into (regular) segmented scans, of which we then pick
@@ -813,7 +813,7 @@ compileBlockRed pat lvl space body ops = do
           (segBinOpLambda op)
           tmps_flat
 
-      sOp $ Imp.ErrorSync Imp.FenceLocal
+      sOp $ Imp.ErrorSync Imp.FenceLocal mempty
 
       saveResults [] tmps_for_ops lastInSegment
 
@@ -839,7 +839,7 @@ compileBlockSegOp pat (SegMap lvl space _ body) = do
     compileStms mempty (bodyStms body) $
       zipWithM_ (compileThreadResult space) (patElems pat) $
         bodyResult body
-  sOp $ Imp.ErrorSync Imp.FenceLocal
+  sOp $ Imp.ErrorSync Imp.FenceLocal mempty
 compileBlockSegOp pat (SegScan lvl space _ body scans post_op) =
   compileBlockScan pat lvl space body scans post_op
 compileBlockSegOp pat (SegRed lvl space _ body ops) =
@@ -887,7 +887,7 @@ compileBlockSegOp pat (SegHist lvl space _ kbody ops) = do
                   copyDWIMFix (paramName p) [] v is
                 do_op (bin_is ++ is)
 
-  sOp $ Imp.ErrorSync Imp.FenceLocal
+  sOp $ Imp.ErrorSync Imp.FenceLocal mempty
 
 -- | The operations for block-level kernels.
 blockOperations :: Operations GPUMem KernelEnv Imp.KernelOp

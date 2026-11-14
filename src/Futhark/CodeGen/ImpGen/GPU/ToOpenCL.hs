@@ -126,6 +126,7 @@ findParamUsers env defs = M.mapWithKey onParam
     getSize (ImpOpenCL.CmpSizeLe _ v _) = Just v
     getSize (ImpOpenCL.GetSizeMax {}) = Nothing
     getSize (ImpOpenCL.LaunchKernel {}) = Nothing
+    getSize (ImpOpenCL.GetBookkeeping {}) = Nothing
     directUseInFun fun = mapMaybe getSize $ toList $ functionBody fun
     direct_uses = map (second directUseInFun) $ unFunctions $ defFuns defs
 
@@ -158,18 +159,11 @@ type SharedMemoryUse = (VName, Count Bytes (TExp Int64))
 data KernelState = KernelState
   { kernelSharedMemory :: [SharedMemoryUse],
     kernelFailures :: [FailureMsg],
-    kernelNextSync :: Int,
-    -- | Has a potential failure occurred sine the last
-    -- ErrorSync?
-    kernelSyncPending :: Bool,
     kernelHasBarriers :: Bool
   }
 
 newKernelState :: [FailureMsg] -> KernelState
-newKernelState failures = KernelState mempty failures 0 False False
-
-errorLabel :: KernelState -> String
-errorLabel = ("error_" ++) . show . kernelNextSync
+newKernelState failures = KernelState mempty failures False
 
 data ToOpenCL = ToOpenCL
   { clGPU :: M.Map KernelName (KernelSafety, T.Text),
@@ -195,6 +189,7 @@ codeMayFail f (x :>>: y) = codeMayFail f x || codeMayFail f y
 codeMayFail f (For _ _ x) = codeMayFail f x
 codeMayFail f (While _ x) = codeMayFail f x
 codeMayFail f (If _ x y) = codeMayFail f x || codeMayFail f y
+codeMayFail f (OnFailure x y) = codeMayFail f x || codeMayFail f y
 codeMayFail _ _ = False
 
 hostOpMayFail :: ImpGPU.HostOp -> Bool
@@ -235,6 +230,8 @@ onHostOp _ (ImpGPU.CmpSizeLe v key _ x) =
   pure $ ImpOpenCL.CmpSizeLe v key x
 onHostOp _ (ImpGPU.GetSizeMax v size_class) =
   pure $ ImpOpenCL.GetSizeMax v size_class
+onHostOp _ (ImpGPU.GetBookkeeping v b) =
+  pure $ ImpOpenCL.GetBookkeeping v b
 
 genGPUCode ::
   Env ->
@@ -303,7 +300,8 @@ calledInHostOp (CallKernel k) = calledFuncs calledInKernelOp $ kernelBody k
 calledInHostOp _ = mempty
 
 calledInKernelOp :: KernelOp -> S.Set Name
-calledInKernelOp = const mempty
+calledInKernelOp (ErrorSync _ handler) = calledFuncs calledInKernelOp handler
+calledInKernelOp _ = mempty
 
 ensureDeviceFuns :: ImpGPU.KernelCode -> OnKernelM [Name]
 ensureDeviceFuns code = do
@@ -347,6 +345,7 @@ onKernel target kernel = do
           -- No need to free, as we cannot allocate memory in kernels.
           mapM_ GC.item =<< GC.declAllocatedMem
           mapM_ GC.item body
+          GC.items =<< GC.errorLabel
       kstate = GC.compUserState cstate
 
       (kernel_consts, (const_defs, const_undefs)) =
@@ -359,17 +358,32 @@ onKernel target kernel = do
   let (use_params, unpack_params) =
         unzip $ mapMaybe useAsParam $ kernelUses kernel
 
-  -- The local_failure variable is an int despite only really storing
-  -- a single bit of information, as some OpenCL implementations
-  -- (e.g. AMD) does not like byte-sized shared memory (and the others
-  -- likely pad to a whole word anyway).
-  let (safety, error_init)
+  -- The local_failure variable is an int despite only really storing a single
+  -- bit of information, as some OpenCL implementations (e.g. AMD) does not like
+  -- byte-sized shared memory (and the others likely pad to a whole word
+  -- anyway). The CUDA/HIP prelude #defines __local to nothing, so we need
+  -- special handling here to get a shared-memory local variable. Ugly...
+  let cuda_local_failure_decl =
+        [C.citem|$escstm:("__shared__ volatile int local_failure;")|]
+      local_failure_decl =
+        case target of
+          TargetOpenCL -> [C.citem|volatile __local int local_failure;|]
+          TargetCUDA -> cuda_local_failure_decl
+          TargetHIP -> cuda_local_failure_decl
+
+      -- No thread may write a failure before all threads have cleared it.
+      local_failure_barrier
+        | kernelHasBarriers kstate = [C.citems|barrier(CLK_LOCAL_MEM_FENCE);|]
+        | otherwise = []
+
+      (safety, error_init)
         -- We conservatively assume that any called function can fail.
         | not $ null called =
             ( SafetyFull,
-              [C.citems|volatile __local int local_failure;
+              [C.citems|$item:local_failure_decl
                         // Harmless for all threads to write this.
-                        local_failure = 0;|]
+                        local_failure = 0;
+                        $items:local_failure_barrier|]
             )
         | length (kernelFailures kstate) == length failures =
             if kernelFailureTolerant kernel
@@ -388,14 +402,14 @@ onKernel target kernel = do
               else
                 ( SafetyFull,
                   [C.citems|
-                     volatile __local int local_failure;
+                     $item:local_failure_decl
                      if (failure_is_an_option) {
                        int failed = *global_failure >= 0;
                        if (failed) {
                          return;
                        }
                      }
-                     // All threads write this value - it looks like CUDA has a compiler bug otherwise.
+                     // Harmless for all threads to write this.
                      local_failure = 0;
                      barrier(CLK_LOCAL_MEM_FENCE);
                   |]
@@ -456,8 +470,6 @@ onKernel target kernel = do
                     $items:(mconcat shared_memory_init)
                     $items:error_init
                     $items:kernel_body
-
-                    $id:(errorLabel kstate): return;
 
                     $items:const_undefs
                 }|]
@@ -565,18 +577,6 @@ kernelArgs = mapMaybe useToArg . kernelUses
     useToArg (ScalarUse v pt) = Just $ ValueKArg (LeafExp v pt) pt
     useToArg ConstUse {} = Nothing
 
-nextErrorLabel :: GC.CompilerM KernelOp KernelState String
-nextErrorLabel =
-  errorLabel <$> GC.getUserState
-
-incErrorLabel :: GC.CompilerM KernelOp KernelState ()
-incErrorLabel =
-  GC.modifyUserState $ \s -> s {kernelNextSync = kernelNextSync s + 1}
-
-pendingError :: Bool -> GC.CompilerM KernelOp KernelState ()
-pendingError b =
-  GC.modifyUserState $ \s -> s {kernelSyncPending = b}
-
 hasCommunication :: ImpGPU.KernelCode -> Bool
 hasCommunication = any communicates
   where
@@ -644,16 +644,15 @@ inKernelOperations env mode body =
       GC.stm [C.cstm|$id:name = (__local unsigned char*) $id:name';|]
     kernelOps (UniformRead dest src i typ space) =
       GC.compileCode (Read dest src i typ space Nonvolatile)
-    kernelOps (ErrorSync f) = do
-      label <- nextErrorLabel
-      pending <- kernelSyncPending <$> GC.getUserState
-      when pending $ do
-        pendingError False
-        GC.stm [C.cstm|$id:label: barrier($exp:(fence f));|]
-        GC.stm [C.cstm|if (local_failure) { return; }|]
+    kernelOps (ErrorSync f handler) = do
+      error_label <- GC.errorLabel
+      unless (null error_label) $ do
+        handler' <- GC.collect $ GC.compileCode handler
+        GC.items error_label
+        GC.stm [C.cstm|barrier($exp:(fence f));|]
+        GC.stm [C.cstm|if (local_failure) { $items:handler' return; }|]
       GC.stm [C.cstm|barrier($exp:(fence f));|]
       GC.modifyUserState $ \s -> s {kernelHasBarriers = True}
-      incErrorLabel
     kernelOps (Atomic space aop) = atomicOps space aop
 
     atomicCast s t = do
@@ -816,16 +815,20 @@ inKernelOperations env mode body =
     kernelReadScalar =
       GC.readScalarPointerWithQuals pointerQuals
 
-    whatNext = do
-      label <- nextErrorLabel
-      pendingError True
-      pure $
-        if has_communication
-          then [C.citems|local_failure = 1; goto $id:label;|]
-          else
-            if mode == FunMode
-              then [C.citems|return 1;|]
-              else [C.citems|return;|]
+    -- A failing thread jumps to the next error label, which is either at an
+    -- 'ErrorSync', before the handler of an 'OnFailure', or at the end of the
+    -- kernel. Since 'local_failure' is set before the jump, the handler of an
+    -- 'OnFailure' can propagate the failure with a plain jump. Device functions
+    -- instead return on failure, which would skip such a handler, so they must
+    -- not contain an 'OnFailure'.
+    whatNext
+      | mode == FunMode = pure [C.citems|return 1;|]
+      | has_communication = do
+          failure <- GC.failureJump
+          pure [C.citems|local_failure = 1; $stm:failure|]
+      | otherwise = do
+          failure <- GC.failureJump
+          pure [C.citems|$stm:failure|]
 
     callInKernel dests fname args
       | functionMayFail fname env = do
@@ -899,10 +902,12 @@ typesInCode (Call _ _ es) = mconcat $ map typesInArg es
 typesInCode (If (TPrimExp e) c1 c2) =
   typesInExp e <> typesInCode c1 <> typesInCode c2
 typesInCode (Assert e _ _) = typesInExp e
+typesInCode (OnFailure body handler) = typesInCode body <> typesInCode handler
 typesInCode (Meta _) = mempty
 typesInCode (DebugPrint _ v) = maybe mempty typesInExp v
 typesInCode (TracePrint msg) = foldMap typesInExp msg
 typesInCode (GetUserParam _ _ def) = typesInExp (untyped def)
+typesInCode (Op (ErrorSync _ handler)) = typesInCode handler
 typesInCode Op {} = mempty
 
 typesInExp :: Exp -> S.Set PrimType

@@ -11,13 +11,15 @@ import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericPython qualified as Py
 import Futhark.CodeGen.Backends.GenericPython.AST
 import Futhark.CodeGen.ImpCode.OpenCL
-  ( ErrorMsg (..),
+  ( Bookkeeping (..),
+    ErrorMsg (..),
     ErrorMsgPart (..),
     FailureMsg (..),
     KernelConst (..),
     KernelConstExp,
     ParamMap,
     PrimType (..),
+    bookkeepingSize,
     errorMsgArgTypes,
     untyped,
   )
@@ -57,6 +59,8 @@ openClInit constants types assign sizes failures =
   [text|
 size_heuristics=$size_heuristics
 self.global_failure_args_max = $max_num_args
+self.bookkeeping_counters_size = $num_counters
+self.bookkeeping_locks_size = $num_locks
 self.failure_msgs=$failure_msgs
 constants = $constants'
 program = initialise_opencl_object(self,
@@ -84,6 +88,8 @@ $assign'
     types' = prettyText $ map (show . prettyString) types -- Looks enough like Python.
     sizes' = prettyText $ Py.sizeClassesToPython sizes
     max_num_args = prettyText $ foldl max 0 $ map (errorMsgNumArgs . failureError) failures
+    num_counters = prettyText $ bookkeepingSize BookkeepingCounters
+    num_locks = prettyText $ bookkeepingSize BookkeepingLocks
     failure_msgs = prettyText $ List $ map formatFailure failures
     onConstant (name, e) =
       Tuple

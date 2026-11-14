@@ -79,7 +79,7 @@ Installing from a precompiled snapshot
 
 Tarballs of binary releases can be `found online
 <https://futhark-lang.org/releases/>`_, but are available only for
-very few platforms (as of this writing, only GNU/Linux on x86_64).
+very few platforms (GNU/Linux on x86_64 and aarch64).
 See the enclosed ``README.md`` for installation instructions.
 
 Furthermore, every day a program automatically clones the Git
@@ -96,8 +96,11 @@ We build such binary snapshots for the following operating systems:
 **Linux (x86_64)**
   `futhark-nightly-linux-x86_64.tar.xz <https://futhark-lang.org/releases/futhark-nightly-linux-x86_64.tar.xz>`_
 
-**macOS (ARM64)**
-  `futhark-nightly-macos-arm64.zip <https://futhark-lang.org/releases/futhark-nightly-macos-arm64.tar.xz>`_
+**Linux (Aarch64)**
+  `futhark-nightly-linux-aarch64.tar.xz <https://futhark-lang.org/releases/futhark-nightly-linux-aarch64.tar.xz>`_
+
+**macOS (AARCH64)**
+  `futhark-nightly-macos-aarch64.zip <https://futhark-lang.org/releases/futhark-nightly-macos-aarch64.tar.xz>`_
 
 **Windows (x86_64)**
   `futhark-nightly-windows-x86_64.zip <https://futhark-lang.org/releases/futhark-nightly-windows-x86_64.zip>`_

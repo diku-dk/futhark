@@ -707,6 +707,9 @@ compileCode (Assert e msg (loc, locs)) = do
   GC.stm [C.cstm|if (!$exp:e') { $items:err }|]
   where
     stacktrace = T.unpack $ prettyStacktrace 0 $ map locText $ loc : locs
+compileCode OnFailure {} =
+  -- ISPC does not allow the goto.
+  error "compileCode: OnFailure in ISPC kernel."
 compileCode code =
   GC.compileCode code
 
@@ -790,6 +793,18 @@ compileGetStructVals struct a b = concat <$> zipWithM field a b
                      $id:name.size = 0;
                      $id:name.references = NULL;|]
 
+-- | Does this code contain an 'OnFailure', not counting those in the tasks of
+-- nested 'SegOp's?
+hasOnFailure :: MCCode -> Bool
+hasOnFailure OnFailure {} = True
+hasOnFailure (x :>>: y) = hasOnFailure x || hasOnFailure y
+hasOnFailure (If _ x y) = hasOnFailure x || hasOnFailure y
+hasOnFailure (For _ _ x) = hasOnFailure x
+hasOnFailure (While _ x) = hasOnFailure x
+hasOnFailure (Op (ForEach _ _ _ body)) = hasOnFailure body
+hasOnFailure (Op (ForEachActive _ body)) = hasOnFailure body
+hasOnFailure _ = False
+
 -- | Can the given code produce an error? If so, we can't use foreach
 -- loops, since they don't allow for early-outs in error handling.
 mayProduceError :: MCCode -> Bool
@@ -800,6 +815,7 @@ mayProduceError (While _ x) = mayProduceError x
 mayProduceError (Op (ForEachActive _ body)) = mayProduceError body
 mayProduceError (Op (ForEach _ _ _ body)) = mayProduceError body
 mayProduceError (Op SegOp {}) = True
+mayProduceError (OnFailure x y) = mayProduceError x || mayProduceError y
 mayProduceError Allocate {} = True
 mayProduceError Assert {} = True
 mayProduceError SetMem {} = True
@@ -874,6 +890,7 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
                         struct $id:fstruct $tyqual:uniform * $tyqual:uniform args,
                         $tyqual:uniform int iterations);|]
 
+  failure <- GC.failureJump
   aos_name <- newVName "aos"
   GC.items
     [C.citems|
@@ -892,10 +909,16 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
     $escstm:("#else")
     err = $id:schedn(ctx, &$id:(fstruct <> "_"), $exp:e');
     if (err != 0) {
-      goto cleanup;
+      $stm:failure
     }
     $escstm:("#endif")|]
   GC.stms read_retvals
+compileOp (ISPCKernel body free)
+  | -- ISPC is too weak for our failure handling machinery.
+    hasOnFailure body =
+      local (\env -> env {GC.envOperations = MC.operations}) $
+        MC.compileOp $
+          ISPCKernel body free
 compileOp (ISPCKernel body free) = do
   free_ctypes <- mapM MC.paramToCType free
   let free_args = map paramName free
@@ -912,7 +935,9 @@ compileOp (ISPCKernel body free) = do
           GC.collect $ do
             GC.decl [C.cdecl|$tyqual:uniform struct futhark_context * $tyqual:uniform ctx = $id:fstruct'->ctx;|]
             GC.items =<< compileGetStructVals fstruct free_args free_ctypes
-            body' <- GC.collect $ compileCode body
+            body' <- GC.collect $ do
+              compileCode body
+              GC.items =<< GC.errorLabel
             mapM_ GC.item decl_cached
             mapM_ GC.item =<< GC.declAllocatedMem
 
@@ -963,11 +988,12 @@ compileOp (ISPCKernel body free) = do
         }|]
 
   -- Generate C code to call into ISPC kernel
+  failure <- GC.failureJump
   GC.items
     [C.citems|
     err = $id:ispcShim(start, end, & $id:fstruct');
     if (err != 0) {
-      goto cleanup;
+      $stm:failure
     }|]
 compileOp (ForEach i from bound body) = do
   from' <- compileExp from
@@ -1094,6 +1120,9 @@ findDeps (Op (ForEach _ _ _ body)) =
   findDeps body
 findDeps (Op (ForEachActive _ body)) =
   findDeps body
+findDeps (OnFailure body handler) = do
+  findDeps body
+  findDeps handler
 findDeps (SetScalar name e) =
   addDeps name $ freeIn e
 findDeps (Call tars _ args) =
@@ -1133,6 +1162,7 @@ findVarying (If _ x y) = findVarying x ++ findVarying y
 findVarying (For _ _ x) = findVarying x
 findVarying (While _ x) = findVarying x
 findVarying (Op (ForEachActive _ body)) = findVarying body
+findVarying (OnFailure body handler) = findVarying body ++ findVarying handler
 findVarying (Op (ForEach idx _ _ body)) = idx : findVarying body
 findVarying (DeclareMem mem _) = [mem]
 findVarying (Op (SegOp _ _ _ _ retvals _)) = map paramName retvals

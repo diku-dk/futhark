@@ -32,7 +32,7 @@ module Futhark.CodeGen.ImpGen.GPU.Base
     blockCoverSpace,
     fenceForArrays,
     updateAcc,
-    genZeroes,
+    bookkeepingArray,
     isPrimParam,
     kernelConstToExp,
     getSize,
@@ -182,15 +182,16 @@ updateAcc safety acc is vs = sComment "UpdateAcc" $ do
             Nothing ->
               error $ "Missing locks for " ++ prettyString acc
 
--- | Generate a constant device array of 32-bit integer zeroes with
--- the given number of elements.  Initialised with a replicate.
-genZeroes :: Name -> Int -> CallKernelGen VName
-genZeroes desc n = genConstants $ do
-  counters_mem <- sAlloc (desc <> "_mem") (4 * fromIntegral n) (Space "device")
-  let shape = Shape [intConst Int64 (fromIntegral n)]
-  counters <- sArrayInMem desc int32 shape counters_mem
-  sReplicate counters $ intConst Int32 0
-  pure (namesFromList [counters_mem], counters)
+-- | Retrieve a bookkeeping array.
+bookkeepingArray :: Imp.Bookkeeping -> CallKernelGen VName
+bookkeepingArray b = do
+  mem <- sDeclareMem (desc <> "_mem") (Space "device")
+  sOp $ Imp.GetBookkeeping mem b
+  sArrayInMem desc int32 (Shape [intConst Int64 $ Imp.bookkeepingSize b]) mem
+  where
+    desc = case b of
+      Imp.BookkeepingCounters -> "counters"
+      Imp.BookkeepingLocks -> "locks"
 
 compileThreadExp :: ExpCompiler GPUMem KernelEnv Imp.KernelOp
 compileThreadExp (Pat [pe]) (BasicOp (Opaque _ se)) =
@@ -348,10 +349,10 @@ inChunkScan ::
   Imp.TExp Int32 ->
   Imp.TExp Bool ->
   [VName] ->
-  InKernelGen () ->
+  Imp.Fence ->
   Lambda GPUMem ->
   InKernelGen ()
-inChunkScan constants seg_flag arrs_full_size lockstep_width block_size active arrs barrier scan_lam = do
+inChunkScan constants seg_flag arrs_full_size lockstep_width block_size active arrs fence scan_lam = do
   skip_threads <- dPrim "skip_threads"
   let actual_params = lambdaParams scan_lam
       (x_params, y_params) =
@@ -391,10 +392,17 @@ inChunkScan constants seg_flag arrs_full_size lockstep_width block_size active a
               $ compileBody' x_params
               $ lambdaBody scan_lam
 
-      maybeBarrier =
-        sWhen
-          (lockstep_width .<=. tvExp skip_threads)
-          barrier
+      -- See Note [Failing block-level operators].
+      maybeBarrier
+        | may_fail = sOp $ Imp.ErrorSync fence mempty
+        | otherwise =
+            sWhen
+              (lockstep_width .<=. tvExp skip_threads)
+              barrier
+
+      warpLocal'
+        | may_fail = id
+        | otherwise = warpLocal
 
   sComment "in-block scan (hopefully no barriers needed)" $ do
     skip_threads <-- 1
@@ -402,14 +410,14 @@ inChunkScan constants seg_flag arrs_full_size lockstep_width block_size active a
       thread_active <-
         dPrimVE "thread_active" $ tvExp skip_threads .<=. in_block_id .&&. active
 
-      warpLocal $ do
+      warpLocal' $ do
         sWhen thread_active . sComment "read operands" $
           zipWithM_ (readParam (sExt64 $ tvExp skip_threads)) x_params arrs
         sComment "perform operation" $ op_to_x thread_active
 
       maybeBarrier
 
-      warpLocal . sWhen thread_active . sComment "write result" $
+      warpLocal' . sWhen thread_active . sComment "write result" $
         sequence_ $
           zipWith3 writeResult x_params y_params arrs
 
@@ -422,6 +430,8 @@ inChunkScan constants seg_flag arrs_full_size lockstep_width block_size active a
     ltid32 = kernelLocalThreadId constants
     ltid = sExt64 ltid32
     array_scan = not $ all primType $ lambdaReturnType scan_lam
+    barrier = sOp $ Imp.Barrier fence
+    may_fail = bodyMayFail $ lambdaBody scan_lam
 
     readInitial p arr = do
       copyDWIMFix (paramName p) [] (Var arr) [ltid]
@@ -507,19 +517,18 @@ blockScan seg_flag arrs_full_size w lam arrs = localOps threadOperations $ do
           chunk_size
           active
           arrs
-          barrier
+          barrier_fence
       array_scan = not $ all primType $ lambdaReturnType lam
-      barrier
-        | array_scan =
-            sOp $ Imp.Barrier Imp.FenceGlobal
-        | otherwise =
-            sOp $ Imp.Barrier fence
+      barrier_fence
+        | array_scan = Imp.FenceGlobal
+        | otherwise = fence
+      barrier = sOp $ Imp.Barrier barrier_fence
 
       errorsync
         | array_scan =
-            sOp $ Imp.ErrorSync Imp.FenceGlobal
+            sOp $ Imp.ErrorSync Imp.FenceGlobal mempty
         | otherwise =
-            sOp $ Imp.ErrorSync Imp.FenceLocal
+            sOp $ Imp.ErrorSync Imp.FenceLocal mempty
 
       writeBlockResult p arr =
         copyDWIMFix arr [sExt64 chunk_id] (Var $ paramName p) []
@@ -606,7 +615,8 @@ blockScan seg_flag arrs_full_size w lam arrs = localOps threadOperations $ do
       sComment "perform operation" op_to_x
       sComment "write final result" $ sUnless no_carry_in write_final_result
 
-  barrier
+  -- See Note [Failing block-level operators].
+  sOp $ Imp.ErrorSync barrier_fence mempty
 
   sComment "restore correct values for first block" $
     sWhen scans_carries $
@@ -638,14 +648,11 @@ blockReduceWithOffset offset w lam arrs = do
   constants <- kernelConstants <$> askEnv
 
   let local_tid = kernelLocalThreadId constants
-
-      barrier
-        | all primType $ lambdaReturnType lam = sOp $ Imp.Barrier Imp.FenceLocal
-        | otherwise = sOp $ Imp.Barrier Imp.FenceGlobal
+      may_fail = bodyMayFail $ lambdaBody lam
 
       errorsync
-        | all primType $ lambdaReturnType lam = sOp $ Imp.ErrorSync Imp.FenceLocal
-        | otherwise = sOp $ Imp.ErrorSync Imp.FenceGlobal
+        | all primType $ lambdaReturnType lam = sOp $ Imp.ErrorSync Imp.FenceLocal mempty
+        | otherwise = sOp $ Imp.ErrorSync Imp.FenceGlobal mempty
 
       readReduceArgument param arr = do
         let i = local_tid + tvExp offset
@@ -675,7 +682,10 @@ blockReduceWithOffset offset w lam arrs = do
         sComment "write result of operation" $
           zipWithM_ writeReduceOpResult reduce_acc_params arrs
 
-      wave_size = kernelWaveSize constants
+      -- See Note [Failing block-level operators].
+      wave_size
+        | may_fail = 1
+        | otherwise = kernelWaveSize constants
       tblock_size = kernelBlockSize constants
       wave_id = local_tid `quot` wave_size
       in_wave_id = local_tid - wave_id * wave_size
@@ -705,14 +715,14 @@ blockReduceWithOffset offset w lam arrs = do
         arg_in_bounds .&&. is_first_thread_in_wave .&&. wave_not_skipped
       cross_wave_reductions =
         sWhile doing_cross_wave_reductions $ do
-          barrier
           offset <-- tvExp skip_waves * wave_size
           sWhen apply_in_cross_wave_iteration do_reduce
+          errorsync
           skip_waves <-- tvExp skip_waves * 2
 
-  in_wave_reductions
-  cross_wave_reductions
+  unless may_fail in_wave_reductions
   errorsync
+  cross_wave_reductions
 
 compileThreadOp :: OpCompiler GPUMem KernelEnv Imp.KernelOp
 compileThreadOp pat (Alloc size space) =
@@ -911,8 +921,11 @@ atomicUpdateLocking _ op = AtomicLocking $ \locking space arrs bucket -> do
       acquire_fence
       dLParams acc_params
       bind_acc_params
-      op_body
-      do_hist
+      -- A thread whose operator fails must still release the lock, or other
+      -- threads would wait for it forever.
+      update <- collect $ op_body >> do_hist
+      on_failure <- collect release_lock
+      emit $ Imp.OnFailure update on_failure
       release_lock
       break_loop
   where
@@ -1189,7 +1202,7 @@ virtualiseBlocks SegVirt required_blocks m = do
         (tvExp phys_tblock_id + i * sExt32 (kernelNumBlocks constants))
     -- Make sure the virtual block is actually done before we let
     -- another virtual block have its way with it.
-    sOp $ Imp.ErrorSync Imp.FenceGlobal
+    sOp $ Imp.ErrorSync Imp.FenceGlobal mempty
 virtualiseBlocks _ _ m =
   m . tvExp . kernelBlockIdVar . kernelConstants =<< askEnv
 
@@ -1546,3 +1559,19 @@ compileThreadResult _ _ TileReturns {} =
 -- kernel when it is a constant, rather than be passed in as a kernel argument,
 -- so that the kernel compiler can unroll the loop. This is why
 -- 'kernelFullChunksMap' does not contain constant dimensions.
+
+-- Note [Failing block-level operators]
+--
+-- Nothing prevents reduction/scan operators from having arbitrary assertions
+-- inside them, which is a bit complicated to handle due to the intricate
+-- synchronisation we perform during collective block-level reductions and
+-- scans.
+--
+-- The problem is that we implement failures by jumping to the next
+-- 'Imp.ErrorSync' in the program text, so no other barrier, nor the warp-level
+-- synchronisation of 'warpLocal', must occur in between (see "Bounds Checking
+-- on GPU", HLPP '20). In 'blockReduce' and 'blockScan', we handle operators
+-- that may fail ('bodyMayFail') by skipping the warp-level phase (which is just
+-- an optimisation anyway) and following each application with an
+-- 'Imp.ErrorSync' in the same iteration. For operators that cannot fail, an
+-- 'Imp.ErrorSync' is just a barrier.

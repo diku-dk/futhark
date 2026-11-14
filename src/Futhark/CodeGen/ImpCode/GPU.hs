@@ -7,6 +7,8 @@ module Futhark.CodeGen.ImpCode.GPU
     KernelConst (..),
     KernelConstExp,
     HostOp (..),
+    Bookkeeping (..),
+    bookkeepingSize,
     KernelOp (..),
     isBarrier,
     Fence (..),
@@ -51,7 +53,28 @@ data HostOp
   | GetSize VName Name SizeClass
   | CmpSizeLe VName Name SizeClass Exp
   | GetSizeMax VName SizeClass
+  | -- | Bind the given device memory to one of the bookkeeping buffers of the
+    -- context.
+    GetBookkeeping VName Bookkeeping
   deriving (Show)
+
+-- | The bookkeeping buffers are device buffers of 32-bit integers that belong
+-- to the context and are shared by all kernels. They are zero whenever no
+-- kernel is running, and a kernel that uses them must leave them zeroed when it
+-- succeeds, and the context zeroes them again after a failure. As kernels run
+-- serially, they never compete for them. If we ever add support for multiple
+-- streams, we must have a set of buffers per stream.
+data Bookkeeping
+  = -- | Counters, e.g. for detecting the last block to finish.
+    BookkeepingCounters
+  | -- | Locks for operations that cannot be done atomically.
+    BookkeepingLocks
+  deriving (Eq, Ord, Show)
+
+-- | The number of 32-bit integers in a bookkeeping buffer.
+bookkeepingSize :: Bookkeeping -> Integer
+bookkeepingSize BookkeepingCounters = 1024
+bookkeepingSize BookkeepingLocks = 100151
 
 -- | The size of one dimension of a block.
 type BlockDim = Either Exp KernelConstExp
@@ -117,6 +140,10 @@ instance Pretty HostOp where
       <> parens (commasep [pretty key, pretty size_class])
   pretty (GetSizeMax dest size_class) =
     pretty dest <+> "<-" <+> "get_size_max" <> parens (pretty size_class)
+  pretty (GetBookkeeping dest BookkeepingCounters) =
+    pretty dest <+> "<-" <+> "bookkeeping_counters()"
+  pretty (GetBookkeeping dest BookkeepingLocks) =
+    pretty dest <+> "<-" <+> "bookkeeping_locks()"
   pretty (CmpSizeLe dest name size_class x) =
     pretty dest
       <+> "<-"
@@ -135,6 +162,8 @@ instance FreeIn HostOp where
   freeIn' (GetSizeMax dest _) =
     freeIn' dest
   freeIn' (GetSize dest _ _) =
+    freeIn' dest
+  freeIn' (GetBookkeeping dest _) =
     freeIn' dest
 
 instance FreeIn Kernel where
@@ -185,13 +214,14 @@ data KernelOp
     WarpSync
   | SharedAlloc VName (Count Bytes (TExp Int64))
   | UniformRead VName VName (Count Elements (TExp Int64)) PrimType Space
-  | -- | Perform a barrier and also check whether any
-    -- threads have failed an assertion.  Make sure all
-    -- threads would reach all 'ErrorSync's if any of them
-    -- do.  A failing assertion will jump to the next
-    -- following 'ErrorSync', so make sure it's not inside
-    -- control flow or similar.
-    ErrorSync Fence
+  | -- | Perform a barrier and also check whether any threads have failed an
+    -- assertion. If so, all threads of the block execute the given code and
+    -- then stop. The code must not fail, and is usually empty. Make sure all
+    -- threads would reach all 'ErrorSync's if any of them do. A failing
+    -- assertion will jump to the next following 'ErrorSync' (unless it is in
+    -- the body of an 'OnFailure'), so make sure it's not inside control flow or
+    -- similar.
+    ErrorSync Fence (Code KernelOp)
   deriving (Show)
 
 -- | Whether this is a barrier, which must be reached by all threads of the
@@ -298,10 +328,6 @@ instance Pretty KernelOp where
     "warp_sync()"
   pretty (SharedAlloc name size) =
     pretty name <+> equals <+> "shared_alloc" <> parens (pretty size)
-  pretty (ErrorSync FenceLocal) =
-    "error_sync_local()"
-  pretty (ErrorSync FenceGlobal) =
-    "error_sync_global()"
   pretty (UniformRead name v is bt space') =
     pretty name
       <+> "<-"
@@ -312,6 +338,14 @@ instance Pretty KernelOp where
               pretty is
             ]
         )
+  pretty (ErrorSync f handler) =
+    sync f <> handler'
+    where
+      sync FenceLocal = "error_sync_local()"
+      sync FenceGlobal = "error_sync_global()"
+      handler' = case handler of
+        Skip -> mempty
+        _ -> " on_failure" <> brace (pretty handler)
   pretty (Atomic _ (AtomicAdd t old arr ind x)) =
     pretty old
       <+> "<-"
@@ -386,6 +420,7 @@ instance Pretty KernelOp where
 instance FreeIn KernelOp where
   freeIn' (Atomic _ op) = freeIn' op
   freeIn' (SharedAlloc _ size) = freeIn' size
+  freeIn' (ErrorSync _ handler) = freeIn' handler
   freeIn' _ = mempty
 
 brace :: Doc a -> Doc a

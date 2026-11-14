@@ -29,6 +29,10 @@ module Futhark.CodeGen.Backends.GenericC.Monad
     generateProgramStruct,
     runCompilerM,
     inNewFunction,
+    failureJump,
+    memoryFailure,
+    errorLabel,
+    withoutPendingFailures,
     cachingMemory,
     volQuals,
     rawMem,
@@ -116,7 +120,10 @@ data CompilerState s = CompilerState
     compCtxFields :: DL.DList (C.Id, C.Type, Maybe C.Exp, Maybe (C.Stm, C.Stm)),
     compClearItems :: DL.DList C.BlockItem,
     compDeclaredMem :: [(VName, Space)],
-    compItems :: DL.DList C.BlockItem
+    compItems :: DL.DList C.BlockItem,
+    -- | The label that the failures since the previous 'errorLabel' jump to, if
+    -- there have been any.
+    compErrorLabel :: Maybe VName
   }
 
 newCompilerState :: VNameSource -> s -> CompilerState s
@@ -131,7 +138,8 @@ newCompilerState src s =
       compCtxFields = mempty,
       compClearItems = mempty,
       compDeclaredMem = mempty,
-      compItems = mempty
+      compItems = mempty,
+      compErrorLabel = Nothing
     }
 
 -- | In which part of the header file we put the declaration.  This is
@@ -252,7 +260,7 @@ data Operations op s = Operations
 freeAllocatedMem :: CompilerM op s [C.BlockItem]
 freeAllocatedMem = collect $ mapM_ free =<< gets compDeclaredMem
   where
-    free (name, space) = unRefMem name space [C.cstm|err = 1;|]
+    free (name, space) = unRefMem name space $ pure [C.cstm|err = 1;|]
 
 declAllocatedMem :: CompilerM op s [C.BlockItem]
 declAllocatedMem = collect $ mapM_ f =<< gets compDeclaredMem
@@ -383,11 +391,49 @@ inNewFunction :: CompilerM op s a -> CompilerM op s a
 inNewFunction m = do
   old_mem <- gets compDeclaredMem
   modify $ \s -> s {compDeclaredMem = mempty}
-  x <- local noCached m
+  x <- local noCached $ withoutPendingFailures m
   modify $ \s -> s {compDeclaredMem = old_mem}
   pure x
   where
     noCached env = env {envCachedMem = mempty}
+
+-- | A statement that jumps to the next error label; see 'errorLabel'. Don't do
+-- this without setting @err@ or similar first.
+failureJump :: CompilerM op s C.Stm
+failureJump = do
+  label <- maybe (newVName "failure") pure =<< gets compErrorLabel
+  modify $ \s -> s {compErrorLabel = Just label}
+  pure [C.cstm|goto $id:label;|]
+
+-- | What do do after failing a memory operation: set @err@ and jump as by
+-- 'failureJump'.
+memoryFailure :: CompilerM op s C.Stm
+memoryFailure = do
+  failure <- failureJump
+  pure [C.cstm|{err = 1; $stm:failure}|]
+
+-- | The label that the failures since the previous error label jump to, if
+-- there have been any. A failure thus jumps to the first error label that
+-- follows it in the program text. Every function that may fail must end with an
+-- error label just before its @cleanup@ label.
+errorLabel :: CompilerM op s [C.BlockItem]
+errorLabel = do
+  label <- gets compErrorLabel
+  modify $ \s -> s {compErrorLabel = Nothing}
+  pure $ case label of
+    Nothing -> []
+    Just label' -> [C.citems|$id:label': ;|]
+
+-- | Run an action as if no failures had happened before it, and afterwards
+-- restore the failures that had. The action must place the error labels for its
+-- own failures.
+withoutPendingFailures :: CompilerM op s a -> CompilerM op s a
+withoutPendingFailures m = do
+  old_label <- gets compErrorLabel
+  modify $ \s -> s {compErrorLabel = Nothing}
+  x <- m
+  modify $ \s -> s {compErrorLabel = old_label}
+  pure x
 
 -- | Insert a block item in the generated code at this point.
 item :: C.BlockItem -> CompilerM op s ()
@@ -589,12 +635,14 @@ resetMem mem space = do
       when refcount $
         stm [C.cstm|$exp:mem.references = NULL;|]
 
-setMem :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> C.Stm -> CompilerM op s ()
-setMem dest src space on_failure = do
+-- | Set @dest@ to @src@.  A failure is handled by 'memoryFailure'.
+setMem :: (C.ToExp a, C.ToExp b) => a -> b -> Space -> CompilerM op s ()
+setMem dest src space = do
   refcount <- fatMemory space
   let src_s = T.unpack $ expText $ C.toExp src noLoc
   if refcount
-    then
+    then do
+      on_failure <- memoryFailure
       stm
         [C.cstm|if ($id:(fatMemSet space)(ctx, &$exp:dest, &$exp:src,
                                                $string:src_s) != 0) {
@@ -613,15 +661,17 @@ setMem dest src space on_failure = do
                   }|]
       _ -> stm [C.cstm|$exp:dest = $exp:src;|]
 
-unRefMem :: (C.ToExp a) => a -> Space -> C.Stm -> CompilerM op s ()
+-- | The failure code is only generated if it is needed.
+unRefMem :: (C.ToExp a) => a -> Space -> CompilerM op s C.Stm -> CompilerM op s ()
 unRefMem mem space on_failure = do
   refcount <- fatMemory space
   cached <- isJust <$> cacheMem mem
   let mem_s = T.unpack $ expText $ C.toExp mem noLoc
-  when (refcount && not cached) $
+  when (refcount && not cached) $ do
+    on_failure' <- on_failure
     stm
       [C.cstm|if ($id:(fatMemUnRef space)(ctx, &$exp:mem, $string:mem_s) != 0) {
-                  $stm:on_failure
+                  $stm:on_failure'
                 }|]
 
 allocMem ::
@@ -629,22 +679,23 @@ allocMem ::
   a ->
   b ->
   Space ->
-  C.Stm ->
+  CompilerM op s C.Stm ->
   CompilerM op s ()
 allocMem mem size space on_failure = do
   refcount <- fatMemory space
   let mem_s = T.unpack $ expText $ C.toExp mem noLoc
+  on_failure' <- on_failure
   if refcount
     then
       stm
         [C.cstm|if ($id:(fatMemAlloc space)(ctx, &$exp:mem, $exp:size,
                                                  $string:mem_s)) {
-                       $stm:on_failure
+                       $stm:on_failure'
                      }|]
     else do
       freeRawMem mem size space mem_s
       alloc <- allocRawMem mem size space [C.cexp|desc|]
-      stm [C.cstm|if ($exp:alloc != FUTHARK_SUCCESS) { $stm:on_failure }|]
+      stm [C.cstm|if ($exp:alloc != FUTHARK_SUCCESS) { $stm:on_failure' }|]
 
 copyMemoryDefaultSpace ::
   C.Exp ->

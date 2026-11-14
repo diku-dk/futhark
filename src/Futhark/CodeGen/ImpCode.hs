@@ -337,6 +337,12 @@ data Code a
     -- out not to be true, then report a failure along with
     -- the given error message.
     Assert Exp (ErrorMsg Exp) (Loc, [Loc])
+  | -- | @OnFailure body handler@ executes @body@, and if it fails, executes
+    -- @handler@ before the failure propagates as usual. This is for code that
+    -- must still be executed after a failure, such as releasing a lock. The
+    -- handler must not fail. In a GPU kernel, only the failing thread executes
+    -- the handler, so @body@ must not contain barriers.
+    OnFailure (Code a) (Code a)
   | -- | Print the given value to the screen, somehow
     -- annotated with the given string as a description.  If
     -- no type/value pair, just print the string.  This has
@@ -390,6 +396,7 @@ lexicalMemoryUsage func =
     go f (If _ x y) = f x <> f y
     go f (For _ _ x) = f x
     go f (While _ x) = f x
+    go f (OnFailure x y) = f x <> f y
     go _ _ = mempty
 
     declared (DeclareMem mem space) =
@@ -415,6 +422,7 @@ declsFirst = mconcat . uncurry (<>) . partition isDecl . listify
     listify (If cond c1 c2) = [If cond (declsFirst c1) (declsFirst c2)]
     listify (For i e c) = [For i e (declsFirst c)]
     listify (While cond c) = [While cond (declsFirst c)]
+    listify (OnFailure c1 c2) = [OnFailure (declsFirst c1) (declsFirst c2)]
     listify c = [c]
     isDecl (DeclareScalar {}) = True
     isDecl (DeclareMem {}) = True
@@ -429,6 +437,7 @@ calledFuncs f (x :>>: y) = calledFuncs f x <> calledFuncs f y
 calledFuncs f (If _ x y) = calledFuncs f x <> calledFuncs f y
 calledFuncs f (For _ _ x) = calledFuncs f x
 calledFuncs f (While _ x) = calledFuncs f x
+calledFuncs f (OnFailure x y) = calledFuncs f x <> calledFuncs f y
 calledFuncs _ _ = mempty
 
 -- | Compute call graph, as per 'calledFuncs', but also include
@@ -449,6 +458,7 @@ foldProvenances f (x :>>: y) = foldProvenances f x <> foldProvenances f y
 foldProvenances f (For _ _ c) = foldProvenances f c
 foldProvenances f (While _ c) = foldProvenances f c
 foldProvenances f (If _ x y) = foldProvenances f x <> foldProvenances f y
+foldProvenances f (OnFailure x y) = foldProvenances f x <> foldProvenances f y
 foldProvenances f (Op x) = f x
 foldProvenances _ _ = mempty
 
@@ -643,6 +653,13 @@ instance (Pretty op) => Pretty (Code op) where
     pretty dest <+> "<-" <+> pretty from <+> "@" <> pretty space
   pretty (Assert e msg _) =
     "assert" <> parens (commasep [pretty msg, pretty e])
+  pretty (OnFailure body handler) =
+    "on_failure"
+      <+> "{"
+      </> indent 2 (pretty body)
+      </> "} handler {"
+      </> indent 2 (pretty handler)
+      </> "}"
   pretty (Copy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)) =
     ("lmadcopy_" <> pretty (length shape) <> "d_" <> pretty t)
       <> (parens . align)
@@ -732,6 +749,8 @@ instance Traversable Code where
     While cond <$> traverse f code
   traverse f (If cond x y) =
     If cond <$> traverse f x <*> traverse f y
+  traverse f (OnFailure x y) =
+    OnFailure <$> traverse f x <*> traverse f y
   traverse f (Op kernel) =
     Op <$> f kernel
   traverse _ Skip =
@@ -779,6 +798,7 @@ declaredIn (If _ t f) = declaredIn t <> declaredIn f
 declaredIn (x :>>: y) = declaredIn x <> declaredIn y
 declaredIn (For i _ body) = oneName i <> declaredIn body
 declaredIn (While _ body) = declaredIn body
+declaredIn (OnFailure body handler) = declaredIn body <> declaredIn handler
 declaredIn _ = mempty
 
 instance FreeIn EntryPoint where
@@ -837,6 +857,8 @@ instance (FreeIn a) => FreeIn (Code a) where
     freeIn' cond <> freeIn' t <> freeIn' f
   freeIn' (Assert e msg _) =
     freeIn' e <> foldMap freeIn' msg
+  freeIn' (OnFailure body handler) =
+    freeIn' body <> freeIn' handler
   freeIn' (Op op) =
     freeIn' op
   freeIn' (Meta {}) =

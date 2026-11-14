@@ -159,6 +159,16 @@ callKernel (GetSizeMax v size_class) = do
   GC.stm [C.cstm|$id:v = $exp:e;|]
 callKernel (LaunchKernel safety kernel_name shared_memory args num_tblocks tblock_size) =
   genLaunchKernel safety kernel_name shared_memory args num_tblocks tblock_size
+callKernel (GetBookkeeping v b) =
+  GC.stm
+    [C.cstm|$id:v = (struct memblock_device) {.references = NULL,
+                                              .mem = $exp:buf,
+                                              .size = $int:(4 * bookkeepingSize b),
+                                              .desc = $string:desc};|]
+  where
+    (buf, desc) = case b of
+      BookkeepingCounters -> ([C.cexp|ctx->bookkeeping_counters|], "bookkeeping_counters")
+      BookkeepingLocks -> ([C.cexp|ctx->bookkeeping_locks|], "bookkeeping_locks")
 
 copygpu2gpu :: GC.DoCopy op s
 copygpu2gpu _ t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
@@ -472,6 +482,8 @@ generateGPUBoilerplate gpu_program macros backendH kernels types failures = do
   mapM_
     GC.earlyDecl
     [C.cunit|static const int max_failure_args = $int:max_failure_args;
+             static const typename int64_t bookkeeping_counters_size = $int:(bookkeepingSize BookkeepingCounters);
+             static const typename int64_t bookkeeping_locks_size = $int:(bookkeepingSize BookkeepingLocks);
              static const int f64_required = $exp:f64_required;
              static const char *gpu_program[] = {$inits:program_fragments};
              $esc:(T.unpack gpuPrototypesH)

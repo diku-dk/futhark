@@ -386,6 +386,8 @@ onHostOp (ImpGPU.CmpSizeLe v key _ x) =
   pure $ CmpSizeLe v key x
 onHostOp (ImpGPU.GetSizeMax v size_class) =
   pure $ GetSizeMax v size_class
+onHostOp (ImpGPU.GetBookkeeping v b) =
+  pure $ GetBookkeeping v b
 
 -- | Generate WebGPU host and device code.
 kernelsToWebGPU :: ImpGPU.Program -> Program
@@ -812,6 +814,9 @@ genWGSLStm (Meta (MetaProvenance (Provenance _ l))) =
   pure $ WGSL.Comment $ locText l
 genWGSLStm (DebugPrint _ _) = pure WGSL.Empty
 genWGSLStm (TracePrint _) = pure WGSL.Empty
+genWGSLStm (ImpGPU.OnFailure x _) =
+  -- FIXME: WebGPU does not support failure.
+  genWGSLStm x
 genWGSLStm (Op (ImpGPU.GetBlockId dest i)) = do
   destId <- getIdent dest
   pure $
@@ -906,7 +911,9 @@ genWGSLStm (Op (ImpGPU.UniformRead tgt mem i t _)) = do
         let (word, offset) = wordAccess t mem' i'
          in call ("unpack_" <> prettyText t) [call "workgroupUniformLoad" [word], offset]
       else call "workgroupUniformLoad" [WGSL.ExpUnary WGSL.AddressOf $ WGSL.ExpIndex (WGSL.ExpIdent mem') i']
-genWGSLStm (Op (ImpGPU.ErrorSync f)) = genWGSLStm $ Op (ImpGPU.Barrier f)
+genWGSLStm (Op (ImpGPU.ErrorSync f _)) =
+  -- FIXME: WebGPU does not support failure.
+  genWGSLStm $ Op (ImpGPU.Barrier f)
 genWGSLStm (Op ImpGPU.WarpSync {}) = error "genWGSLStm: WarpSync not handled."
 genWGSLStm GetUserParam {} = error "genWGSLStm: GetUserParam not handled."
 
@@ -1197,6 +1204,7 @@ findMemoryTypes name = S.elems . find <$> asks (ImpGPU.kernelBody . krKernel)
     find (For _ _ body) = find body
     find (While _ body) = find body
     find (If _ s1 s2) = find s1 <> find s2
+    find (OnFailure s1 s2) = find s1 <> find s2
     find _ = S.empty
 
 -- | Whether the kernel writes to the buffer.  Atomic operations count as
@@ -1211,6 +1219,7 @@ writesMemory name = find <$> asks (ImpGPU.kernelBody . krKernel)
     find (For _ _ body) = find body
     find (While _ body) = find body
     find (If _ s1 s2) = find s1 || find s2
+    find (OnFailure s1 s2) = find s1 || find s2
     find _ = False
 
 -- | The single type at which the kernel accesses the buffer, and whether any

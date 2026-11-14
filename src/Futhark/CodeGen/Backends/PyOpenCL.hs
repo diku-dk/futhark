@@ -233,6 +233,11 @@ callKernel (Imp.CmpSizeLe v key x) = do
 callKernel (Imp.GetSizeMax v size_class) = do
   v' <- compileVar v
   stm $ Assign v' $ kernelConstToExp $ Imp.SizeMaxConst size_class
+callKernel (Imp.GetBookkeeping v b) = do
+  v' <- compileVar v
+  stm . Assign v' . Var $ case b of
+    Imp.BookkeepingCounters -> "self.bookkeeping_counters"
+    Imp.BookkeepingLocks -> "self.bookkeeping_locks"
 callKernel (Imp.LaunchKernel safety name shared_memory args num_threadblocks workgroup_size) = do
   num_threadblocks' <- mapM (fmap asLong . compileExp) num_threadblocks
   workgroup_size' <- mapM compileBlockDim workgroup_size
