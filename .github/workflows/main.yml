@@ -532,7 +532,7 @@ jobs:
 
   test-webgpu-browser:
     runs-on: hendrix
-    needs: [build-linux-nix]
+    needs: [build-linux-x86_64-nix]
     if: github.repository == 'diku-dk/futhark'
     steps:
     - uses: actions/checkout@v4
@@ -552,7 +552,7 @@ jobs:
   # by lavapipe, which runs on the CPU.
   test-webgpu-node:
     runs-on: ubuntu-24.04
-    needs: [build-linux-nix]
+    needs: [build-linux-x86_64-nix]
 
     steps:
     - uses: actions/checkout@v7
