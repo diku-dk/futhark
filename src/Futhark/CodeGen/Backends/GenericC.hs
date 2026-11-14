@@ -50,16 +50,18 @@ defCall :: CallCompiler op s
 defCall dests fname args = do
   let out_args = [[C.cexp|&$id:d|] | d <- dests]
       args' = [C.cexp|ctx|] : out_args ++ args
-  item [C.citem|if ($id:(funName fname)($args:args') != 0) { err = 1; goto cleanup; }|]
+  failure <- failureJump
+  item [C.citem|if ($id:(funName fname)($args:args') != 0) { err = 1; $stm:failure }|]
 
 defError :: ErrorCompiler op s
 defError msg stacktrace = do
   (formatstr, formatargs) <- errorMsgString msg
   let formatstr' = "Error: " <> formatstr <> "\n\nBacktrace:\n%s"
+  failure <- failureJump
   items
     [C.citems|set_error(ctx, msgprintf($string:formatstr', $args:formatargs, $string:stacktrace));
               err = FUTHARK_PROGRAM_ERROR;
-              goto cleanup;|]
+              $stm:failure|]
 
 lmadcopyCPU :: DoCopy op s
 lmadcopyCPU _ t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
@@ -657,6 +659,7 @@ compileConstants (Constants ps init_consts) = do
       compileCode init_consts
     decl_mem <- declAllocatedMem
     free_mem <- freeAllocatedMem
+    error_label <- errorLabel
     libDecl
       [C.cedecl|static int init_constants($ty:ctx_ty *ctx) {
         (void)ctx;
@@ -666,6 +669,7 @@ compileConstants (Constants ps init_consts) = do
         $items:init_consts'
         $items:free_mem
         $items:undefs
+        $items:error_label
         cleanup:
         return err;
       }|]
@@ -700,7 +704,7 @@ compileConstants (Constants ps init_consts) = do
 
     freeConst ScalarParam {} = pure ()
     freeConst (MemParam name space) =
-      unRefMem [C.cexp|ctx->constants->$id:name|] space [C.cstm|err = 1;|]
+      unRefMem [C.cexp|ctx->constants->$id:name|] space $ pure [C.cstm|err = 1;|]
 
     getConst (ScalarParam name bt) = do
       let ctp = primTypeToCType bt

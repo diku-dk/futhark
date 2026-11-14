@@ -159,18 +159,11 @@ type SharedMemoryUse = (VName, Count Bytes (TExp Int64))
 data KernelState = KernelState
   { kernelSharedMemory :: [SharedMemoryUse],
     kernelFailures :: [FailureMsg],
-    kernelNextSync :: Int,
-    -- | Has a potential failure occurred sine the last
-    -- ErrorSync?
-    kernelSyncPending :: Bool,
     kernelHasBarriers :: Bool
   }
 
 newKernelState :: [FailureMsg] -> KernelState
-newKernelState failures = KernelState mempty failures 0 False False
-
-errorLabel :: KernelState -> String
-errorLabel = ("error_" ++) . show . kernelNextSync
+newKernelState failures = KernelState mempty failures False
 
 data ToOpenCL = ToOpenCL
   { clGPU :: M.Map KernelName (KernelSafety, T.Text),
@@ -351,6 +344,7 @@ onKernel target kernel = do
           -- No need to free, as we cannot allocate memory in kernels.
           mapM_ GC.item =<< GC.declAllocatedMem
           mapM_ GC.item body
+          GC.items =<< GC.errorLabel
       kstate = GC.compUserState cstate
 
       (kernel_consts, (const_defs, const_undefs)) =
@@ -476,8 +470,6 @@ onKernel target kernel = do
                     $items:error_init
                     $items:kernel_body
 
-                    $id:(errorLabel kstate): return;
-
                     $items:const_undefs
                 }|]
   modify $ \s ->
@@ -584,18 +576,6 @@ kernelArgs = mapMaybe useToArg . kernelUses
     useToArg (ScalarUse v pt) = Just $ ValueKArg (LeafExp v pt) pt
     useToArg ConstUse {} = Nothing
 
-nextErrorLabel :: GC.CompilerM KernelOp KernelState String
-nextErrorLabel =
-  errorLabel <$> GC.getUserState
-
-incErrorLabel :: GC.CompilerM KernelOp KernelState ()
-incErrorLabel =
-  GC.modifyUserState $ \s -> s {kernelNextSync = kernelNextSync s + 1}
-
-pendingError :: Bool -> GC.CompilerM KernelOp KernelState ()
-pendingError b =
-  GC.modifyUserState $ \s -> s {kernelSyncPending = b}
-
 hasCommunication :: ImpGPU.KernelCode -> Bool
 hasCommunication = any communicates
   where
@@ -662,16 +642,14 @@ inKernelOperations env mode body =
         s {kernelSharedMemory = (name', size) : kernelSharedMemory s}
       GC.stm [C.cstm|$id:name = (__local unsigned char*) $id:name';|]
     kernelOps (ErrorSync f handler) = do
-      label <- nextErrorLabel
-      pending <- kernelSyncPending <$> GC.getUserState
-      when pending $ do
-        pendingError False
+      error_label <- GC.errorLabel
+      unless (null error_label) $ do
         handler' <- GC.collect $ GC.compileCode handler
-        GC.stm [C.cstm|$id:label: barrier($exp:(fence f));|]
+        GC.items error_label
+        GC.stm [C.cstm|barrier($exp:(fence f));|]
         GC.stm [C.cstm|if (local_failure) { $items:handler' return; }|]
       GC.stm [C.cstm|barrier($exp:(fence f));|]
       GC.modifyUserState $ \s -> s {kernelHasBarriers = True}
-      incErrorLabel
     kernelOps (Atomic space aop) = atomicOps space aop
 
     atomicCast s t = do
@@ -834,16 +812,16 @@ inKernelOperations env mode body =
     kernelReadScalar =
       GC.readScalarPointerWithQuals pointerQuals
 
-    whatNext = do
-      label <- nextErrorLabel
-      pendingError True
-      pure $
-        if has_communication
-          then [C.citems|local_failure = 1; goto $id:label;|]
-          else
-            if mode == FunMode
-              then [C.citems|return 1;|]
-              else [C.citems|return;|]
+    -- A failing thread jumps to the next error label, which is either at an
+    -- 'ErrorSync' or at the end of the kernel.
+    whatNext
+      | mode == FunMode = pure [C.citems|return 1;|]
+      | has_communication = do
+          failure <- GC.failureJump
+          pure [C.citems|local_failure = 1; $stm:failure|]
+      | otherwise = do
+          failure <- GC.failureJump
+          pure [C.citems|$stm:failure|]
 
     callInKernel dests fname args
       | functionMayFail fname env = do
