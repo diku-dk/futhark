@@ -921,8 +921,11 @@ atomicUpdateLocking _ op = AtomicLocking $ \locking space arrs bucket -> do
       acquire_fence
       dLParams acc_params
       bind_acc_params
-      op_body
-      do_hist
+      -- A thread whose operator fails must still release the lock, or other
+      -- threads would wait for it forever.
+      update <- collect $ op_body >> do_hist
+      on_failure <- collect release_lock
+      emit $ Imp.OnFailure update on_failure
       release_lock
       break_loop
   where
