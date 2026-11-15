@@ -35,7 +35,7 @@ intraMinInnerPar = 32
 data IntrablockResult = IntrablockResult
   { intraMinPar :: SubExp,
     intraAvailPar :: SubExp,
-    intraThreadBlockSize :: SubExp,
+    intraThreadBlockSize :: Count BlockSize SubExp,
     intraPreludeStms :: Stms GPU,
     intraKernelStms :: Stms GPU,
     intraResultNames :: [VName]
@@ -163,11 +163,15 @@ intrablockParallelise map_in_block segments env inps dist_res _pat aux w arrs la
   noNonuniformPar (freeIn $ map fst wss) $ do
     ((intra_avail_par, tblock_size, kspace, num_tblocks), prelude_stms) <-
       collectStms $ do
-        num_tblocks <-
-          letSubExp "intra_num_tblocks"
-            =<< foldBinOp' (Mul Int64 OverflowUndef) new_segments
         (intra_avail_par, tblock_size) <-
           computeThreadBlockSize wss
+        -- CalcNumBlocks needs a "thread count" to cap the actual number of
+        -- blocks. Tell a white lie here that is good enough, hopefully.
+        num_threads <-
+          letSubExp "num_threads" <=< toExp $
+            product $
+              pe64 (unCount tblock_size) : map pe64 new_segments
+        num_tblocks <- getGridSize "intrablock" num_threads tblock_size
         gtids <- mapM (const $ newVName "gtid") new_segments
         kspace <- mkSegSpace $ zip gtids new_segments
         pure (intra_avail_par, tblock_size, kspace, num_tblocks)
@@ -182,15 +186,15 @@ intrablockParallelise map_in_block segments env inps dist_res _pat aux w arrs la
 
     let kbody' = kbody {bodyStms = read_input_stms <> bodyStms kbody}
         rts = map (length new_segments `stripArray`) result_ts
-        grid = KernelGrid (Count num_tblocks) tblock_size
-        lvl = SegBlock SegNoVirt (Just grid)
+        grid = KernelGrid num_tblocks tblock_size
+        lvl = SegBlock SegVirt (Just grid)
         kstm = Let nested_pat aux $ Op $ SegOp $ SegMap lvl kspace rts kbody'
 
     pure $
       IntrablockResult
         { intraMinPar = intra_avail_par,
           intraAvailPar = intra_avail_par,
-          intraThreadBlockSize = unCount tblock_size,
+          intraThreadBlockSize = tblock_size,
           intraPreludeStms = input_prelude_stms <> prelude_stms,
           intraKernelStms = oneStm kstm,
           intraResultNames = patNames nested_pat

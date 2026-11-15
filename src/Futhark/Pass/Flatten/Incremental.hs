@@ -223,7 +223,7 @@ intraBlockAlternative intra = do
       BasicOp $
         CmpOp
           (CmpSle Int64)
-          (Intrablock.intraThreadBlockSize intra)
+          (unCount (Intrablock.intraThreadBlockSize intra))
           max_tblock_size
   (intra_suff, _) <-
     sufficientParallelism

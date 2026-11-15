@@ -4,6 +4,7 @@ module Futhark.Pass.Flatten.Builtins
   ( BuiltinFn (..),
     builtinFunDef,
     determineReduceOp,
+    getGridSize,
     genUniformSegHist,
     mkSegSpace,
     segMap,
@@ -62,18 +63,17 @@ topSegLevel = SegThread SegVirt Nothing
 
 data ThreadRecommendation = ManyThreads | NoRecommendation SegVirt
 
-numberOfBlocks ::
+-- | Compute a sensible grid size given this many (virtual) threads.
+getGridSize ::
   (MonadBuilder m, Op (Rep m) ~ HostOp inner (Rep m)) =>
   Name ->
   SubExp ->
-  SubExp ->
-  m SubExp
-numberOfBlocks desc w tblock_size = do
+  Count BlockSize SubExp ->
+  m (Count NumBlocks SubExp)
+getGridSize desc num_threads tblock_size = do
   max_num_tblocks_key <- nameFromText . prettyText <$> newVName (desc <> "_num_tblocks")
-  letSubExp "num_tblocks" $
-    Op $
-      SizeOp $
-        CalcNumBlocks w max_num_tblocks_key tblock_size
+  fmap Count . letSubExp "num_tblocks" . Op . SizeOp $
+    CalcNumBlocks num_threads max_num_tblocks_key (unCount tblock_size)
 
 -- | Like 'segThread', but cap the thread count to the input size.
 -- This is more efficient for small kernels, e.g. summing a small
@@ -98,8 +98,8 @@ segThreadCapped ws desc r = do
       let grid = KernelGrid (Count usable_groups) (Count tblock_size)
       pure $ SegThread SegNoVirt (Just grid)
     NoRecommendation v -> do
-      num_tblocks <- numberOfBlocks desc w tblock_size
-      let grid = KernelGrid (Count num_tblocks) (Count tblock_size)
+      num_tblocks <- getGridSize desc w $ Count tblock_size
+      let grid = KernelGrid num_tblocks (Count tblock_size)
       pure $ SegThread v (Just grid)
 
 -- FIXME: We use segThreadCapped here because otherwise we may get
