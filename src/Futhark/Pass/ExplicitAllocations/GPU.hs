@@ -54,10 +54,7 @@ handleSegOp outer_lvl op = do
                   (unCount (gridNumBlocks grid))
                   (unCount (gridBlockSize grid))
             Nothing ->
-              foldBinOp
-                (Mul Int64 OverflowUndef)
-                (intConst Int64 1)
-                (segSpaceDims $ segSpace op)
+              error "handleSegOp: missing grid"
   allocAtLevel (segLevel op) $ mapSegOpM (mapper num_threads) op
   where
     maybe_grid =

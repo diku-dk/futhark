@@ -216,31 +216,18 @@ intraBlockAlternative ::
   FlattenM (SubExp, Body GPU)
 intraBlockAlternative intra = do
   addStms $ Intrablock.intraPreludeStms intra
-  max_tblock_size <-
-    letSubExp "max_tblock_size" $ Op $ SizeOp $ GetSizeMax SizeThreadBlock
-  fits <-
-    letSubExp "fits" $
-      BasicOp $
-        CmpOp
-          (CmpSle Int64)
-          (unCount (Intrablock.intraThreadBlockSize intra))
-          max_tblock_size
   (intra_suff, _) <-
     sufficientParallelism
       "suff_intra_par"
       [Intrablock.intraAvailPar intra]
       mempty
       (Just Intrablock.intraMinInnerPar)
-  intra_ok <-
-    letSubExp "intra_suff_and_fits" $
-      BasicOp $
-        BinOp LogAnd fits intra_suff
   intra_body <-
     renameBody $
       mkBody
         (Intrablock.intraKernelStms intra)
         (varsRes $ Intrablock.intraResultNames intra)
-  pure (intra_ok, intra_body)
+  pure (intra_suff, intra_body)
 
 -- | Construct the multi-versioned alternatives for a map, given actions that
 -- construct the fully-flattened body and the outer-parallel-only body, and an

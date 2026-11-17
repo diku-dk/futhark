@@ -24,13 +24,13 @@ import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplify.Rep (addScopeWisdom)
 import Futhark.Pass
+import Futhark.Pass.AddGrid (mkVirtGrid)
 import Futhark.Pass.ExplicitAllocations.GPU (explicitAllocationsInStms)
 import Futhark.Pass.Flatten.Builtins (mkSegSpace)
 import Futhark.Tools
 import Futhark.Transform.CopyPropagate (copyPropagateInFun)
 import Futhark.Transform.Rename (renamePat, renameStm)
 import Futhark.Transform.Substitute
-import Futhark.Transform.ToGPU (segThread)
 import Futhark.Util (mapAccumLM)
 import Prelude hiding (quot)
 
@@ -190,26 +190,12 @@ transformExp (WithAcc inputs lam) = do
 transformExp e =
   pure (mempty, e)
 
-ensureGridKnown :: SegLevel -> ExpandM (Stms GPUMem, SegLevel, KernelGrid)
+ensureGridKnown :: SegLevel -> ExpandM (SegLevel, KernelGrid)
 ensureGridKnown lvl =
   case lvl of
-    SegThread _ (Just grid) -> pure (mempty, lvl, grid)
-    SegBlock _ (Just grid) -> pure (mempty, lvl, grid)
-    SegThread virt Nothing -> mkGrid (SegThread virt)
-    SegBlock virt Nothing -> mkGrid (SegBlock virt)
-    SegThreadInBlock {} -> error "ensureGridKnown: SegThreadInBlock"
-  where
-    mkGrid f = do
-      (grid, stms) <-
-        runBuilder $
-          KernelGrid
-            <$> (Count <$> getSize "num_tblocks" SizeGrid)
-            <*> (Count <$> getSize "tblock_size" SizeThreadBlock)
-      pure (stms, f $ Just grid, grid)
-
-    getSize desc size_class = do
-      size_key <- nameFromText . prettyText <$> newVName desc
-      letSubExp desc $ Op $ Inner $ SizeOp $ GetSize size_key size_class
+    SegThread _ (Just grid) -> pure (lvl, grid)
+    SegBlock _ (Just grid) -> pure (lvl, grid)
+    _ -> error $ "ensureGridKnown: bad lvl " <> show lvl
 
 transformScanRed ::
   SegLevel ->
@@ -250,12 +236,12 @@ transformScanRed lvl space ops kbody = do
   if null variant_allocs && null invariant_allocs
     then pure (mempty, (lvl, ops, kbody))
     else do
-      (lvl_stms, lvl', grid) <- ensureGridKnown lvl
+      (lvl', grid) <- ensureGridKnown lvl
       allocsForBody variant_allocs invariant_allocs grid space kbody kbody' $
         \offsets alloc_stms kbody'' -> do
           ops'' <- forM ops' $ \op' ->
             localScope (scopeOf op') $ offsetMemoryInLambda offsets op'
-          pure (lvl_stms <> alloc_stms, (lvl', ops'', kbody''))
+          pure (alloc_stms, (lvl', ops'', kbody''))
   where
     bound_in_kernel =
       namesFromList (M.keys $ scopeOfSegSpace space)
@@ -1129,11 +1115,12 @@ sliceKernelSizes num_threads sizes space kstms = do
             max_lam
             (replicate num_sizes $ intConst Int64 0)
             mempty
-    lvl <- segThread "segred"
+
+    grid <- mkVirtGrid
 
     addStms
       =<< mapM renameStm
-      =<< nonSegRed lvl pat w [red_op] size_lam' [thread_space_iota]
+      =<< nonSegRed (SegThread SegVirt (Just grid)) pat w [red_op] size_lam' [thread_space_iota]
 
     size_sums <- forM (patNames pat) $ \threads_max ->
       letExp "size_sum" $

@@ -36,6 +36,7 @@ import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
 import Futhark.Pass.AD
 import Futhark.Pass.AddGlobalParams
+import Futhark.Pass.AddGrid
 import Futhark.Pass.ExpandAllocations
 import Futhark.Pass.ExplicitAllocations.GPU qualified as GPU
 import Futhark.Pass.ExplicitAllocations.MC qualified as MC
@@ -110,6 +111,7 @@ gpuPipeline =
         optimiseArrayLayoutGPU,
         -- Important to simplify after coalescing in order to fix up
         -- redundant manifests.
+        addGrid,
         simplifyGPU,
         performCSE True
       ]
