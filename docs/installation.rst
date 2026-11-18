@@ -132,8 +132,6 @@ above.
 
 .. _`Linuxbrew`: http://linuxbrew.sh/
 
-.. _macos-installation:
-
 Using OpenCL or CUDA
 ~~~~~~~~~~~~~~~~~~~~
 
@@ -150,6 +148,8 @@ talk to the hardware.  You will need both.  Working display drivers
 for the GPU does not imply that an ICD has been installed - they are
 usually in a separate package.  Consult your favourite search engine
 for details.
+
+.. _macos-installation:
 
 Installing Futhark on macOS
 ---------------------------
