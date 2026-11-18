@@ -27,6 +27,7 @@ where
 
 import Control.Monad
 import Control.Monad.Identity
+import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer
 import Data.Bifunctor
@@ -89,6 +90,54 @@ simplifyConsts ::
 simplifyConsts =
   Simplify.simplifyStms simpleSOACS soacRules Engine.noExtraHoistBlockers mempty
 
+-- | We are willing to hoist potentially unsafe statements out of SOACs, but
+-- they must be protected by adding a branch on top of them.
+protectSOACHoisted ::
+  (Engine.SimplifiableRep rep) =>
+  SubExp ->
+  Engine.SimpleM rep (a, Stms (Wise rep)) ->
+  Engine.SimpleM rep (a, Stms (Wise rep))
+protectSOACHoisted w m = do
+  (x, stms) <- m
+  ops <- asks $ Engine.protectHoistedOpS . fst
+  stms' <- runBuilder_ $ do
+    if not $ all (safeExp . stmExp) stms
+      then do
+        is_nonempty <- checkIfNonEmpty
+        mapM_ (Engine.protectIf ops (not . safeExp) is_nonempty) stms
+      else addStms stms
+  pure (x, stms')
+  where
+    checkIfNonEmpty =
+      letSubExp "soac_nonempty" . BasicOp $
+        CmpOp (CmpSlt Int64) (intConst Int64 0) w
+
+simplifySOACLambda ::
+  (Simplify.SimplifiableRep rep, Engine.Simplifiable t) =>
+  SubExp ->
+  GLambda (Wise rep) t ->
+  Engine.SimpleM rep (GLambda (Wise rep) t, Stms (Wise rep))
+simplifySOACLambda w lam =
+  protectSOACHoisted w . Engine.enterLoop . local blockSlices $
+    Engine.simplifyLambda mempty lam
+  where
+    -- Slices are not worth hoisting out of SOACs by themselves. They are
+    -- cheap, and since they are not safe, a hoisted slice must be protected
+    -- by a (costly) fallback branch. However, we do hoist them when a hoisted
+    -- statement depends on them, as otherwise that statement would be blocked
+    -- as well, hence the soft block.
+    blockSlices (ops, env) =
+      let blockers = Engine.envHoistBlockers env
+          blockers' =
+            blockers
+              { Engine.blockHoistPar =
+                  Engine.blockHoistPar blockers `Engine.orIf` isSlice
+              }
+       in (ops, env {Engine.envHoistBlockers = blockers'})
+    isSlice _ _ (Let _ _ (BasicOp (Index _ slice)))
+      | not $ null $ sliceDims slice = Engine.SoftBlock
+    isSlice _ _ _ = Engine.NoBlock
+
 simplifySOAC ::
   (Simplify.SimplifiableRep rep) =>
   Simplify.SimplifyOp rep (SOAC (Wise rep))
@@ -112,15 +161,15 @@ simplifySOAC (WithVJP args lam lam_adj) = do
 simplifySOAC (FlatMap w arrs lam) = do
   w' <- Engine.simplify w
   arrs' <- mapM Engine.simplify arrs
-  (lam', hoisted_lam) <- Engine.enterLoop $ Engine.simplifyLambda mempty lam
+  (lam', hoisted_lam) <- simplifySOACLambda w lam
   pure (FlatMap w' arrs' lam', hoisted_lam)
-simplifySOAC (Stream outerdim arr nes lam) = do
-  outerdim' <- Engine.simplify outerdim
+simplifySOAC (Stream w arr nes lam) = do
+  w' <- Engine.simplify w
   nes' <- mapM Engine.simplify nes
   arr' <- mapM Engine.simplify arr
-  (lam', lam_hoisted) <- Engine.enterLoop $ Engine.simplifyLambda mempty lam
-  pure (Stream outerdim' arr' nes' lam', lam_hoisted)
-simplifySOAC (Hist w imgs ops bfun) = do
+  (lam', lam_hoisted) <- simplifySOACLambda w lam
+  pure (Stream w' arr' nes' lam', lam_hoisted)
+simplifySOAC (Hist w imgs ops lam) = do
   w' <- Engine.simplify w
   (ops', hoisted) <- fmap unzip $
     forM ops $ \(HistOp dests_w rf dests nes op) -> do
@@ -128,16 +177,16 @@ simplifySOAC (Hist w imgs ops bfun) = do
       rf' <- Engine.simplify rf
       dests' <- Engine.simplify dests
       nes' <- mapM Engine.simplify nes
-      (op', hoisted) <- Engine.enterLoop $ Engine.simplifyLambda mempty op
+      (op', hoisted) <- simplifySOACLambda w op
       pure (HistOp dests_w' rf' dests' nes' op', hoisted)
   imgs' <- mapM Engine.simplify imgs
-  (bfun', bfun_hoisted) <- Engine.enterLoop $ Engine.simplifyLambda mempty bfun
-  pure (Hist w' imgs' ops' bfun', mconcat hoisted <> bfun_hoisted)
+  (lam', lam_hoisted) <- simplifySOACLambda w lam
+  pure (Hist w' imgs' ops' lam', mconcat hoisted <> lam_hoisted)
 simplifySOAC (Screma w arrs (ScremaForm map_lam scans reds post_lam)) = do
   (scans', scans_hoisted) <- mapAndUnzipM simplifyScan scans
   (reds', reds_hoisted) <- mapAndUnzipM simplifyReduce reds
-  (map_lam', map_lam_hoisted) <- Engine.enterLoop $ Engine.simplifyLambda mempty map_lam
-  (post_lam', post_lam_hoisted) <- Engine.enterLoop $ Engine.simplifyLambda mempty post_lam
+  (map_lam', map_lam_hoisted) <- simplifySOACLambda w map_lam
+  (post_lam', post_lam_hoisted) <- simplifySOACLambda w post_lam
 
   (,)
     <$> ( Screma
