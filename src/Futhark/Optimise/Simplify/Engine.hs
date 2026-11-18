@@ -716,10 +716,14 @@ matchBlocker cond (MatchDec _ ifsort) = do
                         || (ifsort == MatchEquiv && isManifest (stmExp stm))
                     )
              )
-          || ( ifsort /= MatchFallback
+          || ( (ifsort /= MatchFallback || safeAndCheap stm)
                  && any (`UT.isSize` usage) (patNames (stmPat stm))
                  && all primType (patTypes (stmPat stm))
              )
+      -- A fallback branch may be protecting an unsafe computation, but we do
+      -- want to hoist size computations out of it when they are themselves
+      -- safe. This is important for hoisting the sizes of allocations.
+      safeAndCheap stm = safeExp (stmExp stm) && cheapStm stm
       notDesirableToHoist _ usage stm = not $ desirableToHoist usage stm
 
       -- No matter what, we always want to hoist constants as much as
