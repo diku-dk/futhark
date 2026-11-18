@@ -1,6 +1,5 @@
 module Futhark.Transform.ToGPU
   ( getSize,
-    segThread,
     soacsLambdaToGPU,
     soacsStmToGPU,
     soacsExpToGPU,
@@ -26,18 +25,6 @@ getSize ::
 getSize desc size_class = do
   size_key <- nameFromText . prettyText <$> newVName desc
   letSubExp desc $ Op $ SizeOp $ GetSize size_key size_class
-
-segThread ::
-  (MonadBuilder m, Rep m ~ GPU) =>
-  Name ->
-  m SegLevel
-segThread desc =
-  SegThread SegVirt <$> (Just <$> kernelGrid)
-  where
-    kernelGrid =
-      KernelGrid
-        <$> (Count <$> getSize (desc <> "_num_tblocks") SizeGrid)
-        <*> (Count <$> getSize (desc <> "_tblock_size") SizeThreadBlock)
 
 injectSOACS ::
   ( Monad m,

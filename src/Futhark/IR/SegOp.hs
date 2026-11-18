@@ -7,6 +7,7 @@
 module Futhark.IR.SegOp
   ( SegOp (..),
     segLevel,
+    setSegLevel,
     segBody,
     segSpace,
     typeCheckSegOp,
@@ -379,6 +380,17 @@ segLevel (SegMap lvl _ _ _) = lvl
 segLevel (SegRed lvl _ _ _ _) = lvl
 segLevel (SegScan lvl _ _ _ _ _) = lvl
 segLevel (SegHist lvl _ _ _ _) = lvl
+
+-- | set the level of a 'SegOp'.
+setSegLevel :: SegOp lvl rep -> lvl -> SegOp lvl rep
+setSegLevel (SegMap _ space ts body) lvl =
+  SegMap lvl space ts body
+setSegLevel (SegRed _ space ts body ops) lvl =
+  SegRed lvl space ts body ops
+setSegLevel (SegScan _ space ts body ops post_op) lvl =
+  SegScan lvl space ts body ops post_op
+setSegLevel (SegHist _ space ts body ops) lvl =
+  SegHist lvl space ts body ops
 
 -- | The space of a 'SegOp'.
 segSpace :: SegOp lvl rep -> SegSpace
