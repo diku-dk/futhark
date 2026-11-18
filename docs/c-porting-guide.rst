@@ -175,4 +175,4 @@ provide its initial values.  This is not possible in Futhark -
 consider whether you can write it as a ``replicate``, an ``iota``, or
 a ``map``.  In the worst case, use ``replicate`` to obtain an array of
 the desired size, then use a ``do``-loop with in-place updates to
-initialise it (but note that this will run stricly sequentially).
+initialise it (but note that this will run strictly sequentially).

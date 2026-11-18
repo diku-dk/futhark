@@ -138,7 +138,7 @@ Configuration objects are cheap to create and destroy.
    The cache is managed entirely automatically, and if it is invalid
    or stale, the program performs initialisation from scratch.  There
    is no machine-readable way to get information about whether the
-   cache was hit succesfully, but you can enable logging to see what
+   cache was hit successfully, but you can enable logging to see what
    happens.
 
    Pass ``NULL`` to disable caching (this is the default).

@@ -165,7 +165,7 @@ You can set the level of debug verbosity via the environment variable
 You can run the various compiler passes in whatever order you wish.
 There are also various shorthands for running entire standard pipelines:
 
-- `-s`: "standard" pipeline; how all other piplines start, and stops
+- `-s`: "standard" pipeline; how all other pipelines start, and stops
   just before flattening.
 - `--gpu`: pipeline used for GPU backends (stopping just before adding
   memory information).
