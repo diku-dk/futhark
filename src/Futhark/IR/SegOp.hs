@@ -1014,8 +1014,8 @@ segOpBlocker space = do
     -- Hoisting out slicing is useless and potentially dangerous, as protecting
     -- it can cause nonuniform parallelism.
     isSlice _ _ (Let _ _ (BasicOp (Index _ slice))) =
-      sliceShape slice /= mempty
-    isSlice _ _ _ = False
+      Engine.blockWhen $ sliceShape slice /= mempty
+    isSlice _ _ _ = Engine.NoBlock
 
 -- | We are willing to hoist potentially unsafe statements out of segops, but
 -- they must be protected by adding a branch on top of them.

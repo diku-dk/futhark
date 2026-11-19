@@ -446,7 +446,7 @@ simplifyKernelOp _ (GPUBody ts body) = do
       Engine.simplifyBody keepOnGPU mempty (map (const mempty) ts) body
   pure (GPUBody ts' body', hoisted)
   where
-    keepOnGPU _ _ = keepExpOnGPU . stmExp
+    keepOnGPU _ _ = Engine.blockWhen . keepExpOnGPU . stmExp
     keepExpOnGPU (BasicOp Index {}) = True
     keepExpOnGPU (BasicOp (ArrayLit _ t)) | primType t = True
     keepExpOnGPU Loop {} = True

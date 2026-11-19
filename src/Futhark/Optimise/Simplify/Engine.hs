@@ -26,11 +26,20 @@ module Futhark.Optimise.Simplify.Engine
     bindableSimpleOps,
     Env (envHoistBlockers, envRules),
     emptyEnv,
+    asksEngineEnv,
+    askVtable,
+    localVtable,
+    Protect,
+    protectIf,
+
+    -- * Hoisting
     HoistBlockers (..),
     neverBlocks,
     noExtraHoistBlockers,
     neverHoist,
+    Block (..),
     BlockPred,
+    blockWhen,
     orIf,
     hasFree,
     isConsumed,
@@ -39,11 +48,6 @@ module Futhark.Optimise.Simplify.Engine
     isOp,
     isNotSafe,
     isDeviceMigrated,
-    asksEngineEnv,
-    askVtable,
-    localVtable,
-    Protect,
-    protectIf,
 
     -- * Building blocks
     SimplifiableRep,
@@ -432,7 +436,7 @@ protectCaseHoisted ses prior vs m = do
 -- further optimisation.
 notWorthHoisting :: (ASTRep rep) => BlockPred rep
 notWorthHoisting _ _ (Let pat _ e) =
-  not (safeExp e) && any ((> 0) . arrayRank) (patTypes pat)
+  blockWhen $ not (safeExp e) && any ((> 0) . arrayRank) (patTypes pat)
 
 -- Top-down simplify a statement (including copy propagation into the
 -- pattern and such).  Does not recurse into any sub-Bodies or Ops.
@@ -467,6 +471,48 @@ recSimplifyStm stm@(Let pat (StmAux cs attrs loc (_, dec)) e) usage = do
       then (e_hoisted, mkWiseStm (removePatWisdom pat) aux' e')
       else (mempty, stm)
 
+-- | The hoisting decision for a single statement. We use the
+-- terminology "hoisted" for a statement that is hoisted, and "kept"
+-- for a statement that is not hoisted.
+data Hoist rep
+  = Keep (Stm rep)
+  | Hoist (Stm rep)
+  | -- | Hoisted only if a hoisted statement depends on it ('SoftBlock').
+    HoistIfNeeded (Stm rep)
+
+-- | Finalise the hoisting decisions. First, a top-down pass keeps any
+-- statement that depends on a kept statement. Then a bottom-up pass
+-- keeps any 'HoistIfNeeded' statement that no remaining hoisted
+-- statement depends on. Keeping such a statement cannot affect any
+-- other statement, so no further iteration is needed.
+blockUnhoistedDeps ::
+  (ASTRep rep) =>
+  [Hoist rep] ->
+  [Either (Stm rep) (Stm rep)]
+blockUnhoistedDeps = snd . foldr pruneUnneeded (mempty, []) . snd . mapAccumL block mempty
+  where
+    block blocked (Keep stm) =
+      (blocked <> namesFromList (provides stm), Keep stm)
+    block blocked h
+      | blocked `namesIntersect` freeIn (hoistStm h) =
+          (blocked <> namesFromList (provides (hoistStm h)), Keep (hoistStm h))
+      | otherwise =
+          (blocked, h)
+
+    pruneUnneeded (Keep stm) (needed, stms) =
+      (needed, Left stm : stms)
+    pruneUnneeded (Hoist stm) (needed, stms) =
+      (needed <> freeIn stm, Right stm : stms)
+    pruneUnneeded (HoistIfNeeded stm) (needed, stms)
+      | any (`nameIn` needed) (provides stm) =
+          (needed <> freeIn stm, Right stm : stms)
+      | otherwise =
+          (needed, Left stm : stms)
+
+    hoistStm (Keep stm) = stm
+    hoistStm (Hoist stm) = stm
+    hoistStm (HoistIfNeeded stm) = stm
+
 hoistStms ::
   (SimplifiableRep rep) =>
   RuleBook (Wise rep) ->
@@ -487,8 +533,8 @@ hoistStms rules block orig_stms final = do
                 Op op -> opUsage op
                 _ -> mempty
       (x, _, stms') <- hoistableStms usageInStm stms
-      -- We need to do a final pass to ensure that nothing is
-      -- hoisted past something that it depends on.
+      -- We need to do a final pass to ensure that nothing is hoisted past
+      -- something that it depends on, and that nothing is needlessly hoisted.
       let (blocked, hoisted) = partitionEithers $ blockUnhoistedDeps stms'
       pure (x, blocked, hoisted)
 
@@ -502,23 +548,26 @@ hoistStms rules block orig_stms final = do
     process usageInStm stm stms usage x = do
       vtable <- askVtable
       res <- bottomUpSimplifyStm rules (vtable, usage) stm
+      let keep =
+            pure
+              ( x,
+                expandUsage usageInStm vtable usage stm
+                  `UT.without` provides stm,
+                Keep stm : stms
+              )
+          hoist how =
+            pure
+              ( x,
+                expandUsage usageInStm vtable usage stm,
+                how stm : stms
+              )
       case res of
-        Nothing -- Nothing to optimise - see if hoistable.
-          | block vtable usage stm ->
-              -- No, not hoistable.
-              pure
-                ( x,
-                  expandUsage usageInStm vtable usage stm
-                    `UT.without` provides stm,
-                  Left stm : stms
-                )
-          | otherwise ->
-              -- Yes, hoistable.
-              pure
-                ( x,
-                  expandUsage usageInStm vtable usage stm,
-                  Right stm : stms
-                )
+        Nothing ->
+          -- Nothing to optimise - see if hoistable.
+          case block vtable usage stm of
+            NoBlock -> hoist Hoist
+            SoftBlock -> hoist HoistIfNeeded
+            HardBlock -> keep
         Just optimstms -> do
           changed
           descend usageInStm optimstms $ pure (x, usage, stms)
@@ -552,20 +601,6 @@ hoistStms rules block orig_stms final = do
                   descend usageInStm stms_h_stms $
                     process usageInStm stms_h'' stms_t' usage x
 
-blockUnhoistedDeps ::
-  (ASTRep rep) =>
-  [Either (Stm rep) (Stm rep)] ->
-  [Either (Stm rep) (Stm rep)]
-blockUnhoistedDeps = snd . mapAccumL block mempty
-  where
-    block blocked (Left need) =
-      (blocked <> namesFromList (provides need), Left need)
-    block blocked (Right need)
-      | blocked `namesIntersect` freeIn need =
-          (blocked <> namesFromList (provides need), Left need)
-      | otherwise =
-          (blocked, Right need)
-
 provides :: Stm rep -> [VName]
 provides = patNames . stmPat
 
@@ -594,36 +629,57 @@ expandUsage usageInStm vtable utable stm@(Let pat aux e) =
         map (`UT.usage` (uses `UT.withoutU` UT.presentU)) $
           namesToList aliases
 
-type BlockPred rep = ST.SymbolTable rep -> UT.UsageTable -> Stm rep -> Bool
+-- | Whether a statement may be hoisted. The constructors are ordered by
+-- strength.
+data Block
+  = -- | The statement may and should be hoisted when possible.
+    NoBlock
+  | -- | The statement legal to hoist, but worth doing only if a
+    -- 'NoBlock'-hoisted statement depends on it.
+    SoftBlock
+  | -- | The statement may not be hoisted.
+    HardBlock
+  deriving (Eq, Ord, Show)
+
+type BlockPred rep = ST.SymbolTable rep -> UT.UsageTable -> Stm rep -> Block
+
+-- | 'HardBlock' if true, otherwise 'NoBlock'.
+blockWhen :: Bool -> Block
+blockWhen True = HardBlock
+blockWhen False = NoBlock
 
 neverBlocks :: BlockPred rep
-neverBlocks _ _ _ = False
+neverBlocks _ _ _ = NoBlock
 
 alwaysBlocks :: BlockPred rep
-alwaysBlocks _ _ _ = True
+alwaysBlocks _ _ _ = HardBlock
 
 isFalse :: Bool -> BlockPred rep
-isFalse b _ _ _ = not b
+isFalse b _ _ _ = blockWhen $ not b
 
+-- | The strongest block of the two.
 orIf :: BlockPred rep -> BlockPred rep -> BlockPred rep
-orIf p1 p2 body vtable need = p1 body vtable need || p2 body vtable need
+orIf p1 p2 body vtable need = max (p1 body vtable need) (p2 body vtable need)
 
+-- | The weakest block of the two.
 andAlso :: BlockPred rep -> BlockPred rep -> BlockPred rep
-andAlso p1 p2 body vtable need = p1 body vtable need && p2 body vtable need
+andAlso p1 p2 body vtable need = min (p1 body vtable need) (p2 body vtable need)
 
 isConsumed :: BlockPred rep
-isConsumed _ utable = any (`UT.isConsumed` utable) . patNames . stmPat
+isConsumed _ utable = blockWhen . any (`UT.isConsumed` utable) . patNames . stmPat
 
 -- The main purpose of this rule is to avoid hoisting 'inblock' SegOps
 -- out of their enclosing SegOp, *including* when those are present in
 -- nested Bodies.
 isOp :: BlockPred rep
-isOp _ _ (Let _ _ Op {}) = True
-isOp vtable utable (Let _ _ (Match _ cs def_body _)) =
-  any (any (isOp vtable utable) . bodyStms) $ def_body : map caseBody cs
-isOp vtable utable (Let _ _ (Loop _ _ body)) =
-  any (isOp vtable utable) $ bodyStms body
-isOp _ _ _ = False
+isOp _ _ = blockWhen . isOpStm
+  where
+    isOpStm (Let _ _ Op {}) = True
+    isOpStm (Let _ _ (Match _ cs def_body _)) =
+      any (any isOpStm . bodyStms) $ def_body : map caseBody cs
+    isOpStm (Let _ _ (Loop _ _ body)) =
+      any isOpStm $ bodyStms body
+    isOpStm _ = False
 
 constructBody ::
   (SimplifiableRep rep) =>
@@ -646,18 +702,18 @@ blockIf block stms m = do
   hoistStms rules block stms m
 
 hasFree :: (ASTRep rep) => Names -> BlockPred rep
-hasFree ks _ _ need = ks `namesIntersect` freeIn need
+hasFree ks _ _ need = blockWhen $ ks `namesIntersect` freeIn need
 
 isNotSafe :: (ASTRep rep) => BlockPred rep
-isNotSafe _ _ = not . safeExp . stmExp
+isNotSafe _ _ = blockWhen . not . safeExp . stmExp
 
 isConsuming :: (Aliased rep) => BlockPred rep
-isConsuming _ _ = isUpdate . stmExp
+isConsuming _ _ = blockWhen . isUpdate . stmExp
   where
     isUpdate e = consumedInExp e /= mempty
 
 isNotCheap :: (ASTRep rep) => BlockPred rep
-isNotCheap _ _ = not . cheapStm
+isNotCheap _ _ = blockWhen . not . cheapStm
 
 cheapStm :: (ASTRep rep) => Stm rep -> Bool
 cheapStm = cheapExp . stmExp
@@ -724,21 +780,23 @@ matchBlocker cond (MatchDec _ ifsort) = do
       -- want to hoist size computations out of it when they are themselves
       -- safe. This is important for hoisting the sizes of allocations.
       safeAndCheap stm = safeExp (stmExp stm) && cheapStm stm
-      notDesirableToHoist _ usage stm = not $ desirableToHoist usage stm
+      notDesirableToHoist _ usage stm = blockWhen $ not $ desirableToHoist usage stm
+
+      isNotHoistableBnd _ _ = blockWhen . notHoistableBnd
 
       -- No matter what, we always want to hoist constants as much as
       -- possible.
-      isNotHoistableBnd _ _ (Let _ _ (BasicOp ArrayLit {})) = False
-      isNotHoistableBnd _ _ (Let _ _ (BasicOp SubExp {})) = False
+      notHoistableBnd (Let _ _ (BasicOp ArrayLit {})) = False
+      notHoistableBnd (Let _ _ (BasicOp SubExp {})) = False
       -- Hoist things that are free.
-      isNotHoistableBnd _ _ (Let _ _ (BasicOp Reshape {})) = False
-      isNotHoistableBnd _ _ (Let _ _ (BasicOp Rearrange {})) = False
-      isNotHoistableBnd _ _ (Let _ _ (BasicOp (Index _ slice))) =
+      notHoistableBnd (Let _ _ (BasicOp Reshape {})) = False
+      notHoistableBnd (Let _ _ (BasicOp Rearrange {})) = False
+      notHoistableBnd (Let _ _ (BasicOp (Index _ slice))) =
         null $ sliceDims slice
       --
-      isNotHoistableBnd _ _ stm
+      notHoistableBnd stm
         | is_alloc_fun stm = False
-      isNotHoistableBnd _ _ _ =
+      notHoistableBnd _ =
         -- Hoist aggressively out of versioning branches.
         ifsort /= MatchEquiv
 
@@ -963,9 +1021,9 @@ isDeviceMigrated vtable _ stm
     Just arr_t <- ST.lookupType arr vtable,
     [size] <- arrayDims arr_t,
     size == intConst Int64 1 =
-      True
+      HardBlock
   | otherwise =
-      False
+      NoBlock
 
 -- The simple nonrecursive case that we can perform without bottom-up
 -- information.

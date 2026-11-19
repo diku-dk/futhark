@@ -60,7 +60,7 @@ simplifyProgGeneric rules ops =
     blockers {Engine.blockHoistBranch = blockAllocs}
   where
     blockAllocs vtable _ (Let _ _ (Op Alloc {})) =
-      not $ ST.simplifyMemory vtable
+      Engine.blockWhen $ not $ ST.simplifyMemory vtable
     -- Do not hoist statements that produce arrays.  This is
     -- because in the KernelsMem representation, multiple
     -- arrays can be located in the same memory block, and moving
@@ -68,7 +68,7 @@ simplifyProgGeneric rules ops =
     -- corruption.  At this point in the compiler we have probably
     -- already moved all the array creations that matter.
     blockAllocs _ _ (Let pat _ _) =
-      not $ all primType $ patTypes pat
+      Engine.blockWhen $ not $ all primType $ patTypes pat
 
 simplifyStmsGeneric ::
   ( HasScope rep m,
@@ -85,12 +85,15 @@ simplifyStmsGeneric rules ops stms = do
 
 isResultAlloc :: (OpC rep ~ MemOp op) => Engine.BlockPred rep
 isResultAlloc _ usage (Let (Pat [pe]) _ (Op Alloc {})) =
-  UT.isInResult (patElemName pe) usage
-isResultAlloc _ _ _ = False
+  Engine.blockWhen $ UT.isInResult (patElemName pe) usage
+isResultAlloc _ _ _ = Engine.NoBlock
 
 isAlloc :: (OpC rep ~ MemOp op) => Engine.BlockPred rep
-isAlloc _ _ (Let _ _ (Op Alloc {})) = True
-isAlloc _ _ _ = False
+isAlloc _ _ = Engine.blockWhen . isAllocStm
+
+isAllocStm :: (OpC rep ~ MemOp op) => Stm rep -> Bool
+isAllocStm (Let _ _ (Op Alloc {})) = True
+isAllocStm _ = False
 
 blockers ::
   (OpC rep ~ MemOp inner) =>
@@ -99,7 +102,7 @@ blockers =
   Engine.noExtraHoistBlockers
     { Engine.blockHoistPar = isAlloc,
       Engine.blockHoistSeq = isResultAlloc,
-      Engine.isAllocation = isAlloc ST.empty mempty
+      Engine.isAllocation = isAllocStm
     }
 
 -- If an allocation is statically known to be safe, then we can remove
