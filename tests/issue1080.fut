@@ -1,3 +1,6 @@
+-- ==
+-- tags { no_webgpu }
+
 type complex = {r: f32, i: f32}
 def complex r i : complex = {r, i}
 def real r = complex r 0

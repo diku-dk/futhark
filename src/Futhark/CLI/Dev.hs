@@ -560,11 +560,12 @@ commandLineOptions =
                 "ispc" -> Right $ MCMemAction compileMulticoreToISPCAction
                 "python" -> Right $ SeqMemAction compilePythonAction
                 "pyopencl" -> Right $ GPUMemAction compilePyOpenCLAction
+                "webgpu" -> Right $ GPUMemAction compileWebGPUAction
                 _ -> Left $ error $ "Invalid backend: " <> arg
 
               Right $ \opts -> opts {futharkAction = action}
           )
-          "c|multicore|opencl|cuda|hip|python|pyopencl"
+          "c|multicore|opencl|cuda|hip|python|pyopencl|webgpu"
       )
       "Run this compiler backend on pipeline result.",
     Option
@@ -583,6 +584,14 @@ commandLineOptions =
             opts {futharkAction = GPUMemAction $ \_ _ _ -> kernelImpCodeGenAction}
       )
       "Translate pipeline result to ImpGPU and write it on stdout.",
+    Option
+      []
+      ["compile-imp-webgpu"]
+      ( NoArg $
+          Right $ \opts ->
+            opts {futharkAction = GPUMemAction $ \_ _ _ -> webgpuImpCodeGenAction}
+      )
+      "Translate pipeline result to ImpWebGPU and write it on stdout.",
     Option
       []
       ["compile-imp-multicore"]

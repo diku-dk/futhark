@@ -1,6 +1,5 @@
 -- Tricky because clz has a different return type than input type.
 -- Not really differentiable, though.
-
 -- ==
 -- tags { autodiff }
 

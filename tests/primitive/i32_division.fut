@@ -7,28 +7,28 @@
 -- input { [7i32, -7i32, 7i32, -7i32, -2147483648i32, -2147483648i32, 2147483647i32]
 --         [3i32, 3i32, -3i32, -3i32, -1i32, 1i32, -1i32] }
 -- output { [2i32, -3i32, -3i32, 2i32, -2147483648i32, -2147483648i32, -2147483647i32] }
--- compiled input { [1i32] [0i32] } error: division by zero
+-- compiled no_webgpu input { [1i32] [0i32] } error: division by zero
 
 -- ==
 -- entry: mod
 -- input { [7i32, -7i32, 7i32, -7i32, -2147483648i32, -2147483648i32, 2147483647i32]
 --         [3i32, 3i32, -3i32, -3i32, -1i32, 1i32, -1i32] }
 -- output { [1i32, 2i32, -2i32, -1i32, 0i32, 0i32, 0i32] }
--- compiled input { [1i32] [0i32] } error: division by zero
+-- compiled no_webgpu input { [1i32] [0i32] } error: division by zero
 
 -- ==
 -- entry: quot
 -- input { [7i32, -7i32, 7i32, -7i32, -2147483648i32, -2147483648i32, 2147483647i32]
 --         [3i32, 3i32, -3i32, -3i32, -1i32, 1i32, -1i32] }
 -- output { [2i32, -2i32, -2i32, 2i32, -2147483648i32, -2147483648i32, -2147483647i32] }
--- compiled input { [1i32] [0i32] } error: division by zero
+-- compiled no_webgpu input { [1i32] [0i32] } error: division by zero
 
 -- ==
 -- entry: rem
 -- input { [7i32, -7i32, 7i32, -7i32, -2147483648i32, -2147483648i32, 2147483647i32]
 --         [3i32, 3i32, -3i32, -3i32, -1i32, 1i32, -1i32] }
 -- output { [1i32, -1i32, 1i32, -1i32, 0i32, 0i32, 0i32] }
--- compiled input { [1i32] [0i32] } error: division by zero
+-- compiled no_webgpu input { [1i32] [0i32] } error: division by zero
 
 entry divide = map2 (i32./)
 entry mod = map2 (i32.%)

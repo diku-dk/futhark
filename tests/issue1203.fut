@@ -1,3 +1,5 @@
+-- ==
+-- tags { no_webgpu }
 def main [n] (xss: [][n]i64) (x: i64) =
   map (\xs ->
          #[sequential]

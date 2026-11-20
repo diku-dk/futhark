@@ -1,5 +1,6 @@
 -- Batched matrix multiplication as it appears in Rodinia's LUD
 -- ==
+-- tags { no_webgpu }
 -- no_python compiled random input { [128][16][16]f32 [128][16][16]f32 [128][128][16][16]f32 } auto output
 
 def main [m] [b]

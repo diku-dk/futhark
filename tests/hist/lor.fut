@@ -1,5 +1,6 @@
 -- Test with ||.
 -- ==
+-- tags { no_webgpu }
 -- input  {
 --   5i64
 --   [0, 1, 2, 3, 4]

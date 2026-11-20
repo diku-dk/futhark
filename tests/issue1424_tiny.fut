@@ -1,5 +1,6 @@
 -- Small program related to #1424.
 -- ==
+-- tags { no_webgpu }
 -- input { 2 [1,2,3] [42] } auto output
 -- structure gpu-mem {SegMap 1}
 

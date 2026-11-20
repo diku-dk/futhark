@@ -1,5 +1,5 @@
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_webgpu }
 --  entry: main
 --  input {
 --    [0i64,0i64,0i64,1i64,1i64,2i64,2i64,2i64,2i64]

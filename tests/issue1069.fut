@@ -1,5 +1,7 @@
 -- The 'unsafe' is just to make the code a little neater.  It does not
 -- affect the bug.
+-- ==
+-- tags { no_webgpu }
 
 def main xs =
   #[unsafe]

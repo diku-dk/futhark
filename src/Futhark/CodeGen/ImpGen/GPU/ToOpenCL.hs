@@ -642,6 +642,8 @@ inKernelOperations env mode body =
       GC.modifyUserState $ \s ->
         s {kernelSharedMemory = (name', size) : kernelSharedMemory s}
       GC.stm [C.cstm|$id:name = (__local unsigned char*) $id:name';|]
+    kernelOps (UniformRead dest src i typ space) =
+      GC.compileCode (Read dest src i typ space Nonvolatile)
     kernelOps (ErrorSync f handler) = do
       error_label <- GC.errorLabel
       unless (null error_label) $ do

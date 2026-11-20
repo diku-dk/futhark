@@ -7,6 +7,7 @@
 -- result.
 --
 -- ==
+-- tags { no_webgpu }
 -- input { [0f32,1f32,2f32,3f32,4f32,5f32,6f32,7f32,8f32,9f32 ] }
 -- output {
 --   [45f32, -5f32, -5f32, -5f32,

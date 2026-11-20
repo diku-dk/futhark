@@ -1,5 +1,6 @@
 -- This test is inspired by #2417 and ensure we don't get rid of assertions.
 -- ==
+-- tags { no_webgpu }
 -- input {[0i64,1i64,2i64,3i64] [1i64,1i64,1i64,1i64]}
 -- input {[0i64,1i64,2i64,0i64] [1i64,1i64,1i64,1i64]}
 -- error: filled

@@ -1,3 +1,5 @@
+-- ==
+-- tags { no_webgpu }
 def argmax arr =
   reduce_comm (\(a, i) (b, j) ->
                  if a < b

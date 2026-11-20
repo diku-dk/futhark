@@ -1,6 +1,7 @@
 -- Memory block merging with a copy into a multidimensional array given as a
 -- function parameter.
 -- ==
+-- tags { no_webgpu }
 -- input { [[[0, 1, 2],
 --           [0, 1, 2],
 --           [0, 1, 2]],

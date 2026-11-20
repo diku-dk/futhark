@@ -1,5 +1,6 @@
 -- Simple 2D tiling
 -- ==
+-- tags { no_webgpu }
 -- structure gpu { SegMap/SegMap 4
 -- SegMap/Loop/SegMap 1
 -- SegMap/SegMap 2

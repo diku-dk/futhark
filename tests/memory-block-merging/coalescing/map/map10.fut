@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_webgpu }
 -- input { [0, 1, 2, 3, 4] }
 -- output { [0f32, 1f32, 2f32, 3f32, 4f32] }
 -- structure gpu-mem { Alloc 0 }

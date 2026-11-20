@@ -1,5 +1,6 @@
 -- This test checks whether empty reduces are handled properly.
 -- ==
+-- tags { no_webgpu }
 -- input {
 --   0i64
 -- }

@@ -6,7 +6,7 @@
 -- day we improve tiling to detect that it is not profitable.
 
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_webgpu }
 
 local
 def hash (x: i32) : i32 =

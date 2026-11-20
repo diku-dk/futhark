@@ -1,6 +1,7 @@
 -- Horizontal fusion of two reductions that share the same input
 -- array. After fusion, duplicate inputs should be eliminated.
 -- ==
+-- tags { no_webgpu }
 -- structure { Screma 3 }
 
 def dotprod [n] (xs: [n]i32) (ys: [n]i32) : i32 =

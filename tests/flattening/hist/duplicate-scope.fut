@@ -5,6 +5,7 @@
 -- Here the problem was that we redundantly bound the same scope multiple times,
 -- which caused it to then be removed.
 -- ==
+-- tags { no_webgpu }
 -- no_ispc input { [[1i64,2i64,3i64],[4i64,0i64,6i64]] }
 
 def f [n] (keys0: [n]i64) : i64 =

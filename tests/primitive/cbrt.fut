@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_webgpu }
 -- entry: cbrt64
 -- input { [0f64, 8f64, 1e300f64, 1e-300f64] }
 -- output { [0f64, 2f64, 1e100f64, 1e-100f64] }

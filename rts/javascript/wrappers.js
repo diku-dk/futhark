@@ -5,6 +5,20 @@
 // Asynchronous operations run one at a time, as Asyncify (used by WebGPU)
 // allows no other calls into the module while one is suspended.
 
+// Asyncify resumes a suspended C function by calling it without arguments, but
+// an int64_t parameter cannot then be converted to a BigInt.  We resume with the
+// arguments of the most recent 'ccall' instead, which is the suspended one.
+function futhark_fix_asyncify_rewind(m) {
+  const ccall = m.ccall;
+  let args_in_flight = [];
+  m.ccall = (cfun, ret, types, args, opts) => {
+    args_in_flight = args;
+    return ccall(cfun, ret, types, args, opts);
+  };
+  m.Asyncify.doRewind = (ptr) =>
+    m.Asyncify.funcWrappers.get(m.Asyncify.getDataRewindFunc(ptr))(...args_in_flight);
+}
+
 // f16 values and their bit patterns, rounding to nearest even.
 function futhark_f16_bits(x) {
   if (Number.isNaN(x)) {
@@ -282,6 +296,9 @@ class FutharkContext {
     } catch (e) {
       throw e instanceof Error ? e : new Error("Failed to load the WebAssembly module: " + e);
     }
+    if (this.wasm.Asyncify !== undefined) {
+      futhark_fix_asyncify_rewind(this.wasm);
+    }
     if (options.num_threads !== undefined &&
         this.wasm._futhark_context_config_set_num_threads === undefined) {
       throw new Error("The num_threads option is not supported by this backend");
@@ -315,7 +332,7 @@ class FutharkContext {
     for (const [name, info] of Object.entries(this.manifest.types)) {
       if (info.kind == "array") {
         const constructor = {
-          from_data: (data, ...shape) => this._new_array(name, data, shape),
+          from_data: (data, ...shape) => this._exclusive(() => this._new_array(name, data, shape)),
         };
         this.types[name] = constructor;
         this[info.elemtype + "_" + info.rank + "d"] = constructor;
@@ -498,9 +515,8 @@ class FutharkContext {
     }
   }
 
-  _new_array(type, data, shape) {
+  async _new_array(type, data, shape) {
     this._check_usable();
-    this._check_idle();
     var info = this.manifest.types[type];
     var prim = futhark_prims[info.elemtype];
     if (shape.length != info.rank) {
@@ -525,7 +541,8 @@ class FutharkContext {
     var p = this._malloc(bytes.length);
     try {
       this.wasm.HEAPU8.set(bytes, p);
-      var ptr = this.wasm["_" + info.ops.new](this.ctx, p, ...shape);
+      // May suspend with WebGPU.
+      var ptr = await this._call(info.ops.new, this.ctx, p, ...shape);
       if (ptr == 0) {
         throw this._error();
       }
