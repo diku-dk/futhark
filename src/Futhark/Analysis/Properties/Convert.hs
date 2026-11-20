@@ -69,10 +69,7 @@ newIndexFn vn t = do
   --    for i < n . x.1.0(i),
   --    for i < n . x.1.1(i)]
   array_shape <- shapeOf t
-  printM 2 $ "### newIndexFn t " <> prettyStr t
-  printM 2 $ "### tuple projections " <> prettyStr vn <> prettyStr (toTupleOfArrays t)
   fs <- mapM (createUninterpretedIndexFn array_shape <=< dots vn) (toTupleOfArrays t)
-  printM 2 $ "### fs " <> prettyStr vn <> prettyStr fs
   insertIndexFn vn fs
   pure fs
   where
@@ -143,7 +140,7 @@ mkIndexFnValBind val@(E.ValBind _ vn (Just te) _ type_params params body _ _ val
         type_params
     -- Adds the effect of a precondition without checking that it holds.
     addPreconditions pat = do
-      printM 2 $ warningString "+" <> " Adding precondition on " <> prettyStr pat
+      printM 3 $ warningString "+" <> " Adding precondition on " <> prettyStr pat
       ref <- getRefinement pat
       forM_ ref $ \(_, effect) -> effect emptyCheckContext
       printAlgEnv 3
