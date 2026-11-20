@@ -125,7 +125,10 @@ eqSolverRules = do
             case alg_inj of
               Just (Injective _ (Just rcd)) -> do
                 rcd' <- fromAlgebra rcd
-                isYes <$> (e_i `inRange` rcd') `andM` (e_j `inRange` rcd')
+                let Just (Var x') = justSym e_x
+                let a = sym2SoP $ Apply (Var x') [e_i]
+                let b = sym2SoP $ Apply (Var x') [e_j]
+                isYes <$> (a `inRange` rcd') `andM` (b `inRange` rcd')
               Just (Injective _ Nothing) ->
                 pure True
               _ -> pure False
