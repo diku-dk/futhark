@@ -3,6 +3,7 @@
 -- | A representation with flat parallelism via GPU-oriented kernels.
 module Futhark.IR.GPU
   ( GPU,
+    segOpParallelism,
 
     -- * Module re-exports
     module Futhark.IR.Prop,
@@ -15,6 +16,8 @@ module Futhark.IR.GPU
   )
 where
 
+import Control.Monad.State
+import Data.Set qualified as S
 import Futhark.Builder
 import Futhark.Construct
 import Futhark.IR.Aliases (Aliases)
@@ -65,6 +68,24 @@ instance HasSegOp GPU where
 
 instance TraverseOpBodies GPU where
   traverseOpBodies = traverseHostOpBodies traverseSOACBodies
+
+-- | Extract the SegOp parallelism used by the body, paired with whether it is
+-- virtualised.
+segOpParallelism :: GBody GPU res -> [([SubExp], SegVirt)]
+segOpParallelism = S.toList . flip execState mempty . onBody
+  where
+    onBody :: GBody GPU res -> State (S.Set ([SubExp], SegVirt)) ()
+    onBody = mapM_ onStm . bodyStms
+    onStm stm = walkExpM walker $ stmExp stm
+    walker =
+      (identityWalker @GPU)
+        { walkOnBody = const onBody,
+          walkOnOp = onOp
+        }
+    onOp (SegOp op) = do
+      modify $ S.insert (segSpaceDims $ segSpace op, segVirt (segLevel op))
+      onBody $ segBody op
+    onOp _ = pure ()
 
 -- Note [GPU Terminology]
 --

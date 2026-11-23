@@ -96,10 +96,10 @@ We build such binary snapshots for the following operating systems:
 **Linux (x86_64)**
   `futhark-nightly-linux-x86_64.tar.xz <https://futhark-lang.org/releases/futhark-nightly-linux-x86_64.tar.xz>`_
 
-**Linux (Aarch64)**
+**Linux (AArch64)**
   `futhark-nightly-linux-aarch64.tar.xz <https://futhark-lang.org/releases/futhark-nightly-linux-aarch64.tar.xz>`_
 
-**macOS (AARCH64)**
+**macOS (Apple Silicon)**
   `futhark-nightly-macos-aarch64.zip <https://futhark-lang.org/releases/futhark-nightly-macos-aarch64.tar.xz>`_
 
 **Windows (x86_64)**
@@ -132,8 +132,6 @@ above.
 
 .. _`Linuxbrew`: http://linuxbrew.sh/
 
-.. _macos-installation:
-
 Using OpenCL or CUDA
 ~~~~~~~~~~~~~~~~~~~~
 
@@ -150,6 +148,8 @@ talk to the hardware.  You will need both.  Working display drivers
 for the GPU does not imply that an ICD has been installed - they are
 usually in a separate package.  Consult your favourite search engine
 for details.
+
+.. _macos-installation:
 
 Installing Futhark on macOS
 ---------------------------

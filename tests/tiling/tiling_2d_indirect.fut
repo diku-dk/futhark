@@ -2,8 +2,8 @@
 -- ==
 -- tags { no_webgpu }
 -- structure gpu { SegMap/SegMap 4
--- SegMap/Loop/SegMap 1
--- SegMap/SegMap 2
+-- SegMap/Loop/SegMap 2
+-- SegMap/SegMap 1
 -- SegMap/Loop/Loop/SegMap/Loop 0 }
 
 def main (is: []i32) (js: []i32) (xss: [][][]i32) (yss: [][][]i32) =

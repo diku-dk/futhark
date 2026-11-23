@@ -41,7 +41,7 @@ import Futhark.MonadFreshNames
 import Futhark.Pass.Flatten.Monad
 import Futhark.Tools
 import Futhark.Transform.Rename (renameBody, renameLambda)
-import Futhark.Transform.ToGPU (getSize, soacsLambdaToGPU)
+import Futhark.Transform.ToGPU (soacsLambdaToGPU)
 import Futhark.Util (unsnoc)
 
 mkSegSpace :: (MonadFreshNames m) => [(VName, SubExp)] -> m SegSpace
@@ -62,55 +62,12 @@ topSegLevel = SegThread SegVirt Nothing
 
 data ThreadRecommendation = ManyThreads | NoRecommendation SegVirt
 
-numberOfBlocks ::
-  (MonadBuilder m, Op (Rep m) ~ HostOp inner (Rep m)) =>
-  Name ->
-  SubExp ->
-  SubExp ->
-  m SubExp
-numberOfBlocks desc w tblock_size = do
-  max_num_tblocks_key <- nameFromText . prettyText <$> newVName (desc <> "_num_tblocks")
-  letSubExp "num_tblocks" $
-    Op $
-      SizeOp $
-        CalcNumBlocks w max_num_tblocks_key tblock_size
-
--- | Like 'segThread', but cap the thread count to the input size.
--- This is more efficient for small kernels, e.g. summing a small
--- array.
-segThreadCapped ::
-  (MonadBuilder m, Rep m ~ GPU) =>
-  [SubExp] -> Name -> ThreadRecommendation -> m (SegOpLevel (Rep m))
-segThreadCapped ws desc r = do
-  w <-
-    letSubExp "nest_size"
-      =<< foldBinOp (Mul Int64 OverflowUndef) (intConst Int64 1) ws
-  tblock_size <- getSize (desc <> "_tblock_size") SizeThreadBlock
-
-  case r of
-    ManyThreads -> do
-      usable_groups <-
-        letSubExp "segmap_usable_groups"
-          =<< eBinOp
-            (SCeilDiv Int64 Unsafe)
-            (eSubExp w)
-            (eSubExp =<< asIntS Int64 tblock_size)
-      let grid = KernelGrid (Count usable_groups) (Count tblock_size)
-      pure $ SegThread SegNoVirt (Just grid)
-    NoRecommendation v -> do
-      num_tblocks <- numberOfBlocks desc w tblock_size
-      let grid = KernelGrid (Count num_tblocks) (Count tblock_size)
-      pure $ SegThread v (Just grid)
-
--- FIXME: We use segThreadCapped here because otherwise we may get
--- out-of-bounds writes for SegOps with non-primitive return types.
-capThreadSegLevel ::
-  (MonadBuilder m, Rep m ~ GPU, Foldable t) =>
-  t SubExp -> Name -> SegLevel -> ThreadRecommendation -> m SegLevel
-capThreadSegLevel segments desc lvl tr =
-  case lvl of
-    SegThread {} -> segThreadCapped (toList segments) desc tr
-    _ -> pure lvl
+capThreadSegLevel :: SegLevel -> ThreadRecommendation -> SegLevel
+capThreadSegLevel lvl tr =
+  case (lvl, tr) of
+    (SegThread {}, ManyThreads) -> SegThread SegNoVirt Nothing
+    (SegThread {}, NoRecommendation v) -> SegThread v Nothing
+    _ -> lvl
 
 determineReduceOp ::
   (MonadBuilder m) =>
@@ -162,7 +119,7 @@ segMap lvl segments f = do
     pure (map mkResult res, ts)
   let kbody = Body () stms res
   let tr = if all primType ts then ManyThreads else NoRecommendation SegVirt
-  lvl' <- capThreadSegLevel segments "segmap" lvl tr
+      lvl' = capThreadSegLevel lvl tr
   pure $ Op $ SegOp $ SegMap lvl' space ts kbody
   where
     mkResult (SubExpRes cs se) = Returns ResultMaySimplify cs se
@@ -218,7 +175,7 @@ genNonSegRed lvl desc segments red_op shape map_lam arrs = do
   kbody' <- renameBody kbody
   red_lam' <- renameLambda red_lam
   let op = SegBinOp comm red_lam' nes shape
-  lvl' <- capThreadSegLevel new_segment "uniform_nonsegred" lvl $ NoRecommendation SegNoVirt
+      lvl' = capThreadSegLevel lvl $ NoRecommendation SegVirt
   ress <- letTupExp desc $ Op $ SegOp $ SegRed lvl' space res_t kbody' [op]
   forM ress $ \res_d -> do
     res_dt <- lookupType res_d
@@ -254,7 +211,7 @@ genUniformSegHist lvl desc segments ops bucket_fun arrs readFree = do
     res_t <- mapM (subExpType . resSubExp) res
     pure (map mkResult res, res_t)
   kbody' <- renameBody kbody
-  lvl' <- capThreadSegLevel segments "uniform_seghist" lvl $ NoRecommendation SegNoVirt
+  let lvl' = capThreadSegLevel lvl $ NoRecommendation SegVirt
   letTupExp desc $ Op $ SegOp $ SegHist lvl' space res_t kbody' ops'
   where
     mkResult (SubExpRes cs se) = Returns ResultMaySimplify cs se
@@ -286,7 +243,7 @@ genUniformSegRed lvl desc segments red_ops shape map_lam arrs readFree = do
     pure $ SegBinOp (redComm red_op) red_lam' (redNeutral red_op) shape
 
   kbody' <- renameBody kbody
-  lvl' <- capThreadSegLevel segments "uniform_segred" lvl $ NoRecommendation SegNoVirt
+  let lvl' = capThreadSegLevel lvl $ NoRecommendation SegVirt
   letTupExp desc $ Op $ SegOp $ SegRed lvl' space res_t kbody' ops
   where
     mkResult (SubExpRes cs se) = Returns ResultMaySimplify cs se
@@ -321,7 +278,7 @@ genScanWithKernelBodyAndPost lvl desc segments mkScanLam shape nes mkPostLam m =
 
   kbody' <- renameBody kbody
   let op = SegBinOp Noncommutative scan_lam' nes shape
-  lvl' <- capThreadSegLevel segments "uniform_segscan" lvl $ NoRecommendation SegNoVirt
+      lvl' = capThreadSegLevel lvl $ NoRecommendation SegVirt
   letTupExp desc $ Op $ SegOp $ SegScan lvl' space res_t kbody' [op] (SegPostOp post_lam')
   where
     mkResult (SubExpRes cs se) = Returns ResultMaySimplify cs se
@@ -544,7 +501,7 @@ genScatterND lvl dest grid f = do
             UpdateAcc Safe acc idxs [v]
       pure [Returns ResultMaySimplify mempty $ Var acc']
     acc_t <- lookupType acc
-    lvl' <- capThreadSegLevel grid "genScatterND" lvl $ NoRecommendation SegVirt
+    let lvl' = capThreadSegLevel lvl $ NoRecommendation SegVirt
     letTupExp' "scatter" $ Op $ SegOp $ SegMap lvl' space [acc_t] kbody
 
 genTabulate ::
@@ -558,7 +515,7 @@ genTabulate lvl w m = do
     ts <- mapM subExpType ses
     pure (map (Returns ResultMaySimplify mempty) ses, ts)
   let kbody = Body () stms res
-  lvl' <- capThreadSegLevel [w] "genTabulate" lvl $ NoRecommendation SegVirt
+      lvl' = capThreadSegLevel lvl $ NoRecommendation SegVirt
   pure $ Op $ SegOp $ SegMap lvl' space ts kbody
 
 genFlags ::

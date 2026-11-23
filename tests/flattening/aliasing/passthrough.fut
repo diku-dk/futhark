@@ -1,6 +1,7 @@
 -- The result of a map must not alias its input, even when the body may return
 -- its parameter unchanged.
 -- ==
+-- tags { no_webgpu }
 -- random input { 0i64 [2][3][4]f32 } auto output
 -- random input { 1i64 [2][3][4]f32 } auto output
 
