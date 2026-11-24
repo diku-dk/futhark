@@ -204,6 +204,16 @@ evalModExp (ModApply f arg (Info p_substs) (Info b_substs) loc) = do
                   resolveSubsts (scopeSubsts (modScope arg_mod)) p_substs
                     <> scopeSubsts f_closure
                     <> scopeSubsts (modScope arg_mod)
+              -- The result exports only what the argument determines. The
+              -- closure's substitutions are visible to the body, but must not
+              -- leak into the scope of the application site, where they may
+              -- override more recent knowledge. This can (perhaps more
+              -- efficiently) be written with M.withoutKeys instead - check if
+              -- this transformation ever needs to be sped up.
+              exported =
+                M.filterWithKey
+                  (\k _ -> k `M.member` p_substs && k `M.notMember` b_substs)
+                  abs_substs
           extendScope
             ( Scope
                 abs_substs
@@ -215,7 +225,7 @@ evalModExp (ModApply f arg (Info p_substs) (Info b_substs) loc) = do
               substs <- scopeSubsts <$> askScope
               x <- evalModExp f_body
               pure $
-                addSubsts abs (abs_substs `M.withoutKeys` M.keysSet b_substs) $
+                addSubsts abs exported $
                   -- The next one is dubious, but is necessary to
                   -- propagate substitutions from the argument (see
                   -- modules/functor24.fut).

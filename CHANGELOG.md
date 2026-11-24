@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Incorrect substitution with matching certain higher-order modules. (#2615)
 
+* Another obscure module-related compiler crash. (#2616)
+
 ## [0.29.1]
 
 ### Added
