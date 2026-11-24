@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Incorrect hoisting of unsafe expressions out of SOACs. (#2612)
 
+* Incorrect substitution with matching certain higher-order modules. (#2615)
+
 ## [0.29.1]
 
 ### Added

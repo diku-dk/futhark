@@ -495,25 +495,32 @@ matchMTys orig_mty orig_mty_sig =
     matchMods abs_subst_to_type quals (ModEnv mod) (ModEnv sig) loc =
       matchEnvs abs_subst_to_type quals mod sig loc
     matchMods
-      old_abs_subst_to_type
+      abs_subst_to_type
       quals
       (ModFun (FunModType mod_abs mod_pmod mod_mod))
       (ModFun (FunModType sig_abs sig_pmod sig_mod))
       loc = do
-        -- We need to use different substitutions when matching
-        -- parameter and body signatures - this is because the
-        -- concrete parameter must be *at least as* general as the
-        -- ascripted parameter, while the concrete body must be *at
-        -- most as* general as the ascripted body.
-        abs_substs <- resolveAbsTypes mod_abs mod_pmod sig_abs loc
-        p_abs_substs <- resolveAbsTypes sig_abs sig_pmod mod_abs loc
-        let abs_subst_to_type =
-              old_abs_subst_to_type <> M.map (substFromAbbr . snd) abs_substs
-            p_abs_subst_to_type =
-              old_abs_subst_to_type <> M.map (substFromAbbr . snd) p_abs_substs
-            abs_name_substs = M.map (qualLeaf . fst) abs_substs
-        pmod_substs <- matchMods p_abs_subst_to_type quals sig_pmod mod_pmod loc
-        mod_substs <- matchMTys' abs_subst_to_type quals mod_mod sig_mod loc
+        -- The parameter is matched contravariantly, meaning the signature
+        -- parameter must match the concrete one. This solves the abstract types
+        -- of the concrete parameter in terms of the signature parameter (the
+        -- latter being rigid), giving a realisation that we then apply to the
+        -- concrete body, so the body can be matched covariantly with everything
+        -- expressed in the names of the signature parameter. The
+        -- 'abs_subst_to_type' substitution maps abstract types of enclosing
+        -- module types to their concrete definitions, and is applied to the
+        -- signature parameter so that it uses the same type names as the
+        -- concrete parameter.
+        let sig_pmod' =
+              substituteTypesInMod (`M.lookup` abs_subst_to_type) sig_pmod
+        p_real <-
+          M.map (substFromAbbr . snd)
+            <$> resolveAbsTypes sig_abs sig_pmod' mod_abs loc
+        pmod_substs <- matchMods p_real quals sig_pmod' mod_pmod loc
+        let mod_mod' = substituteTypesInMTy (`M.lookup` p_real) mod_mod
+        mod_substs <- matchMTys' abs_subst_to_type quals mod_mod' sig_mod loc
+        -- Name mapping from the signature parameter to the concrete one.
+        abs_name_substs <-
+          M.map (qualLeaf . fst) <$> resolveAbsTypes mod_abs mod_pmod sig_abs loc
         pure $
           -- Avoid including substitutions that refer to abstract types, as this
           -- results in circular substitutions (#2407).
