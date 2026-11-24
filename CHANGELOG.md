@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Another obscure module-related compiler crash. (#2616)
 
+* Compiler crash due to fusion using a duplicate name. (#2617)
+
 ## [0.29.1]
 
 ### Added

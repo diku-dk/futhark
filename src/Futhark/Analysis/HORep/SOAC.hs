@@ -553,7 +553,7 @@ soacToStream soac = do
           let scan_arr_ts = map (`arrayOfRow` chvar) $ lambdaReturnType scan_lam
               accrtps = lambdaReturnType scan_lam
 
-          inpacc_ids <- mapM (newParam "inpacc") accrtps
+          inpacc_ids <- mapM (newParam "scan_inpacc") accrtps
           maplam <- mkMapPlusAccLam (map (Var . paramName) inpacc_ids) scan_lam
           -- Finally, construct the stream
           let strmpar = chunk_param : inpacc_ids ++ strm_inpids
@@ -594,9 +594,11 @@ soacToStream soac = do
             -- 5. let acc'        = acc + lasteel_ids
             addStms addlelstm
             pure $ addlelres ++ map (subExpRes . Var) (strm_resids ++ map_resids)
+
+          resacc_ids <- mapM (newIdent "scan_resacc") accrtps
           pure
             ( Stream w inps nes strmlam,
-              map paramIdent inpacc_ids
+              resacc_ids
             )
       | Just (reds, _) <- Futhark.isRedomapSOAC form,
         Futhark.Reduce comm lamin nes <- Futhark.singleReduce reds -> do
@@ -612,7 +614,7 @@ soacToStream soac = do
               foldlam = lam'
           -- array result and input IDs of the stream's lambda
           strm_resids <- mapM (newIdent "res") loutps'
-          inpacc_ids <- mapM (newParam "inpacc") accrtps
+          inpacc_ids <- mapM (newParam "red_inpacc") accrtps
           acc0_ids <- mapM (newIdent "acc0") accrtps
           -- 1. let (acc0_ids,strm_resids) = redomap(+,lam,nes,a_ch) in
           insoac <-
