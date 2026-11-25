@@ -1,4 +1,5 @@
 {-# LANGUAGE DefaultSignatures #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | The type checker checks whether the program is type-consistent.
@@ -272,15 +273,45 @@ data TState = TState
   }
 
 -- | The type checker runs in this monad.
+--
+-- Semantically this is just a reader, state, and error monad, but it is written
+-- in this nasty CPS style to avoid allocating on the monadic bind operator.
+-- This is only worth it because IR type checking runs so often.
 newtype TypeM rep a
-  = TypeM (ReaderT (Env rep) (StateT TState (Either (TypeError rep))) a)
-  deriving
-    ( Monad,
-      Functor,
-      Applicative,
-      MonadReader (Env rep),
-      MonadState TState
-    )
+  = TypeM
+      ( forall r.
+        Env rep ->
+        TState ->
+        (a -> TState -> Either (TypeError rep) r) ->
+        Either (TypeError rep) r
+      )
+
+instance Functor (TypeM rep) where
+  fmap f (TypeM m) = TypeM $ \env s k -> m env s (k . f)
+  {-# INLINE fmap #-}
+
+instance Applicative (TypeM rep) where
+  pure x = TypeM $ \_ s k -> k x s
+  {-# INLINE pure #-}
+  (<*>) = ap
+  {-# INLINE (<*>) #-}
+
+instance Monad (TypeM rep) where
+  TypeM m >>= f = TypeM $ \env s k ->
+    m env s $ \x s' -> let TypeM m' = f x in m' env s' k
+  {-# INLINE (>>=) #-}
+
+instance MonadReader (Env rep) (TypeM rep) where
+  ask = TypeM $ \env s k -> k env s
+  {-# INLINE ask #-}
+  local f (TypeM m) = TypeM $ \env s k -> m (f env) s k
+  {-# INLINE local #-}
+
+instance MonadState TState (TypeM rep) where
+  get = TypeM $ \_ s k -> k s s
+  {-# INLINE get #-}
+  put s = TypeM $ \_ _ k -> k () s
+  {-# INLINE put #-}
 
 instance
   (Checkable rep) =>
@@ -295,13 +326,13 @@ runTypeM ::
   TypeM rep a ->
   Either (TypeError rep) a
 runTypeM env (TypeM m) =
-  evalStateT (runReaderT m env) (TState mempty mempty)
+  m env (TState mempty mempty) $ \x _ -> Right x
 
 -- | Signal a type error.
 bad :: ErrorCase rep -> TypeM rep a
 bad e = do
   messages <- asks envContext
-  TypeM $ lift $ lift $ Left $ Error (reverse messages) e
+  TypeM $ \_ _ _ -> Left $ Error (reverse messages) e
 
 tell :: Consumption -> TypeM rep ()
 tell cons = modify $ \s -> s {stateCons = stateCons s <> cons}
