@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Compiler crash due to fusion using a duplicate name. (#2617)
 
+* Closures used through operator sections did not have their aliases tracked
+  properly.
+
 ## [0.29.1]
 
 ### Added

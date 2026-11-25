@@ -80,9 +80,9 @@ freeInExp expr = case expr of
   Lambda pats e0 _ (Info (RetType dims t)) _ ->
     (foldMap freeInPat pats <> freeInExp e0 <> freeInType t)
       `freeWithoutL` (foldMap patNames pats <> dims)
-  OpSection {} -> mempty
-  OpSectionLeft _ _ e _ _ _ -> freeInExp e
-  OpSectionRight _ _ e _ _ _ -> freeInExp e
+  OpSection qn _ _ -> FV $ S.singleton $ qualLeaf qn
+  OpSectionLeft qn _ e _ _ _ -> FV (S.singleton (qualLeaf qn)) <> freeInExp e
+  OpSectionRight qn _ e _ _ _ -> FV (S.singleton (qualLeaf qn)) <> freeInExp e
   UpdateSection steps _ _ -> foldMap freeInUpdateStep steps
   AppExp (Loop sparams pat e1 form e3 _) _ ->
     let (e2fv, e2ident) = formVars form
