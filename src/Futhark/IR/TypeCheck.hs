@@ -681,7 +681,11 @@ checkFun' (fname, rettype, params) consumable check = do
   where
     param_names = map fst params
 
-    isParam = (`elem` param_names)
+    param_set = namesFromList param_names
+
+    isParam = (`nameIn` param_set)
+
+    param_by_index = M.fromList $ zip [0 ..] param_names
 
     consumable_names = namesFromList $ do
       (v, FParamName t) <- params
@@ -689,7 +693,7 @@ checkFun' (fname, rettype, params) consumable check = do
       pure v
 
     allowedArgAliases pals =
-      namesFromList (map (param_names !!) pals) <> consumable_names
+      namesFromList (map (param_by_index M.!) pals) <> consumable_names
 
     checkReturnAlias retals = zipWithM_ checkRet (zip [(0 :: Int) ..] rettype) retals
       where
@@ -714,7 +718,7 @@ checkFun' (fname, rettype, params) consumable check = do
         checkRet _ _ = pure ()
 
         isProblem i als rals (j, jals, j_rals) =
-          i /= j && j `notElem` rals && i `notElem` j_rals && namesIntersect als jals
+          i /= j && namesIntersect als jals && j `notElem` rals && i `notElem` j_rals
 
 checkSubExp :: (Checkable rep) => SubExp -> TypeM rep Type
 checkSubExp (Constant val) =
@@ -1373,8 +1377,8 @@ consumeArgs ::
   [Arg] ->
   TypeM rep ()
 consumeArgs paramts args = do
-  forM_ (zip [0 :: Int ..] args_cons) $ \(i, (cons_als, _)) ->
-    forM_ (map (snd . snd) . filter ((/= i) . fst) $ zip [0 ..] args_cons) $ \als ->
+  forM_ consumed $ \(i, cons_als) ->
+    forM_ [als | (j, (_, als)) <- zip [0 ..] args_cons, j /= i] $ \als ->
       case namesToList $ cons_als `namesIntersection` als of
         [] -> pure ()
         v : _ ->
@@ -1386,6 +1390,11 @@ consumeArgs paramts args = do
     args_cons = zipWith consumeArg (map diet paramts) args
     consumeArg Consume (_, als) = (als, als)
     consumeArg _ (_, als) = (mempty, als)
+    -- Only a consumed argument can conflict with the others.
+    consumed = do
+      (i, (cons_als, _)) <- zip [0 :: Int ..] args_cons
+      guard $ cons_als /= mempty
+      pure (i, cons_als)
 
 -- The boolean indicates whether we only allow consumption of
 -- parameters.
