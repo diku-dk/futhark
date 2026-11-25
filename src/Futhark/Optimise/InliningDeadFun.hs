@@ -63,18 +63,21 @@ inlineFunctions simplify_rate cg what_should_be_inlined prog = do
       funs = progFuns prog
       vtable = ST.fromScope (addScopeWisdom (scopeOf consts))
 
-  (consts', funs') <- recurse (1, vtable) (consts, funs) what_should_be_inlined
+  (consts', funs') <- recurse (1, vtable) (consts, funs) what_should_be_inlined mempty
   pure $ prog {progConsts = consts', progFuns = funs'}
   where
     fdmap fds = M.fromList $ zip (map funDefName fds) fds
 
     noCallsTo which from = S.null $ allCalledBy from cg `S.intersection` which
+    someCallsTo which from = not $ noCallsTo which from
 
-    recurse (i, vtable) (consts, funs) to_inline = do
+    -- A function is inlined into once all the functions it calls that are to
+    -- be inlined are done, such that it is simplified only once.
+    recurse (i, vtable) (consts, funs) to_inline done = do
       let (to_inline_now, to_inline_later) =
             S.partition (noCallsTo to_inline) to_inline
-          (dont_inline_in, to_inline_in) =
-            partition (noCallsTo to_inline_now . funDefName) funs
+          ready f = someCallsTo to_inline_now f && noCallsTo to_inline_later f
+          (to_inline_in, dont_inline_in) = partition (ready . funDefName) funs
 
       if null to_inline_now
         then
@@ -84,12 +87,13 @@ inlineFunctions simplify_rate cg what_should_be_inlined prog = do
           let to_inline' = to_inline `S.intersection` calledOnce cg
            in if to_inline' == to_inline
                 then pure (consts, funs)
-                else recurse (i, vtable) (consts, funs) to_inline'
+                else recurse (i, vtable) (consts, funs) to_inline' done
         else do
           let inlinemap =
-                fdmap $ filter ((`S.member` to_inline_now) . funDefName) dont_inline_in
+                done <> fdmap (filter ((`S.member` to_inline_now) . funDefName) dont_inline_in)
           (vtable', consts') <-
             if any (`calledByConsts` cg) to_inline_now
+              && not (any (`calledByConsts` cg) to_inline_later)
               then do
                 consts' <-
                   simplifyConsts . performCSEOnStms
@@ -113,6 +117,7 @@ inlineFunctions simplify_rate cg what_should_be_inlined prog = do
             (i + 1, vtable')
             (consts', dont_inline_in <> to_inline_in')
             to_inline_later
+            inlinemap
 
 calledOnce :: CallGraph -> S.Set Name
 calledOnce =
