@@ -158,11 +158,17 @@ maybeAscript loc (Just (mtye, substs)) me = ModAscript me mtye substs loc
 maybeAscript _ Nothing me = me
 
 substituteInMod :: Substitutions -> Mod -> Mod
-substituteInMod substs (ModMod (Scope mod_substs mod_mods)) =
-  -- Forward all substitutions.
-  ModMod
-    (Scope (resolveSubsts (mod_substs <> substs) substs) (M.map (substituteInMod substs) mod_mods))
-substituteInMod substs (ModFun abs (Scope mod_substs mod_mods) mparam mbody) =
+substituteInMod substs = forwardInMod substs substs
+
+-- | As 'substituteInMod', but resolve through additional substitutions, which do
+-- not themselves become part of the module.
+forwardInMod :: Substitutions -> Substitutions -> Mod -> Mod
+forwardInMod substs through (ModMod (Scope mod_substs mod_mods)) =
+  ModMod $
+    Scope
+      (resolveSubsts (mod_substs <> through) substs)
+      (M.map (forwardInMod substs through) mod_mods)
+forwardInMod substs _ (ModFun abs (Scope mod_substs mod_mods) mparam mbody) =
   -- Keep 'mod_substs': the body still refers to the names it binds.
   ModFun abs (Scope (resolveSubsts mod_substs substs <> mod_substs) mod_mods) mparam mbody
 
@@ -221,13 +227,21 @@ evalModExp (ModApply f arg (Info p_substs) (Info b_substs) loc) = do
             $ do
               substs <- scopeSubsts <$> askScope
               x <- evalModExp f_body
+              -- The argument may be an anonymous module whose substitutions are
+              -- not otherwise visible at the application site
+              -- (modules/functor24.fut). The result can refer to the argument
+              -- only through the parameter, so only the names that the
+              -- parameter is matched against need be propagated.
+              let arg_visible =
+                    resolveSubsts arg_substs $
+                      arg_substs `M.restrictKeys` S.fromList (M.elems p_substs)
+              -- The body's scope is needed to resolve the names of the result,
+              -- but is not part of it, as it contains the entire closure of the
+              -- functor.
               pure $
                 addSubsts abs exported $
-                  -- The next one is dubious, but is necessary to
-                  -- propagate substitutions from the argument (see
-                  -- modules/functor24.fut).
-                  addSubstsModMod (scopeSubsts $ modScope arg_mod) $
-                    substituteInMod (b_substs <> substs) x
+                  addSubstsModMod arg_visible $
+                    forwardInMod b_substs (b_substs <> substs) x
   where
     addSubsts abs substs (ModFun mabs (Scope msubsts mods) mp me) =
       ModFun (abs <> mabs) (Scope (substs <> msubsts) mods) mp me
