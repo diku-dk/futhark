@@ -1,11 +1,14 @@
--- | A minor cleanup pass that runs after defunctorisation and applies
--- any type abbreviations. After this, the program consists entirely
--- value bindings.
+-- | A minor cleanup pass that runs after defunctorisation and applies any type
+-- abbreviations, as well as removes unreachable definitions. After this, the
+-- program consists entirely value bindings, all of which are reachable from an
+-- entry point. It is a bit arbitrary to do that here, but it is convenient, and
+-- speeds up the frontend.
 module Futhark.Internalise.ApplyTypeAbbrs (transformProg) where
 
 import Control.Monad.Identity
 import Data.Map.Strict qualified as M
-import Data.Maybe (mapMaybe)
+import Data.Maybe (isJust, mapMaybe)
+import Data.Set qualified as S
 import Language.Futhark
 import Language.Futhark.Semantic (TypeBinding (..))
 import Language.Futhark.Traversals
@@ -82,4 +85,20 @@ transformProg decs =
   let types = getTypes mempty decs
       onDec (ValDec valbind) = Just $ removeTypeVariables types valbind
       onDec _ = Nothing
-   in pure $ mapMaybe onDec decs
+   in pure $ removeUnreachable $ mapMaybe onDec decs
+
+-- | Remove value bindings that are not reachable from an entry point. A
+-- binding can only refer to bindings that precede it, so a single backwards
+-- pass suffices.
+removeUnreachable :: [ValBind] -> [ValBind]
+removeUnreachable = snd . foldl' check (mempty, []) . reverse
+  where
+    check (needed, vbs) vb
+      | isJust (valBindEntryPoint vb) || valBindName vb `S.member` needed =
+          (needed <> fvVars (freeInValBind vb), vb : vbs)
+      | otherwise = (needed, vbs)
+
+    freeInValBind vb =
+      freeInExp (valBindBody vb)
+        <> foldMap freeInPat (valBindParams vb)
+        <> freeInType (retType (unInfo (valBindRetType vb)))

@@ -162,11 +162,11 @@ replaceStaticValSizes globals orig_substs sv =
 restrictEnvTo :: FV -> DefM Env
 restrictEnvTo fv = asks restrict
   where
-    restrict (globals, env) = M.mapMaybeWithKey keep env
-      where
-        keep k (Binding t sv) = do
-          guard $ not (k `M.member` globals) && S.member k (fvVars fv)
-          Just $ Binding t $ restrict' sv
+    -- The environment can be large, so restrict it by the (small) free variable
+    -- set rather than just filtering it.
+    restrict (globals, env) =
+      M.map restrict'' . M.filterWithKey (\k _ -> k `M.notMember` globals) $
+        env `M.restrictKeys` fvVars fv
     restrict' (Dynamic t) =
       Dynamic t
     restrict' (LambdaSV pat t e env) =
