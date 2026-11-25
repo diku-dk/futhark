@@ -198,22 +198,19 @@ evalModExp (ModApply f arg (Info p_substs) (Info b_substs) loc) = do
         . generating
         $ do
           abs <- asks envAbs
-          let keep k _ = k `M.member` p_substs || k `S.member` abs
+          let arg_substs = scopeSubsts $ modScope arg_mod
+              keep = M.keysSet p_substs <> abs
               abs_substs =
-                M.filterWithKey keep $
-                  resolveSubsts (scopeSubsts (modScope arg_mod)) p_substs
-                    <> scopeSubsts f_closure
-                    <> scopeSubsts (modScope arg_mod)
+                resolveSubsts arg_substs p_substs
+                  <> (scopeSubsts f_closure `M.restrictKeys` keep)
+                  <> (arg_substs `M.restrictKeys` keep)
               -- The result exports only what the argument determines. The
               -- closure's substitutions are visible to the body, but must not
               -- leak into the scope of the application site, where they may
-              -- override more recent knowledge. This can (perhaps more
-              -- efficiently) be written with M.withoutKeys instead - check if
-              -- this transformation ever needs to be sped up.
+              -- override more recent knowledge.
               exported =
-                M.filterWithKey
-                  (\k _ -> k `M.member` p_substs && k `M.notMember` b_substs)
-                  abs_substs
+                (abs_substs `M.restrictKeys` M.keysSet p_substs)
+                  `M.withoutKeys` M.keysSet b_substs
           extendScope
             ( Scope
                 abs_substs
