@@ -56,6 +56,7 @@ import Data.Graph.Inductive.Dot qualified as G
 import Data.Graph.Inductive.Graph qualified as G
 import Data.Graph.Inductive.Query.DFS qualified as Q
 import Data.Graph.Inductive.Tree qualified as G
+import Data.IntSet qualified as IS
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe (mapMaybe)
@@ -217,7 +218,14 @@ depsFromEdge = getName . G.edgeLabel
 
 -- | Find all the edges connecting the two nodes.
 edgesBetween :: DepGraph -> G.Node -> G.Node -> [DepEdge]
-edgesBetween dg n1 n2 = G.labEdges $ G.subgraph [n1, n2] $ dgGraph dg
+edgesBetween dg n1 n2
+  | n1 == n2 = edgesFrom n1
+  | otherwise = edgesFrom (min n1 n2) <> edgesFrom (max n1 n2)
+  where
+    g = dgGraph dg
+    edgesFrom n
+      | G.gelem n g = filter (\(_, t, _) -> t == n1 || t == n2) $ G.out g n
+      | otherwise = []
 
 -- | @reachable dg from to@ is true if @to@ is reachable from @from@.
 reachable :: DepGraph -> G.Node -> G.Node -> Bool
@@ -456,7 +464,9 @@ unreachableEitherDir g a b =
 vFusionFeasability :: DepGraph -> G.Node -> G.Node -> Bool
 vFusionFeasability dg@DepGraph {dgGraph = g} n1 n2 =
   (isWithAccNodeId n2 dg || not (any isInf (edgesBetween dg n1 n2)))
-    && not (any (reachable dg n2) (filter (/= n2) (G.pre g n1)))
+    && not (any (`IS.member` reachable_from_n2) (filter (/= n2) (G.pre g n1)))
+  where
+    reachable_from_n2 = IS.fromList $ Q.reachable n2 g
 
 hFusionFeasability :: DepGraph -> G.Node -> G.Node -> Bool
 hFusionFeasability = unreachableEitherDir
