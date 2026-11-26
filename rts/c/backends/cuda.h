@@ -921,10 +921,18 @@ static void gpu_create_kernel(struct futhark_context *ctx,
     fprintf(ctx->log, "Creating kernel %s.\n", name);
   }
   CUDA_SUCCEED_FATAL(cuModuleGetFunction(kernel, ctx->module, name));
-  // Unless the below is set, the kernel is limited to 48KiB of memory.
-  CUDA_SUCCEED_FATAL(cuFuncSetAttribute(*kernel,
+
+  int current_max_dynamic_shared_memory;
+  CUDA_SUCCEED_FATAL(cuFuncGetAttribute(&current_max_dynamic_shared_memory,
                                         cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                        ctx->max_shared_memory));
+                                        *kernel));
+  
+  if ((size_t)current_max_dynamic_shared_memory != ctx->max_shared_memory) {
+    // Unless the below is set, the kernel is limited to 48KiB of memory.
+    CUDA_SUCCEED_FATAL(cuFuncSetAttribute(*kernel,
+                                          cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                          ctx->max_shared_memory));
+  }
 }
 
 static void gpu_free_kernel(struct futhark_context *ctx,
