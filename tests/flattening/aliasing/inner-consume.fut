@@ -1,6 +1,7 @@
 -- The result of an inner map is fresh, so it can be consumed while its input
 -- is still live, even when its body may return a view of its parameter.
 -- ==
+-- tags { no_webgpu }
 -- random input { 0i64 [2][3][4]f32 } auto output
 -- random input { 1i64 [2][3][4]f32 } auto output
 

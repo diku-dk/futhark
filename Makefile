@@ -121,6 +121,10 @@ test-multicore:
 test-python:
 	cabal run -- futhark test tests -c --backend=python --exclude=no_python --exclude=compiled
 
+# Compile and run all programs with the 'webgpu' backend, in a browser.
+test-webgpu:
+	cabal run -- futhark test tests -c --backend=webgpu --runner tools/browser_test.py --no-tuning
+
 # Run all programs through the interpreter. This excludes slow workloads.
 test-interpreter:
 	cabal run -- futhark test tests -i

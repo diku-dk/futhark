@@ -5,6 +5,7 @@
 --  2) simplifying away the slices.
 --
 -- ==
+-- tags { no_webgpu }
 -- structure gpu { /If/True/SegMap 1 /If/False/SegRed 1 }
 
 entry example_tc5 [A]

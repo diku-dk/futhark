@@ -11,7 +11,13 @@ backend. Run with e.g.
 $ make FUTHARK_BACKEND=wasm-multicore
 ```
 
-The tests are run with `node`, rather than via browser.
+The tests are run with `node`, rather than via browser.  For `webgpu`, WebGPU
+must be available in Node, as in the `.#test-webgpu` Nix shell, which also
+provides the `LAVAPIPE_ICD` driver for running on the CPU:
+
+```
+$ VK_DRIVER_FILES=$LAVAPIPE_ICD make FUTHARK_BACKEND=webgpu
+```
 
 Each program `X.fut` is tested by `test_X.js`. General facilities are in
 `harness.js`.

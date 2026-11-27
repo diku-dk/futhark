@@ -1,5 +1,7 @@
 -- After flattening, the false branch aliases xsss unless we take care to avoid
 -- it.
+-- ==
+-- tags { no_webgpu }
 
 entry main (b: bool) (xsss: [][][]f32) =
   map (\xss ->

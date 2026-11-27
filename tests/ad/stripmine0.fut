@@ -5,7 +5,7 @@ def pow y x =
     acc * x
 
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_webgpu }
 -- entry: f_jvp f_vjp
 -- input { 3 4 } output { 48 }
 -- input { 9 3 } output { 59049 }

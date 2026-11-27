@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_webgpu }
 -- input { 5i64 4i64 }
 -- auto output
 def main (m: i64) (n: i64) =

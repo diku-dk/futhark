@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_webgpu }
 -- entry: rsqrt64
 -- input { [0f64, 8f64] }
 -- output { [f64.inf, 0.35355338f64] }

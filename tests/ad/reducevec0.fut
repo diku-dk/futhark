@@ -1,5 +1,5 @@
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_webgpu }
 -- entry: rev fwd fwd_vec rev_vec
 -- input {
 --   [[[0f32,1f32],[2f32,3f32]],

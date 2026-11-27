@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_webgpu }
 -- structure gpu-mem { /If/True/SegMap 1 /If/True/SegRed 1 /If/False/SegMap 1 }
 
 entry main [n] (xs: [n]i64) =

@@ -1,3 +1,5 @@
+-- ==
+-- tags { no_webgpu }
 def main [n] [m] (xss: *[n][m]i32) =
   map (\(xs: [m]i32) ->
          let xs =

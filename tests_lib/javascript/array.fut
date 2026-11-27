@@ -21,3 +21,8 @@ entry consume_i32_1d (xs: *[]i32) : []i32 = xs with [0] = 42
 
 entry consume_first (xs: *[]i32) (ys: []i32) : i32 =
   i32.sum (xs with [0] = 0) + i32.sum ys
+
+-- Entry points with two array arguments, which may be the same array.
+entry add_i32_1d (xs: []i32) (ys: []i32) : []i32 = map2 (+) xs ys
+
+entry and_bool_1d (xs: []bool) (ys: []bool) : []bool = map2 (&&) xs ys

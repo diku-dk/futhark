@@ -1,5 +1,6 @@
 -- Multidimensional reduce_by_index at block level.
 -- ==
+-- tags { no_webgpu }
 -- random input { [1][8][8]f32 [1][8]i64 [1][8]i64 [1][8]f32 } auto output
 -- structure gpu { /SegMap/Loop/SegHist 1 }
 

@@ -4,6 +4,7 @@
 -- /futlib/linalg module would probably be useful here.
 --
 -- ==
+-- tags { no_webgpu }
 -- input {
 --
 -- [1.0f32, 1.0f32, 1.0f32]

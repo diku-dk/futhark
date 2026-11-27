@@ -1,5 +1,6 @@
 -- Stripped version of nw from futhark-benchmarks
 -- ==
+-- tags { no_webgpu }
 -- no_wasm compiled input @ data/tiny.in
 -- output @ data/tiny.out
 

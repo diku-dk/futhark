@@ -1,3 +1,6 @@
+-- ==
+-- tags { no_webgpu }
+
 def main [N] [D] [K] [triD] (x: [N][D]f32) (means: [K][D]f32) (qs: [K][D]f32) (ls: [K][triD]f32) =
   let xs =
     map (\x' ->

@@ -1,5 +1,5 @@
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_webgpu }
 
 def pow_list [n] y (xs: [n]i32) =
   #[stripmine(2)]

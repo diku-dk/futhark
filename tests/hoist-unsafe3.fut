@@ -2,6 +2,7 @@
 -- inside a kernel is protected by a fallback branch. The allocation in the
 -- fallback branch must still be hoisted out of the kernel.
 -- ==
+-- tags { no_webgpu }
 -- input { [[1f32,2f32,3f32,4f32],[5f32,6f32,7f32,8f32]] 2i64 2i64 3i64 }
 -- output { [[4f32,6f32,4f32],[12f32,14f32,12f32]] }
 -- input { [[1f32,2f32,3f32,4f32],[5f32,6f32,7f32,8f32]] 3i64 1i64 0i64 }

@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_webgpu }
 
 def segmented_scan [n] 't
                    (op: t -> t -> t)

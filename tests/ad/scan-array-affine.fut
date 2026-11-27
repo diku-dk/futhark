@@ -2,7 +2,7 @@
 -- Prefixes satisfy A_i = a_i*A_(i-1), B_i = a_i*B_(i-1)+b_i.
 -- Expected derivatives are from these recurrences, not another AD mode.
 -- ==
--- tags { autodiff }
+-- tags { autodiff no_webgpu }
 -- entry: main
 -- input { [[2f32, 3], [5f32, 7], [11f32, 13]]
 --         [[1f32, 1], [1f32, 1], [1f32, 1]] }

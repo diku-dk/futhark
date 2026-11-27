@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_webgpu }
 -- compiled random input { [200][10]f32 [200][10]f32 [10]f32 } auto output
 
 def main [n1] [n2] [m] (X1: [n1][m]f32) (X2: [n2][m]f32) (Y: [m]f32) : [][]f32 =

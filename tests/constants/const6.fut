@@ -1,3 +1,4 @@
+-- ==
 def number = 123 + 456 : i64
 
 def array = iota number

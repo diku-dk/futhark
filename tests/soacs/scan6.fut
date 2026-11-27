@@ -1,5 +1,6 @@
 -- Even more funky scan with vectorised operator on arrays (and not interchangeable).
 -- ==
+-- tags { no_webgpu }
 -- compiled random input { [1][10][100]i32 } auto output
 -- compiled random input { [100][10][1]i32 } auto output
 -- compiled random input { [100][10][100]i32 } auto output

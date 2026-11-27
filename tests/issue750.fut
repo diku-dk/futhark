@@ -1,3 +1,5 @@
+-- ==
+-- tags { no_webgpu }
 def flatten_to [n] [m] 't (k: i64) (xs: [n][m]t) : [k]t =
   flatten xs :> [k]t
 

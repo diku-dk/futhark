@@ -1,4 +1,5 @@
 -- ==
+-- tags { no_webgpu }
 -- compiled random input { [20000]f32 } error: l != 1337
 
 def main [n] (xs: *[n]f32) =

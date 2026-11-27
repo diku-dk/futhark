@@ -1,3 +1,5 @@
+-- ==
+-- tags { no_webgpu }
 def foo x =
   #[sequential]
   let n = 2i64

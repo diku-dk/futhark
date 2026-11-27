@@ -4,6 +4,7 @@
 -- parameters provide, which is two elements per thread. This test is only
 -- sensible on GPU.
 -- ==
+-- tags { no_webgpu }
 -- entry: scan_arr
 -- random input { [33][2]i32 } auto output
 -- random input { [100][10]i32 } auto output

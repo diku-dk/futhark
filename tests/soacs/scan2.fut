@@ -1,6 +1,7 @@
 -- A segmented scan of a two-dimensional array.
 --
 -- ==
+-- tags { no_webgpu }
 -- random input { [20]bool [20][2]i32 } auto output
 -- random input { [2000]bool [2000][10]i32 } auto output
 
