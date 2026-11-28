@@ -528,9 +528,12 @@ compareResult _ _ _ (RunTimeFailure expectedError) (ErrorResult actualError) =
   checkError expectedError actualError
 compareResult _ _ _ (Succeeds _) (ErrorResult err) =
   E.throwError $ "Function failed with error:\n" <> err
-compareResult _ _ _ (RunTimeFailure f) (SuccessResult _ free_vs) = do
+compareResult _ _ _ (RunTimeFailure (ThisError r _)) (SuccessResult _ free_vs) = do
   free_vs
-  E.throwError $ "Program succeeded, but expected failure:\n  " <> showText f
+  E.throwError $ "Program succeeded, but expected this failure: " <> r
+compareResult _ _ _ (RunTimeFailure AnyError) (SuccessResult _ free_vs) = do
+  free_vs
+  E.throwError "Program succeeded, but expected failure."
 
 ---
 --- Test manager
