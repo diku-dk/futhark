@@ -170,20 +170,24 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
         not $ any ((`nameIn` freeIn merge) . paramName . fst) merge,
         Just (prestms', poststms') <-
           preludeToPostlude variance prestms stm_to_tile (stmsFromList poststms) = do
-          let branch_variant' =
-                branch_variant
-                  <> mconcat
-                    ( map
-                        (flip (M.findWithDefault mempty) variance)
-                        (namesToList (freeIn bound))
-                    )
+          let look = foldMap (`lookupVariance` variance) . namesToList . freeIn
+              branch_variant' = branch_variant <> look bound
               merge_params = map fst merge
+              -- The tiled loop keeps a private copy of each loop parameter per
+              -- thread, so treat them as variant to every thread. TODO: if
+              -- necessary, we can do fixpoint iteration to detect more precise
+              -- variance.
+              all_gtids = namesFromList $ map fst $ unSegSpace initial_space
+              variance' =
+                M.insert i (look bound) $
+                  M.fromList [(paramName p, all_gtids) | p <- merge_params]
+                    <> variance
 
           maybe_tiled <-
             localScope (M.insert i (IndexName it) $ scopeOfFParams merge_params)
               $ tileInBody
                 branch_variant'
-                variance
+                variance'
                 initial_lvl
                 initial_space
                 (map paramType merge_params)

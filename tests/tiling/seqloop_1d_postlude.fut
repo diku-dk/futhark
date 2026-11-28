@@ -2,6 +2,7 @@
 -- postlude.
 -- ==
 -- random input { 3 [10][20]i32 [10]i32 } auto output
+-- random input { 3 [3][600]i32 [300]i32 } auto output
 -- structure gpu { SegMap/Loop/Loop/SegMap 2 }
 
 def main (n: i32) (xs: [][]i32) (ys: []i32) =
