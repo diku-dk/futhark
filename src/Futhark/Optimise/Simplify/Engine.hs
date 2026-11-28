@@ -1205,12 +1205,18 @@ instance Simplifiable Certs where
     when (ocs' /= ocs) changed
     pure $ Certs ocs'
     where
-      check idd = do
-        vv <- ST.lookupSubExp idd <$> askVtable
-        case vv of
-          Just (Constant _, Certs cs) -> pure cs
-          Just (Var idd', _) -> pure [idd']
-          _ -> pure [idd]
+      check v = do
+        e <- ST.lookupBasicOp v <$> askVtable
+        case e of
+          Just (SubExp (Constant _), Certs cs) -> pure cs
+          Just (SubExp (Var v'), Certs cs) -> pure $ v' : cs
+          -- Some special cases that recognise that only the data dependency to
+          -- the originating assert is important.
+          Just (Rearrange v' _, Certs cs) -> (<> cs) <$> check v'
+          Just (Reshape v' _, Certs cs) -> (<> cs) <$> check v'
+          Just (Replicate _ (Var v'), Certs cs) -> (<> cs) <$> check v'
+          Just (Index v' _, Certs cs) -> (<> cs) <$> check v'
+          _ -> pure [v]
 
 simplifyFun ::
   (SimplifiableRep rep) =>
