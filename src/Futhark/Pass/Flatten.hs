@@ -313,11 +313,26 @@ flattenApply funSizeParams lvl segments env inps res (pat, aux) (name, args, ret
         then transformScalarStm lvl segments env inps res $ Let pat aux (Apply name args rettype s)
         else error "Unhandled Apply in non SegThread Seglevel"
 
+-- | When lifting a statement, we transform its certificates to (most likely) be
+-- arrays of certificates. This loses some granularity in the safety checks, but
+-- it is unlikely to matter. In principle we could do slightly better for some
+-- constructs, but I doubt it matters.
+liftCerts ::
+  FlattenOps ->
+  Segments ->
+  DistInputs ->
+  DistEnv ->
+  Certs ->
+  FlattenM Certs
+liftCerts ops segments inps env (Certs vs) =
+  Certs <$> mapM (liftVarRegular (flattenSegLevel ops) segments inps env (segmentsShape segments)) vs
+
 transformDistStm :: FunSizeParams -> FlattenOps -> Segments -> DistEnv -> DistStm -> FlattenM DistEnv
 transformDistStm _ outer_ops segments env (DistStm inps res (ScalarStm stms)) =
   transformScalarStms (flattenSegLevel outer_ops) segments env inps res stms
 transformDistStm funSizeParams outer_ops segments env (DistStm inps res (ParallelStm (Let pat aux e))) = do
-  case e of
+  cs <- liftCerts outer_ops segments inps env $ stmAuxCerts aux
+  certifying cs $ case e of
     BasicOp op -> do
       let ~[res'] = res
           ~[pe] = patElems pat
@@ -627,7 +642,8 @@ transformStm attrs funHasParallelism funSizeParams (Let pat aux (Op (Screma w ar
   | shouldDissectForm form =
       error "transformStm: complex Screma survived preprocessing"
   | otherwise =
-      transformTopLevelScrema attrs funHasParallelism funSizeParams pat aux w arrs form
+      certifying (stmAuxCerts aux) $
+        transformTopLevelScrema attrs funHasParallelism funSizeParams pat aux w arrs form
 transformStm attrs funHasParallelism funSizeParams (Let pat aux (Op (FlatMap w arrs lam))) =
   certifying (stmAuxCerts aux) $ flattenFlatMap ops pat w arrs lam
   where

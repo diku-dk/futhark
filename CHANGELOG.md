@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Closures used through operator sections did not have their aliases tracked
   properly.
 
+* Flattening could drop safety checks in some cases. (#2620)
+
 ## [0.29.1]
 
 ### Added
