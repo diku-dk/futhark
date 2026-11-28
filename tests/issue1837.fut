@@ -1,7 +1,7 @@
 -- This crashed the compiler because the size slice produced by
 -- ExpandAllocations had a consumption inside of it.
 -- ==
--- structure gpu-mem { SegMap 3 }
+-- structure gpu-mem { SegMap 4 }
 
 entry main [n] (xs: [n]i64) =
   tabulate n

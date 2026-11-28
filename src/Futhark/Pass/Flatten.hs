@@ -325,7 +325,12 @@ liftCerts ::
   Certs ->
   FlattenM Certs
 liftCerts ops segments inps env (Certs vs) =
-  Certs <$> mapM (liftVarRegular (flattenSegLevel ops) segments inps env (segmentsShape segments)) vs
+  Certs <$> mapM liftCert vs
+  where
+    liftCert v
+      | v `M.member` inputReps inps env =
+          liftVarRegular (flattenSegLevel ops) segments inps env (segmentsShape segments) v
+      | otherwise = pure v
 
 transformDistStm :: FunSizeParams -> FlattenOps -> Segments -> DistEnv -> DistStm -> FlattenM DistEnv
 transformDistStm _ outer_ops segments env (DistStm inps res (ScalarStm stms)) =

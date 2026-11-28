@@ -1,5 +1,5 @@
 -- ==
--- structure gpu-mem { /If/True/SegMap 1 /If/True/SegRed 1 /If/False/SegMap 1 }
+-- structure gpu-mem { /If/True/SegMap 1 /If/True/SegRed 1 /If/False/SegMap 2 }
 
 entry main [n] (xs: [n]i64) =
   tabulate n
