@@ -75,7 +75,7 @@ type Constraints rep =
 multiplicity :: (Constraints rep) => Stm rep -> M.Map VName Int
 multiplicity stm =
   free 1 (stmAux stm)
-    <> case stmExp stm of
+    `comb` case stmExp stm of
       Match cond cases defbody _ ->
         foldl' comb mempty $
           free 1 cond : free 1 defbody : map (free 1 . caseBody) cases
